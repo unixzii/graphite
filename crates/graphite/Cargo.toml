@@ -1,0 +1,11 @@
+[package]
+name = "graphite"
+version = "0.0.1"
+description = "Cross-platform retained-mode 2D layer rendering on top of native compositors"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+slotmap.workspace = true
+bitflags.workspace = true
