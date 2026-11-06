@@ -1,4 +1,4 @@
-/** Graphite layer API. Ownership contracts: ../../src/CONTRACT.md. */
+/** Graphite layer API. */
 #ifndef GRAPHITE_LAYER_H
 #define GRAPHITE_LAYER_H
 #include "resource.h"
@@ -8,6 +8,16 @@
 extern "C"
 {
 #endif
+
+    /** Layer conventions:
+     * Setters compare values and coalesce dependent changes into a commit.
+     * Kind-specific setters reject incompatible kinds with GR_ERROR_KIND;
+     * kind-specific getters require the correct kind. Optional value getters
+     * require an output pointer, return presence and zero absent output values.
+     * After Scene teardown, surviving layer getters return defaults/empty
+     * relationships and value setters are successful no-ops. Kind is retained;
+     * drawer installation instead rejects ownership transfer with GR_ERROR_STATE.
+     */
 
     /* Property descriptions */
 
@@ -27,7 +37,11 @@ extern "C"
 
     /* Layer lifetime */
 
-    /** Creates an owned detached layer of a fixed kind in scene; returns NULL for an invalid kind. */
+    /** Creates an owned detached layer of a fixed kind in a live Scene.
+     * Returns NULL for an invalid kind. Defaults: zero bounds/position, anchor
+     * (0.5,0.5), identity transform, opacity 1, visible, no clip/background/border/
+     * shadow, radius 0 and all corners. Shapes have no path/fill/stroke, nonzero
+     * fill rule and stroke range [0,1]. Content gravity defaults to resize. */
     gr_layer *gr_layer_new(gr_scene *scene, gr_layer_kind kind);
 
     /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
@@ -183,6 +197,15 @@ extern "C"
         double scale;
     } gr_draw_info;
 
+    /** Drawer callback ownership and lifetime:
+     * A drawer may borrow its own layer as userdata through its destruction;
+     * core keeps that allocation valid. Other captures need owned references or
+     * externally guaranteed lifetimes. Strong self/ancestor captures can cycle.
+     * During draw, do not release the last Scene reference; balanced temporary
+     * ref/unref is allowed. Nested draw and Scene commit/mutation are rejected.
+     * Replacement publishes the new state before invoking the old destructor.
+     * Destructors may release other objects under normal Scene reentry rules.
+     */
     typedef struct
     {
         void *userdata;

@@ -70,7 +70,7 @@ changes require `gr_content_layer_set_needs_display`.
 Core retains the callback, not its recording. Backends cache their rendering and
 request it again when bounds, scale or display version change. Clearing a drawer
 leaves empty content. A drawer may borrow its own layer during its lifetime;
-strong self/ancestor ownership can create cycles. See [the contract](../src/CONTRACT.md).
+strong self/ancestor ownership can create cycles. See [layer callback documentation](../include/graphite/layer.h).
 
 Canvas supports save/restore, affine transforms, multiplicative drawing alpha,
 rect/path clips, filled/stroked paths, rectangles and images. Finishing balances

@@ -29,7 +29,7 @@ Scene/Layer calls run on one owning thread. Callers enforce that rule; core does
 not check thread affinity. Immutable paths, images, paints, strokes and display
 lists use atomic reference counts and may be shared after synchronized
 publication. Builders and canvases require exclusive access. Full rules are in
-[the ownership contract](../src/CONTRACT.md).
+[API conventions](../include/graphite/types.h) and [lifetime internals](core-lifetime.md).
 
 ## Pipeline
 

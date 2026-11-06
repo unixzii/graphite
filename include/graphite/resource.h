@@ -1,4 +1,4 @@
-/** Graphite resource API. Ownership contracts: ../../src/CONTRACT.md. */
+/** Graphite resource API. */
 #ifndef GRAPHITE_RESOURCE_H
 #define GRAPHITE_RESOURCE_H
 #include "types.h"

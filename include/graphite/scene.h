@@ -1,4 +1,4 @@
-/** Graphite scene API. Ownership contracts: ../../src/CONTRACT.md. */
+/** Graphite scene API. */
 #ifndef GRAPHITE_SCENE_H
 #define GRAPHITE_SCENE_H
 #include "types.h"
@@ -16,7 +16,10 @@ extern "C"
     /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
     gr_scene *gr_scene_ref(gr_scene *scene);
 
-    /** Releases an owned reference; NULL is accepted. Final release destroys the object at a safe boundary. */
+    /** Releases an owned reference; NULL is accepted. Final release invalidates
+     * weak links/providers and layer Scene associations before user cleanup.
+     * External layer references survive as inert handles. Do not release the
+     * last Scene reference from a draw callback. Destruction uses safe boundaries. */
     void gr_scene_unref(gr_scene *scene);
 
     /** Returns the borrowed root, valid until Scene teardown; ref it to retain an inert handle afterward. */
@@ -27,7 +30,8 @@ extern "C"
     /** Returns whether model changes or native retirements await a commit. */
     bool gr_scene_needs_commit(const gr_scene *scene);
 
-    /** Applies pending changes; clean commits do nothing. Missing backend returns STATE; reentry returns REENTRANT. */
+    /** Applies pending changes; clean commits do nothing. Missing backend preserves
+     * pending work and returns STATE; reentry returns REENTRANT. */
     gr_result gr_scene_commit(gr_scene *scene);
 
     /* Scale and snapping */

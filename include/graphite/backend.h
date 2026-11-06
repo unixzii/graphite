@@ -169,7 +169,9 @@ extern "C"
      * release. Detached realized layers retain native identity until retirement.
      * No Scene reentry from vtable calls except provider_draw. Read resolved data
      * instead. request_commit schedules work; it must NOT synchronously commit.
-     * apply is non-reentrant. Native failures are handled/reported by backend;
+     * destroy cancels scheduled work and releases native maps; it must not call
+     * Scene APIs or dereference retiring identities. apply is non-reentrant.
+     * Native failures are handled/reported by backend;
      * there is no automatic rollback/retry of a partially applied batch.
      */
     typedef struct

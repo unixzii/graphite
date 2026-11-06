@@ -4,7 +4,8 @@
 |---|---|
 | [Architecture](architecture.md) | Ownership, dirty tracking, commit batches and coordinates |
 | [Layer semantics](layer-model.md) | Geometry, masks, drawing and resources |
-| [API contract](../src/CONTRACT.md) | Lifetimes, errors, threading and callbacks |
+| [API conventions](../include/graphite/types.h) | Ownership, errors, threading and values |
+| [Core lifetime](core-lifetime.md) | Cleanup boundaries, retirement and Scene teardown |
 | [CMake packages](cmake.md) | Build switches, install/export and consumers |
 | [Testing](testing.md) | Core, native and rendering tests |
 | [Core coverage](core-test-audit.md) | Covered contracts and remaining test opportunities |

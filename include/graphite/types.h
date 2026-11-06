@@ -1,13 +1,34 @@
-/** Units: logical points, radians; origin top-left, y down; straight-alpha sRGB.
- * Scene/layer/link operations: owning thread only, without thread checks.
- * Immutable resources: ref/unref and reads may cross threads after publication.
- * Builders/canvases: exclusive access. Never throw/unwind through C callbacks.
- * Unless documented otherwise: pointers are required, inputs are borrowed for
- * the call, setters copy values and ref stored objects, getters borrow objects.
- * ref(NULL) returns NULL; unref(NULL) is harmless. Other NULLs require explicit
- * permission. Borrowed arrays live until their immutable owner is unref'd.
- * OOM aborts; constructors return NULL for invalid arguments. Result-returning
- * operations leave state/ownership unchanged on failure. No global last-error.
+/**
+ * Graphite API conventions (C11, also usable from C++ and Objective-C).
+ *
+ * Units: logical points, radians; origin top-left, y down; straight-alpha sRGB.
+ * Scene/layer/link operations run on their owning thread without thread checks.
+ * Immutable resource ref/unref and reads may cross threads after synchronized
+ * publication. Builders and canvases require exclusive access.
+ *
+ * Opaque handles have stable addresses until final destruction. new returns one
+ * owned reference; ref acquires one and unref releases one. A valid owned or
+ * borrowed reference is required for every call; reference counting does not
+ * validate arbitrary pointers. ref(NULL) returns NULL; unref(NULL) is harmless.
+ * Other NULL arguments require explicit permission in the function's contract.
+ *
+ * Unless documented otherwise, inputs are borrowed for the call. Constructors
+ * copy arrays and descriptors; setters copy values and ref stored objects before
+ * releasing old ones. Getters return borrowed objects. Immutable array views
+ * remain valid while their owner is alive; layer borrows expire on replacement
+ * or Scene teardown. Empty arrays allow NULL data, nonempty arrays require data.
+ *
+ * Allocation failure aborts. Invalid constructor arguments return NULL; other
+ * recoverable errors use gr_result. Failed result-returning operations preserve
+ * state and ownership. There is no global last-error slot.
+ * Unknown enum values and nonfinite numbers are invalid. Sizes, radii, widths
+ * and blur sigma are nonnegative; backing/image scales are positive. Opacity
+ * and stroke fractions clamp to [0,1]; color components must be in [0,1].
+ * Inactive union members and absent optional values are ignored.
+ *
+ * Never throw/unwind across C callbacks. Cleanup callbacks may release owned
+ * objects but must not resurrect an object being destroyed or use expired
+ * borrowed argument storage. Scene reentry follows the callback-specific rules.
  */
 #ifndef GRAPHITE_TYPES_H
 #define GRAPHITE_TYPES_H

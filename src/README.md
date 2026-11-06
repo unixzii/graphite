@@ -23,5 +23,5 @@ allocate. Backend maps borrow layer identities until release notification,
 independently of public reference counts. User cleanup runs after consistent
 state is published, with Scene/allocation pins protecting active operations.
 
-See the [contract](CONTRACT.md), [architecture](../docs/architecture.md), and
+See the [lifetime internals](../docs/core-lifetime.md), [architecture](../docs/architecture.md), and
 [testing guide](../docs/testing.md) before changing these boundaries.

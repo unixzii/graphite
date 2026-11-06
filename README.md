@@ -33,7 +33,7 @@ The check target requires clang-format 18. Native rendering tests require a
 working graphical session. Core-only CI does not require a window server.
 
 - [Documentation](docs/README.md)
-- [Public API and ownership contract](src/CONTRACT.md)
+- [Public API conventions](include/graphite/types.h)
 - [Demo](examples/demo/README.md)
 - [Conformance](conformance/README.md)
 - [Benchmarks](benchmarks/README.md)
