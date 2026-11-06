@@ -1,7 +1,8 @@
 # C migration: decisions and implementation plan
 
-Status: stage 1 header/contract draft is ready for review in `src/`; C runtime
-implementation and stage 2 have not started. See [interface review](../src/CONTRACT.md).
+Status: stage 1 interfaces committed; stage 2 resource/Canvas implementation and
+CMake tests are in `src/`. Scene/Layer migration has not started. See
+[interface contracts](../src/CONTRACT.md) and [implementation status](../src/README.md).
 
 Planning baseline: `4e612d7135cf39a47fd3ad6e9b12dbfe7cd7887e` (2026-11-06).
 Record subsequent behavior changes explicitly while other development continues.
@@ -139,7 +140,8 @@ parity for the initial migration:
 
 ## Implementation stages
 
-These are the proposed work sequence and acceptance gates, not completed work.
+These are the work sequence and acceptance gates; the status above and the
+implementation status document distinguish completed work from future stages.
 Keep existing Rust implementation and tests available until replacement is
 validated. Avoid unrelated rendering or API behavior changes during translation.
 
