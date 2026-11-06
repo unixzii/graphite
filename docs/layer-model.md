@@ -73,6 +73,9 @@ core feature set because the platforms disagree on how they flatten.
 - A shadow is never derived from the alpha of the contents. Its shape is
   `Shadow::path` (in local space) if set, otherwise the layer's rounded
   bounds. This avoids offscreen passes and keeps backends consistent.
+- The whole shape casts the shadow, including the part under the layer: it
+  shows through a layer without an opaque background (as with a `CALayer`
+  that has a `shadowPath`, and unlike CSS `box-shadow`).
 - `blur_sigma` is a Gaussian standard deviation in points.
 
 ## Masks

@@ -11,7 +11,12 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{run, snapshot};
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+mod gtk;
+#[cfg(target_os = "linux")]
+pub use gtk::{run, snapshot};
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 mod unsupported {
     use std::process::ExitCode;
 
@@ -28,5 +33,5 @@ mod unsupported {
         None
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub use unsupported::{run, snapshot};

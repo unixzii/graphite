@@ -1,8 +1,9 @@
 # Writing a backend
 
-This is a checklist for adding a platform (GTK is next; Windows and Web
-follow). Read [architecture](../architecture.md) first. Use the macOS backend
-as the reference implementation.
+This is a checklist for adding a platform (Windows and Web are next). Read
+[architecture](../architecture.md) first. The macOS backend is the reference
+for a retained compositor; the GTK backend is the reference for a
+snapshot-style one.
 
 ## 1. Crate layout
 
@@ -62,7 +63,7 @@ Rules:
 
 Where the platform has no retained layer tree (GSK), cache one render node
 per layer. On commit, invalidate dirty layers and their ancestors, and
-rebuild only invalidated nodes in `snapshot()`.
+rebuild only invalidated nodes in `snapshot()` (see `crates/graphite-gtk/src/tree.rs`).
 
 ## 3. Hosting
 
@@ -93,6 +94,11 @@ impl graphite_conformance::Harness for MyHarness {
 
 graphite_conformance::conformance_tests!(MyHarness);
 ```
+
+If your platform's objects are bound to the main thread, use a
+`harness = false` test target that calls
+`graphite_conformance::run_main(&[&harness])` instead of the macro (see
+`crates/graphite-gtk/tests/conformance.rs`).
 
 `Capture::capture` must return the root's bounds at the attach scale as
 premultiplied RGBA8, with row 0 at the top. Calibrate first: render a known

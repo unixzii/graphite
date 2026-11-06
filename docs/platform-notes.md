@@ -136,6 +136,10 @@ and Homebrew ships 4.24.
 - Color management is opt-in (`GDK_DEBUG=color-mgmt`) and `GdkColor` is
   private.
 - Rust bindings: gtk4-rs / gsk4 0.11.5 have feature flags up to `v4_24`.
+- Measured while implementing the backend (GTK 4.22.4): `GskNglRenderer`
+  no longer realizes (use `GskGLRenderer`); the blur node's radius is 2σ;
+  GTK falls back to GL for windows when Vulkan lacks dmabuf support. See
+  [the GTK backend](backends/gtk.md#lessons-learned).
 
 ## Text stack
 

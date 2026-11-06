@@ -9,32 +9,33 @@
 - **macOS backend**: layer mapping, run-loop commit scheduling, CoreGraphics
   replay, view and layer hosting with backing-scale tracking, and `CARenderer`
   offscreen rendering.
-- **Conformance suite**: 22 semantic and 5 measured cases at 1× and 2×; macOS
-  passes all of them. Shadow σ is calibrated for Core Animation.
+- **GTK backend** (Linux): per-layer render-node caching, DisplayList → GSK
+  nodes (no Cairo), frame-clock commits in the layout phase, and
+  fractional-scale tracking. Passes the whole conformance suite with the
+  Vulkan and GL renderers, and has a real-window test.
+- **Conformance suite**: 23 semantic and 6 measured cases at 1×, 1.5× and 2×;
+  macOS and GTK pass all of them. Shadow σ is calibrated for both backends.
+  `run_main` serves main-thread-bound backends.
 - **Platform-neutral demo** with `--selftest` and `--snapshot`.
 
 ## Next
 
-1. **GTK backend** (`crates/graphite-gtk`), aligned with macOS through the
-   conformance suite. It needs `brew install gtk4` locally on macOS, but must
-   also be run on Linux, where Wayland defaults to the Vulkan renderer while
-   macOS GTK uses GL. Work items:
-   - per-layer render-node caching;
-   - DisplayList → GSK nodes, with a Cairo → texture fallback;
-   - `gdk_surface_get_scale`;
-   - calibrating shadow σ.
-2. **Resource release notifications**: let backends evict native caches
-   keyed by `ResourceId` (GSK will want to cache `GskPath` and `GdkTexture`).
-   macOS avoids this today with per-node reference counts.
-3. **Text**: `AttributedString`, `TextLayout` (measurement, line metrics,
+1. **Resource release notifications**: let backends evict native caches
+   keyed by `ResourceId`. Both backends currently share image textures
+   through per-layer reference counts. Caching paths or drawings across
+   layers would need explicit notifications.
+2. **Text**: `AttributedString`, `TextLayout` (measurement, line metrics,
    index/position queries, max lines, truncation) and `Canvas::draw_text`.
-   Design it against CoreText and Pango side by side once GTK runs. See
+   Design it against CoreText and Pango side by side. See
    [testing](testing.md#text-future) for the test strategy.
-4. **Tier C review**: generate a side-by-side page from
+3. **Tier C review**: generate a side-by-side page from
    `target/conformance/*`, and keep same-backend golden snapshots.
 
 ## Later
 
+- Headless Linux testing (for example `mutter --headless`) and CI.
+- Conformance cases for gradient-painted shapes (GTK supports them; Core
+  Animation does not yet).
 - Gradient paints on `ShapeLayer` for Core Animation (a gradient layer masked
   by the shape).
 - An image sampling (magnification/minification filter) property.

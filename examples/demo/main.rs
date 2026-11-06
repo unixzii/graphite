@@ -38,14 +38,14 @@ pub struct App {
     frame: u32,
     selftest: bool,
     /// Ticks at which the previous tick's changes were still uncommitted.
-    unflushed: u32,
+    unflushed: Vec<u32>,
 }
 
 impl App {
     fn new(selftest: bool) -> App {
         let scene = Scene::new(scene::SIZE);
         let demo = Demo::build(&scene);
-        App { scene, demo, frame: 0, selftest, unflushed: 0 }
+        App { scene, demo, frame: 0, selftest, unflushed: Vec::new() }
     }
 
     pub fn scene(&self) -> &Scene {
@@ -57,19 +57,22 @@ impl App {
     /// platform's commit point (backends schedule that themselves).
     pub fn tick(&mut self) -> Control {
         self.frame += 1;
-        if self.scene.needs_commit() {
-            self.unflushed += 1;
+        // From the second tick on, the previous tick's changes must have
+        // been committed. (The first tick can run before the platform's
+        // first commit point, e.g. GTK ticks before its layout phase.)
+        if self.frame > 1 && self.scene.needs_commit() {
+            self.unflushed.push(self.frame);
         }
         self.demo.pose((self.frame % CYCLE) as f64 / CYCLE as f64);
 
         if self.selftest && self.frame == SELFTEST_FRAMES {
             println!(
-                "selftest: frames={} uncommitted={} backing_scale={}",
+                "selftest: frames={} uncommitted={:?} backing_scale={}",
                 self.frame,
                 self.unflushed,
                 self.scene.backing_scale()
             );
-            return Control::Exit(if self.unflushed == 0 { 0 } else { 1 });
+            return Control::Exit(if self.unflushed.is_empty() { 0 } else { 1 });
         }
         Control::Continue
     }

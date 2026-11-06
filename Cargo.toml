@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [".", "crates/graphite", "crates/graphite-macos", "crates/graphite-conformance"]
+members = [".", "crates/graphite", "crates/graphite-macos", "crates/graphite-conformance", "crates/graphite-gtk"]
 
 [workspace.package]
 edition = "2024"
@@ -31,3 +31,6 @@ objc2-foundation = "0.3.2"
 objc2-app-kit = "0.3.2"
 objc2-quartz-core = "0.3.2"
 block2 = "0.6.2"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+graphite-gtk = { path = "crates/graphite-gtk" }

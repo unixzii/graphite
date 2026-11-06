@@ -5,6 +5,7 @@ cargo test --workspace                                         # everything
 cargo test -p graphite                                         # core model only
 cargo test -p graphite-macos --test conformance                # conformance on macOS
 cargo test -p graphite-macos --test conformance -- --nocapture # …with measured values
+cargo test -p graphite-gtk --test conformance                  # conformance on GTK (Linux, needs a session)
 cargo run --example demo -- --selftest                         # real window, 60 frames
 cargo run --example demo -- --snapshot out.png                 # offscreen render of the demo
 cargo clippy --workspace --all-targets
@@ -27,8 +28,11 @@ and resolved values.
 
 ### Conformance: `crates/graphite-conformance`
 
-One suite, run by every backend against its own offscreen renderer, at 1×
-and 2× backing scale. Cross-platform output differs in anti-aliasing,
+One suite, run by every backend against its own offscreen renderer, at 1×,
+1.5× and 2× backing scale. The fractional scale catches issues that only
+appear between device pixels. A shadow bug on a 1.333 desktop was only
+reproducible at a fractional scale (see the
+[GTK backend](backends/gtk.md#lessons-learned)). Cross-platform output differs in anti-aliasing,
 gradient interpolation, blur kernels and text, so the suite never compares
 images across platforms. It works in tiers:
 
@@ -61,8 +65,17 @@ Judge relations rather than absolute values when the platforms legitimately
 differ. For example, the group-opacity case checks that overlap equals a
 single square instead of checking a specific alpha.
 
+Backends whose objects are bound to the main thread (GTK) cannot use the
+`#[test]` functions that `conformance_tests!` generates. They call
+`graphite_conformance::run_main(&[&harness, …])` from a test target with
+`harness = false`. It runs every case for every harness sequentially,
+filters by substring (`<harness>::<case>`), and reports like libtest.
+
 ### Backend-specific tests
 
+- `crates/graphite-gtk/tests/widget.rs`: `attach` in a real GTK window
+  (frame-clock commits, natural size, scale, painted output). See the
+  [GTK backend](backends/gtk.md#testing) for the environment it needs.
 - `crates/graphite-macos/tests/offscreen.rs`: the offscreen renderer itself
   (read-back orientation, scaling), using raw Core Animation.
 - `crates/graphite-macos/tests/view.rs`: `attach_to_view` in a real
