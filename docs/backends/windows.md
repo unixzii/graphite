@@ -1,5 +1,9 @@
 # Windows backend (`graphite-windows`)
 
+The C/C++ port is available in `src/platforms/windows`. See its
+[build, hosting and VM validation guide](../../src/platforms/windows/README.md).
+The following notes retain the Rust implementation as the reference.
+
 This backend renders a scene with the system Windows.UI.Composition API
 (WinComp) from Win32, draws immediate-mode contents with Direct2D, and uses
 the `windows` 0.62 bindings. It is built on Windows only (`cfg(windows)`),

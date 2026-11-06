@@ -5,9 +5,9 @@ static void crossing_interpolates(void)
 {
     sample samples[] = {{0, {0, 0, 0, 1}}, {1, {0, 0, 0, 0.5}}, {2, {0, 0, 0, 0}}};
     profile p = {samples, 3};
-    NEAR(profile_crossing(p, 3, 0.75), 0.5);
-    NEAR(profile_crossing(p, 3, 0.25), 1.5);
-    NEAR(profile_coverage(p, 3, 2), 0.75);
+    CHECK_NEAR(profile_crossing(p, 3, 0.75), 0.5);
+    CHECK_NEAR(profile_crossing(p, 3, 0.25), 1.5);
+    CHECK_NEAR(profile_coverage(p, 3, 2), 0.75);
 }
 
 static void names_are_unique(void)
@@ -29,8 +29,8 @@ static void probes_and_profiles(void)
     CHECK(!frame_at(&f, POINT(1, 0), &got));
     profile p = frame_profile(&f, POINT(0, 0.1), POINT(1, 0.1));
     CHECK(p.count == 2);
-    NEAR(p.data[0].distance, 0.25);
-    NEAR(p.data[1].distance, 0.75);
+    CHECK_NEAR(p.data[0].distance, 0.25);
+    CHECK_NEAR(p.data[1].distance, 0.75);
     free(p.data);
 }
 

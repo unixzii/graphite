@@ -21,8 +21,8 @@ struct recorder
     gr_scene *scene;
     size_t requests, applies, destroys, realized, released, update_count;
     gr_layer *root;
-    gr_layer_update updates[LIMIT];
-    mirror_node nodes[LIMIT];
+    gr_layer_update *updates;
+    mirror_node *nodes;
     size_t node_count;
     gr_drawer_provider *provider;
     void (*during_apply)(recorder *, const gr_commit_batch *);
@@ -174,12 +174,23 @@ static void destroy(void *userdata)
     clear_updates(r);
     gr_drawer_provider_unref(r->provider);
     r->provider = NULL;
+    free(r->updates);
+    free(r->nodes);
+    r->updates = NULL;
+    r->nodes = NULL;
+}
+
+static void init_recorder(recorder *r, gr_scene *scene)
+{
+    *r = (recorder){.scene = scene};
+    r->updates = calloc(LIMIT, sizeof(*r->updates));
+    r->nodes = calloc(LIMIT, sizeof(*r->nodes));
+    CHECK(r->updates && r->nodes);
 }
 
 static gr_scene *new_scene(recorder *r)
 {
-    *r = (recorder){0};
-    r->scene = gr_scene_new((gr_size){400, 300});
+    init_recorder(r, gr_scene_new((gr_size){400, 300}));
     gr_backend_vtable v = {request, apply, destroy};
     OK(gr_scene_set_backend(r->scene, &v, r));
     return r->scene;
@@ -394,16 +405,16 @@ static void geometry(void)
     OK(gr_layer_set_transform(l, (gr_affine){2, 0, 0, 3, 1, 2}));
     OK(gr_scene_commit(s));
     const gr_resolved *v = &update(&r, l)->resolved;
-    NEAR(v->transform.tx, 11);
-    NEAR(v->transform.ty, 27);
-    NEAR(v->bounds_offset.x, -3);
-    NEAR(v->bounds_offset.y, -4);
+    CHECK_NEAR(v->transform.tx, 11);
+    CHECK_NEAR(v->transform.ty, 27);
+    CHECK_NEAR(v->bounds_offset.x, -3);
+    CHECK_NEAR(v->bounds_offset.y, -4);
     OK(gr_layer_set_transform(l, (gr_affine){1, 0, 0, 1, 0, 0}));
     OK(gr_layer_set_frame(l, (gr_rect){{5, 6}, {11, 12}}));
     gr_rect frame = gr_layer_get_frame(l);
-    NEAR(frame.origin.x, 5);
-    NEAR(frame.size.height, 12);
-    NEAR(gr_layer_get_bounds(l).origin.x, 3);
+    CHECK_NEAR(frame.origin.x, 5);
+    CHECK_NEAR(frame.size.height, 12);
+    CHECK_NEAR(gr_layer_get_bounds(l).origin.x, 3);
     gr_border border = {0.3, {0, 0, 0, 1}};
     OK(gr_layer_set_border(l, &border));
     gr_shadow shadow = {.color = {0, 0, 0, 1}, .blur_sigma = 2, .spread = 3};
@@ -414,14 +425,14 @@ static void geometry(void)
     OK(gr_scene_set_backing_scale(s, 1.5));
     OK(gr_scene_commit(s));
     v = &update(&r, l)->resolved;
-    NEAR(v->size.width, 10);
-    NEAR(v->size.height, 4);
-    NEAR(v->border.width, 2.0 / 3);
+    CHECK_NEAR(v->size.width, 10);
+    CHECK_NEAR(v->size.height, 4);
+    CHECK_NEAR(v->border.width, 2.0 / 3);
     gr_path *outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
     CHECK(outline);
     gr_path_element_list el = gr_path_get_elements(outline);
-    NEAR(el.data[0].p[0].x, 2);
-    NEAR(el.data[0].p[0].y, -3);
+    CHECK_NEAR(el.data[0].p[0].x, 2);
+    CHECK_NEAR(el.data[0].p[0].y, -3);
     gr_path_unref(outline);
     gr_path_element e = {GR_PATH_MOVE, {{4, 5}}};
     gr_path *path = gr_path_new((gr_path_element_list){&e, 1});
@@ -435,8 +446,8 @@ static void geometry(void)
     v = &update(&r, l)->resolved;
     outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
     el = gr_path_get_elements(outline);
-    NEAR(el.data[0].p[0].x, 4 - 4.0 / 3);
-    NEAR(el.data[0].p[0].y, 3);
+    CHECK_NEAR(el.data[0].p[0].x, 4 - 4.0 / 3);
+    CHECK_NEAR(el.data[0].p[0].y, 3);
     gr_path_unref(outline);
     CHECK(gr_layer_set_opacity(l, NAN) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_bounds(l, (gr_rect){{0, 0}, {-1, 2}}) == GR_ERROR_ARGUMENT);
@@ -493,7 +504,7 @@ static void property_dependencies(void)
     OK(gr_layer_set_bounds(l, (gr_rect){{0, 0}, {20, 10}}));
     OK(gr_scene_commit(s));
     CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW | GR_DIRTY_CONTENT));
-    NEAR(update(&r, l)->resolved.content.value.image.rect.origin.x, 9);
+    CHECK_NEAR(update(&r, l)->resolved.content.value.image.rect.origin.x, 9);
     OK(gr_layer_set_corner_radius(l, 2));
     OK(gr_scene_commit(s));
     CHECK(update(&r, l)->changed == (GR_DIRTY_APPEARANCE | GR_DIRTY_SHADOW));
@@ -624,7 +635,8 @@ static void unavailable_backend(void)
     CHECK(gr_scene_commit(s) == GR_ERROR_STATE && gr_scene_needs_commit(s));
     gr_backend_vtable bad = {0};
     CHECK(gr_scene_set_backend(s, &bad, NULL) == GR_ERROR_ARGUMENT);
-    recorder r = {.scene = s};
+    recorder r;
+    init_recorder(&r, s);
     gr_backend_vtable v = {request, apply, destroy};
     OK(gr_scene_set_backend(s, &v, &r));
     CHECK(gr_scene_set_backend(s, &v, &r) == GR_ERROR_STATE);

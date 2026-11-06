@@ -88,7 +88,7 @@ static void widget_hosting(void)
     gtk_widget_get_preferred_size(widget, &min, &natural);
     CHECK(natural.width == 120 && natural.height == 80);
     GdkSurface *surface = gtk_native_get_surface(gtk_widget_get_native(widget));
-    NEAR(gr_scene_get_backing_scale(scene), gdk_surface_get_scale(surface));
+    CHECK_NEAR(gr_scene_get_backing_scale(scene), gdk_surface_get_scale(surface));
     size_t stride;
     GBytes *bytes = paint_widget(widget, &stride);
     expect_pixel(bytes, stride, 5, 5, true);

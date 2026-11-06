@@ -2,8 +2,8 @@
 
 Status: stages 1–3 committed. The C conformance suite and macOS backend are
 implemented and validated against the unchanged Rust backend. The GTK port is
-also implemented and validated in the supplied Linux VM; Windows remains future
-work. The direct macOS port was used instead of a temporary Rust
+also implemented and validated in the supplied Linux VM. Windows backend/demo
+validation now passes in the supplied Windows VM as well. The direct macOS port was used instead of a temporary Rust
 backend adapter. See
 [interface contracts](../src/CONTRACT.md) and [implementation status](../src/README.md).
 

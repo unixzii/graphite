@@ -4,7 +4,8 @@ The C and Rust implementations coexist. CMake currently builds a static
 `graphite::graphite` target containing immutable resources, Canvas recording,
 Scene/Layer and the commit interface. On macOS, `graphite::macos` provides the
 native Core Animation backend. Linux can enable the GTK 4.22 backend with
-`-DGRAPHITE_GTK=ON`; Windows backend migration and text remain future work.
+`-DGRAPHITE_GTK=ON`. Windows builds include `graphite::windows` using C++/WinRT
+and Direct2D. Text remains future work.
 
 ## Build and test
 
@@ -40,7 +41,7 @@ require clang-format. The C GitHub Actions workflow runs `check` in Debug with
 sanitizers and in Release; hosted results are separate from local validation.
 
 `tests/test.h` and `tests/test.c` provide shared, always-active `CHECK`, `OK`,
-and `NEAR`, plus a table-driven runner. Each case prints and flushes `[ RUN ]`
+and `CHECK_NEAR`, plus a table-driven runner. Each case prints and flushes `[ RUN ]`
 before execution and `[ OK ]` afterward. Failure reports the suite/case,
 expression, file and line and aborts; numeric comparisons also show both values.
 Worker threads must finish before a case returns. Register new cases with
@@ -62,10 +63,11 @@ uses the harness so its checks remain active in Release.
 - `src/core/`: C implementation and private headers.
 - `src/platforms/macos/`: Objective-C Core Animation backend and hosting.
 - `src/platforms/gtk/`: C GTK/GSK backend and hosting (optional SDK dependency).
+- `src/platforms/windows/`: C++ Windows.UI.Composition/Direct2D backend.
 - `conformance/`: backend-neutral cases, measurements and comparison tools.
 - `tests/`: test harness, resource/Scene suites and lifecycle example.
 - `vendor/`: pinned third-party sources and license information.
-- `examples/demo/`: C scenes with macOS and GTK shells; `examples/demo-rs/` preserves the Rust demo.
+- `examples/demo/`: C scenes with macOS, GTK and Windows shells; `examples/demo-rs/` preserves the Rust demo.
 
 Paths in this document are relative to the repository root unless stated otherwise.
 
@@ -132,7 +134,10 @@ match the preserved Rust demo. See [demo usage](../examples/demo/README.md). See
 Linux GTK validation has subsequently passed on the supplied Ubuntu VM: Debug
 and Release, three GSK renderer variants with 333/333 captures matching Rust,
 and GL/Cairo sanitizer checks with documented external-library leak exclusions.
-See [GTK validation](platforms/gtk/README.md). Windows remains unvalidated. These
+See [GTK validation](platforms/gtk/README.md). Windows Debug/Release validation
+also passes, including native window tests, demo selftests, and exact comparison
+of all 111 conformance images and both demo snapshots with Rust. See
+[Windows validation](platforms/windows/README.md). These
 checks do not establish performance parity or pixel equality on other OS versions.
 
 ## Scene implementation notes

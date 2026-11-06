@@ -112,3 +112,12 @@ The default VM Vulkan driver's transient output was reproduced with Rust itself
 and is not used as a blocker. GL/Cairo sanitizer checks pass with narrow, explicit
 Fontconfig/EGL leak suppressions confirmed using a standalone GTK program. See
 [GTK validation and reproduction commands](../src/platforms/gtk/README.md).
+
+## Windows migration validation
+
+Windows builds provide `graphite_windows_conformance`. Use an interactive, awake
+desktop session; an SSH session alone cannot validate DWM output. On the supplied
+ARM64 Windows VM, MSVC Debug and Release each pass all 33 cases at 1x, 1.5x and
+2x. All 111 captures and 39 measurement-log groups exactly match the unchanged
+Rust Windows backend. Both demo snapshots also match in both builds. See the
+[Windows build and validation guide](../src/platforms/windows/README.md).

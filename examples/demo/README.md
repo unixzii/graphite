@@ -2,14 +2,14 @@
 
 The C demo contains the same two scenes and animations as the Rust reference in
 `../demo-rs`. Scene code uses only the public Graphite C API; the native event loop
-and PNG snapshot writers live in `platform/macos.m` and `platform/gtk.c`.
+and PNG snapshot writers live in the platform-specific macOS, GTK and Windows shells.
 
 - `showcase` (960 × 640): six animated cards covering transforms, Canvas paths and
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
 - `ui` (1000 × 600): the original control/gallery layout with placeholder text
   bars, animated switch, slider, caret, spinner and progress bar.
 
-The windowed C executable supports macOS 14+ and Linux with GTK 4.22+.
+The windowed C executable supports macOS 14+, Linux with GTK 4.22+, and Windows 11.
 The scene library builds independently of the native shell. The old Rust demo
 retains its GTK/Windows/macOS shells, with its Cargo example now named `demo-rs`.
 
@@ -28,7 +28,8 @@ cmake --build /tmp/graphite-c --target graphite_demo
 `--snapshot` poses the scene at 2.4 seconds and renders at 1x, matching Rust.
 On macOS, the window registers a display-associated `CADisplayLink` on the main
 run loop in common modes. On GTK, a widget frame-clock tick updates the Scene
-before the backend commits in layout. Both shells use display/frame timestamps
+before the backend commits in layout. The Windows shell posts compositor-clock events from a worker to the UI thread.
+All shells use elapsed time
 rather than an assumed 60 Hz, so slow rendering or refresh-rate changes do not
 change animation speed. Closing the window removes its update callback before
 releasing state.
@@ -38,7 +39,7 @@ previous-tick changes committed before the next tick; successful output includes
 `uncommitted=[]`. It does not force a commit each tick. `--fps` reports actual display-callback
 rate every two seconds. Closing the window exits and releases scene resources.
 
-CMake's `check` target includes both native selftests on macOS and GTK. A graphical
+CMake's `check` target includes both native selftests on macOS, GTK and Windows. A graphical
 session with the selected renderer available is required. Format checks include all C/Objective-C files in this demo.
 
 ## Ownership
@@ -94,3 +95,17 @@ pixel-identical to Rust for GL and Cairo (4/4 captures). Both real-window
 60-callback selftests passed with `uncommitted=[]` at 2x in Release and Debug
 ASan/UBSan. The sanitizer run uses the explicit Fontconfig/EGL leak exclusions
 documented in the backend guide. FPS reporting was checked in a live window.
+
+## Windows
+
+Build from a Visual Studio developer prompt. `graphite_demo` uses the Windows
+backend automatically and produces `examples/demo/demo.exe`, with the same CLI
+options. Animation is driven by the compositor clock; the display must be awake
+for selftest callbacks. All Scene updates stay on the window thread, and closing
+the window stops/joins the clock worker before freeing state.
+
+On the supplied ARM64 Windows VM, both 60-frame selftests pass in Debug and
+Release with `uncommitted=[]` at 1.75x. Both scenes' Debug and Release snapshots
+are pixel-identical to the unchanged Rust Windows demo. See the
+[Windows backend guide](../../src/platforms/windows/README.md) for compiler and
+interactive-session requirements.

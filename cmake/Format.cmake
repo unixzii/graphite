@@ -17,7 +17,7 @@ set(sources)
 foreach(directory src include tests conformance examples/demo)
     file(GLOB_RECURSE files
         "${GRAPHITE_ROOT}/${directory}/*.c" "${GRAPHITE_ROOT}/${directory}/*.h"
-        "${GRAPHITE_ROOT}/${directory}/*.cpp" "${GRAPHITE_ROOT}/${directory}/*.m"
+        "${GRAPHITE_ROOT}/${directory}/*.hpp" "${GRAPHITE_ROOT}/${directory}/*.cpp" "${GRAPHITE_ROOT}/${directory}/*.m"
         "${GRAPHITE_ROOT}/${directory}/*.mm")
     list(APPEND sources ${files})
 endforeach()
