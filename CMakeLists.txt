@@ -4,6 +4,9 @@ project(graphite VERSION 0.0.1 LANGUAGES C)
 include(CTest)
 option(GRAPHITE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
 add_subdirectory(src)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 set(CLANG_FORMAT "" CACHE FILEPATH "Path to clang-format 18")
 add_custom_target(format-check

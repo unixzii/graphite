@@ -21,7 +21,7 @@ them. Headers are also compatible with C++ and Objective-C.
 
 ## Formatting and test harness
 
-Use **clang-format 18** for all first-party C-family sources/headers in `src/`.
+Use **clang-format 18** for all first-party C-family sources/headers in `src/`, `include/`, and `tests/`.
 The root `.clang-format` enforces multiline function/control-flow bodies and
 separation between definitions. Vendored files are excluded and stay unchanged.
 If needed, configure `-DCLANG_FORMAT=/path/to/clang-format-18`.
@@ -45,14 +45,23 @@ Worker threads must finish before a case returns. Register new cases with
 `GR_TEST_CASE(function)` and suites with the CMake `graphite_add_suite` helper.
 
 ```sh
-/tmp/graphite-c/src/graphite_scene_tests --list
-/tmp/graphite-c/src/graphite_scene_tests teardown_reentry
+/tmp/graphite-c/tests/graphite_scene_tests --list
+/tmp/graphite-c/tests/graphite_scene_tests teardown_reentry
 ```
 
 There are currently 5 resource cases and 11 Scene/lifecycle cases. `check` uses
 verbose CTest output so progress is visible even when all cases pass. An unknown
 case name fails instead of silently running no tests. The lifecycle example also
 uses the harness so its checks remain active in Release.
+
+## Repository layout
+
+- `include/graphite/`: public C headers.
+- `src/core/`: C implementation and private headers.
+- `tests/`: test harness, resource/Scene suites and lifecycle example.
+- `vendor/`: pinned third-party sources and license information.
+
+Paths in this document are relative to the repository root unless stated otherwise.
 
 ## Implemented scope
 
@@ -74,7 +83,7 @@ uses the harness so its checks remain active in Release.
 - Transform resolution, image gravity, pixel snapping, custom shadow translation,
   and spread/rounded-corner shadow outlines.
 
-`review/lifecycle.c` now links and runs as part of `tests/scene.c`. Executable
+`tests/lifecycle.c` now links and runs as part of `tests/scene.c`. Executable
 resource tests live in `tests/resources.c`.
 
 ## Validation recorded

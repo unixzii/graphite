@@ -1,4 +1,4 @@
-/** Graphite layer API. Ownership contracts: ../../CONTRACT.md. */
+/** Graphite layer API. Ownership contracts: ../../src/CONTRACT.md. */
 #ifndef GRAPHITE_LAYER_H
 #define GRAPHITE_LAYER_H
 #include "resource.h"

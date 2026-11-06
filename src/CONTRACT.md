@@ -6,14 +6,14 @@ interface through CMake; native backend implementations remain future work.
 See [implementation status](README.md)
 for build instructions, coverage and validation limits. Text is a later feature.
 
-Review entry points:
+Entry points (paths relative to the repository root):
 
 - `include/graphite/graphite.h`: umbrella public include.
 - `types.h`, `resource.h`, `scene.h`, `layer.h`, `canvas.h` under the same directory:
   standalone public headers grouped by responsibility.
 - `include/graphite/backend.h`: native backend vtable, commit snapshots, deferred
   drawing and DisplayList replay.
-- `review/lifecycle.c`: compile-only examples of ownership and deferred work.
+- `tests/lifecycle.c`: executable ownership/deferred-work example in the Scene suite.
 
 ## Decisions carried into the headers
 
@@ -142,7 +142,7 @@ identity after the release batch returns, even though the provider itself lives.
 
 ## Review scenarios and validation limits
 
-The compile-only fixture covers root ownership, attaching and dropping a local
+The lifecycle fixture covers root ownership, attaching and dropping a local
 layer reference, resource capture by a recording, userdata transfer on success
 and failure, weak scheduling, and an external layer reference surviving Scene
 teardown. Its mock backend uses no platform SDK.

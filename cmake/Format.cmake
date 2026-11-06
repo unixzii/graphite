@@ -13,10 +13,14 @@ execute_process(COMMAND "${CLANG_FORMAT}" --version OUTPUT_VARIABLE version RESU
 if(NOT result EQUAL 0 OR NOT version MATCHES "clang-format version 18\\.")
     message(FATAL_ERROR "Expected clang-format 18, got: ${version}")
 endif()
-file(GLOB_RECURSE sources
-    "${GRAPHITE_ROOT}/src/*.c" "${GRAPHITE_ROOT}/src/*.h"
-    "${GRAPHITE_ROOT}/src/*.cpp" "${GRAPHITE_ROOT}/src/*.m" "${GRAPHITE_ROOT}/src/*.mm")
-list(FILTER sources EXCLUDE REGEX "/vendor/")
+set(sources)
+foreach(directory src include tests)
+    file(GLOB_RECURSE files
+        "${GRAPHITE_ROOT}/${directory}/*.c" "${GRAPHITE_ROOT}/${directory}/*.h"
+        "${GRAPHITE_ROOT}/${directory}/*.cpp" "${GRAPHITE_ROOT}/${directory}/*.m"
+        "${GRAPHITE_ROOT}/${directory}/*.mm")
+    list(APPEND sources ${files})
+endforeach()
 list(SORT sources)
 if(FORMAT_WRITE)
     set(mode -i)

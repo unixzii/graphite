@@ -1,4 +1,4 @@
-/** Graphite scene API. Ownership contracts: ../../CONTRACT.md. */
+/** Graphite scene API. Ownership contracts: ../../src/CONTRACT.md. */
 #ifndef GRAPHITE_SCENE_H
 #define GRAPHITE_SCENE_H
 #include "types.h"

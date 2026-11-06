@@ -1,4 +1,4 @@
-/** Graphite canvas API. Ownership contracts: ../../CONTRACT.md. */
+/** Graphite canvas API. Ownership contracts: ../../src/CONTRACT.md. */
 #ifndef GRAPHITE_CANVAS_H
 #define GRAPHITE_CANVAS_H
 #include "resource.h"
