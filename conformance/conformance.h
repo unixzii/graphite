@@ -21,7 +21,7 @@ typedef struct
 } gr_conf_harness;
 
 /** Runs all cases at 1, 1.5 and 2x. Positional arguments filter full case names
- * by substring, flags are ignored as in the Rust runner. Returns process status.
+ * by substring, flags are ignored. Returns process status.
  * GRAPHITE_CONFORMANCE_OUT overrides the compile-time output directory. */
 int gr_conf_run_main(const gr_conf_harness *harnesses, size_t count, int argc, char **argv);
 #endif

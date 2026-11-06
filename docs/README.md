@@ -1,31 +1,20 @@
 # Graphite documentation
 
-Start here if you are new to the project.
-
-| Document | Read it to… |
+| Guide | Contents |
 |---|---|
-| [Architecture](architecture.md) | understand the model → commit → backend pipeline, ownership, the `CommitBatch` contract, coordinate spaces and pixel snapping |
-| [Layer model and API semantics](layer-model.md) | learn what the public API means, especially where it differs from `CALayer` |
-| [Testing](testing.md) | run the tests, understand the conformance tiers, and add cases |
-| [Writing a backend](backends/writing-a-backend.md) | add a platform (Web is next) |
-| [macOS backend](backends/macos.md) | see how Core Animation is mapped, and the pitfalls found while doing it |
-| [GTK backend](backends/gtk.md) | see how GSK render nodes are cached and composed, how commits follow the frame clock, and how to test on Linux |
-| [Windows backend](backends/windows.md) | see how layers map onto composition visuals, how pixels are read back from DWM, and how to test on Windows |
-| [Platform notes](platform-notes.md) | check verified facts about each platform's rendering stack and the capability matrix |
-| [Status and roadmap](roadmap.md) | see what is done, what is next, and the open questions |
-| [C migration plan](c-migration.md) | review the agreed C core/backend boundaries, ownership rules, and migration stages |
+| [Architecture](architecture.md) | Ownership, dirty tracking, commit batches and coordinates |
+| [Layer semantics](layer-model.md) | Geometry, masks, drawing and resources |
+| [API contract](../src/CONTRACT.md) | Lifetimes, errors, threading and callbacks |
+| [CMake packages](cmake.md) | Build switches, install/export and consumers |
+| [Testing](testing.md) | Core, native and rendering tests |
+| [Core coverage](core-test-audit.md) | Covered contracts and remaining test opportunities |
+| [Writing a backend](backends/writing-a-backend.md) | Backend vtable and hosting requirements |
+| [macOS](backends/macos.md), [GTK](backends/gtk.md), [Windows](backends/windows.md) | Native implementations |
+| [Platform notes](platform-notes.md) | Rendering capabilities and constraints |
+| [Roadmap](roadmap.md) | Implemented features and planned work |
 
-[C conformance](../conformance/README.md) documents the translated suite and
-macOS capture comparison against the Rust baseline.
-
-API reference: `cargo doc --workspace --no-deps --open`.
-
-## Conventions for contributors
-
-- Rust 2024 edition, MSRV 1.88; `cargo fmt` (120-column max width, see
-  `rustfmt.toml`) and `cargo clippy --workspace --all-targets` must be clean.
-- Model behavior gets a test in `crates/graphite/tests/scene.rs`. Anything
-  a backend renders gets a conformance case, and the case must be seen
-  failing when the behavior is broken.
-- Platform facts that influence the design belong in
-  [platform notes](platform-notes.md), together with how they were verified.
+The API reference is in the documented headers under `include/graphite/`.
+Public functions need documentation comments. Use clang-format 18 and the
+`format-check` target; format only changed code. Add model tests under `tests/`
+and rendering cases under `conformance/`. Use the shared test harness for
+progress output and checks that remain active in Release builds.

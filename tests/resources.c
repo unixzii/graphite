@@ -223,6 +223,39 @@ static void containers(void)
     CHECK(map == NULL);
 }
 
+static void recording_failure_and_state_isolation(void)
+{
+    gr_canvas *canvas = gr_canvas_new();
+    gr_paint *paint = solid();
+    gr_canvas_save(canvas);
+    gr_canvas_save(canvas);
+    OK(gr_canvas_set_alpha(canvas, 0.25f));
+    CHECK(gr_canvas_concat_transform(canvas, (gr_affine){1, 0, 0, 1, INFINITY, 0}) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_clip_rect(canvas, (gr_rect){{0, 0}, {-1, 2}}) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_fill_rect(canvas, (gr_rect){{NAN, 0}, {2, 2}}, paint) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_set_alpha(canvas, NAN) == GR_ERROR_ARGUMENT);
+    gr_canvas_restore(canvas);
+    gr_display_list *first = gr_canvas_finish(canvas);
+    gr_draw_op_list ops = gr_display_list_get_ops(first);
+    CHECK(ops.count == 5);
+    CHECK(ops.data[0].kind == GR_DRAW_SAVE && ops.data[1].kind == GR_DRAW_SAVE);
+    CHECK(ops.data[2].kind == GR_DRAW_ALPHA && ops.data[2].value.alpha == 0.25f);
+    CHECK(ops.data[3].kind == GR_DRAW_RESTORE && ops.data[4].kind == GR_DRAW_RESTORE);
+    /* Finishing balances the old stack and leaves a fresh recording. */
+    gr_canvas_restore(canvas);
+    OK(gr_canvas_fill_rect(canvas, (gr_rect){{3, 4}, {5, 6}}, paint));
+    gr_display_list *second = gr_canvas_finish(canvas);
+    gr_paint_unref(paint);
+    gr_canvas_unref(canvas);
+    gr_display_list_unref(first);
+    ops = gr_display_list_get_ops(second);
+    CHECK(ops.count == 1 && ops.data[0].kind == GR_DRAW_FILL_PATH);
+    CHECK(gr_paint_get_desc(ops.data[0].value.fill_path.paint).value.solid.r == 1);
+    gr_path_element_list elements = gr_path_get_elements(ops.data[0].value.fill_path.path);
+    CHECK(elements.count == 5 && elements.data[0].p[0].x == 3 && elements.data[0].p[0].y == 4);
+    gr_display_list_unref(second);
+}
+
 static void null_references(void)
 {
     gr_path_unref(NULL);
@@ -239,7 +272,7 @@ int main(int argc, char **argv)
 {
     const gr_test_case cases[] = {
         GR_TEST_CASE(resources),  GR_TEST_CASE(paths),           GR_TEST_CASE(shared_resources),
-        GR_TEST_CASE(containers), GR_TEST_CASE(null_references),
+        GR_TEST_CASE(containers), GR_TEST_CASE(null_references), GR_TEST_CASE(recording_failure_and_state_isolation),
     };
     return gr_test_run("resources", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
 }

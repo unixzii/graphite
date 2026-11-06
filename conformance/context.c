@@ -100,7 +100,7 @@ static bool chunk(FILE *file, const char *type, const uint8_t *data, size_t size
     return fwrite(word, 1, 4, file) == 4;
 }
 
-/* PNG rows remain premultiplied, matching the Rust encoder's input exactly.
+/* PNG rows remain premultiplied to preserve exact capture bytes.
  * Stored DEFLATE blocks avoid a codec dependency; compression is not compared. */
 static bool save_png(const char *path, const gr_conf_pixels *pixels)
 {

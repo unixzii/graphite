@@ -1,166 +1,84 @@
 # Layer model and API semantics
 
-This page describes what the public API means, especially where it
-deliberately differs from `CALayer`. For signatures, see the rustdoc
-(`cargo doc --open -p graphite`).
+The documented C headers in `include/graphite` define signatures and ownership.
+A Scene owns a root container and accepts one backend. Its root resolves at the
+host's origin; root position, anchor and transform are ignored. Root size does
+not resize the native host.
 
-## Scenes
+```c
+#include <graphite/graphite.h>
 
-A `Scene` owns one layer tree and is presented by exactly one backend
-(`Scene::set_backend` may be called once). It is a cheap, reference-counted
-handle bound to the thread that created it.
-
-The root layer (`Scene::root`) always sits at the top-left of the host. Its
-`position`, `anchor_point` and `transform` are ignored. Its size does not
-resize the host: whatever extends past the host is clipped.
-
-```rust
-use graphite::*;
-
-let scene = Scene::new(Size::new(400.0, 300.0));
-
-let card = Layer::new(&scene);
-card.set_frame(Rect::new(20.0, 20.0, 240.0, 120.0));
-card.set_background(Some(Color::WHITE));
-card.set_corner_radius(12.0);
-card.set_masks_to_bounds(true);
-card.set_shadow(Some(Shadow::new(Color::BLACK.with_alpha(0.2), Vec2::new(0.0, 4.0), 8.0)));
-scene.root().add_sublayer(&card);
-// `card` can be dropped now; the tree keeps the layer alive.
+gr_scene *scene = gr_scene_new((gr_size){400, 300});
+gr_layer *card = gr_layer_new(scene, GR_LAYER_CONTAINER);
+gr_layer_set_frame(card, (gr_rect){{20, 20}, {240, 120}});
+gr_color white = {1, 1, 1, 1};
+gr_layer_set_background(card, &white);
+gr_layer_set_corner_radius(card, 12);
+gr_layer_add_child(gr_scene_get_root(scene), card);
+gr_layer_unref(card); /* The parent now owns the child. */
+/* Attach a platform host before committing or presenting the Scene. */
+gr_scene_unref(scene);
 ```
+
+Check `gr_result` in production code when inputs can be rejected.
 
 ## Layer kinds
 
-| Handle | Kind | Adds |
-|---|---|---|
-| `Layer::new` | `Container` | background, border, shadow, sublayers |
-| `ContentLayer` | `Content` | an image, or a drawing produced by a drawer |
-| `ShapeLayer` | `Shape` | a filled and/or stroked path, with `stroke_start` / `stroke_end` |
-| `GradientLayer` | `Gradient` | a linear or radial gradient |
+`GR_LAYER_CONTAINER` supplies common geometry, appearance and children.
+`GR_LAYER_CONTENT` adds an image or drawer, `GR_LAYER_SHAPE` a filled/stroked path,
+and `GR_LAYER_GRADIENT` a gradient. Kind is fixed at creation. Kind-specific
+setters reject incompatible layers; kind-specific getters require the right kind.
 
-Every typed handle `Deref`s to `Layer`, so `parent.add_sublayer(&shape)` and
-`shape.set_opacity(0.5)` work. Use `Layer::downcast` and `downcast_ref` to get
-a typed handle back, for example from `sublayers()`.
+## Geometry and appearance
 
-## Geometry
+Bounds define local coordinates; bounds origin scrolls children and drawings.
+Position locates the anchor in the parent's local space. Anchor defaults to
+(0.5,0.5); a 2D affine transform applies around it. `gr_layer_set_frame` assumes
+an identity transform and preserves bounds origin without resetting transform.
+3D/perspective transforms are not supported.
 
-Geometry follows the CALayer model:
+Opacity applies to the whole subtree. Corner radius and selected corners round
+background/border; `masks_to_bounds` also clips children and contents. Borders
+are inside bounds, above contents and children. Pixel snapping rounds geometry
+and border width to the backing-scale grid; see [architecture](architecture.md).
 
-- `bounds`: the layer's local coordinate space. `bounds.origin` acts as a
-  scroll offset for sublayers, drawings and paths.
-- `position`: where the anchor point lies in the superlayer's local space.
-- `anchor_point`: in unit coordinates of the bounds size; `(0.5, 0.5)` by
-  default.
-- `transform`: a 2D affine transform applied around the anchor point.
-- `frame()` and `set_frame()` are derived. Like `CALayer`, `set_frame` assumes
-  an identity transform.
-
-Only 2D affine transforms are supported. 3D and perspective are not in the
-core feature set because the platforms disagree on how they flatten.
-
-## Appearance
-
-- `opacity` is **group opacity**: a layer and its subtree fade as a whole.
-- `corner_radius` with `masked_corners` rounds the background and border;
-  `masks_to_bounds` also clips contents and sublayers to that rounded shape.
-  There are no per-corner radii (Core Animation cannot express them).
-- `border` is drawn inside the bounds, above contents and sublayers. With
-  pixel snapping, its width is rounded to whole device pixels.
-
-### Shadows: deliberate differences from CALayer
-
-- A shadow is **not** clipped by the layer's own `masks_to_bounds`, so a
-  clipped, rounded card can still cast a shadow.
-- A shadow is never derived from the alpha of the contents. Its shape is
-  `Shadow::path` (in local space) if set, otherwise the layer's rounded
-  bounds. This avoids offscreen passes and keeps backends consistent.
-- The whole shape casts the shadow, including the part under the layer: it
-  shows through a layer without an opaque background (as with a `CALayer`
-  that has a `shadowPath`, and unlike CSS `box-shadow`).
-- `blur_sigma` is a Gaussian standard deviation in points.
-- `spread` (`Shadow::with_spread`) grows the default shape on every side,
-  like CSS `box-shadow`'s spread: rounded corners grow with it, square
-  corners stay square; negative values shrink it. It is ignored for custom
-  paths. Use it for focus rings and soft glows.
+Shadows escape the layer's own clip. Their shape is an explicit local-space path
+or rounded bounds, never the alpha of contents. The entire shape casts a shadow,
+including beneath transparent backgrounds. Blur uses Gaussian sigma. Spread
+expands/shrinks default bounds, growing rounded corners but preserving square
+ones; custom paths ignore spread.
 
 ## Masks
 
-`set_mask(Some(&mask))` masks a layer and its subtree by the alpha of `mask`,
-which is positioned in the layer's local space. The constraints match the
-strictest platform (Core Animation):
+`gr_layer_set_mask` uses the mask subtree's alpha, positioned in the owner's local
+space. Masks cannot already have a parent, cannot themselves have a mask, and
+cannot be nested or create cycles. Invalid relations return an error without
+changing state. A mask can be detached and subsequently used as a child.
 
-- the mask must not be in the tree (no superlayer) and cannot be added as a
-  sublayer while it is a mask;
-- masks cannot be nested: a mask cannot have a mask, and a mask layer cannot
-  mask anything;
-- a layer cannot be masked by one of its ancestors.
+## Contents and Canvas
 
-Violations panic (they are programming errors).
+Images are immutable premultiplied RGBA8 sRGB with a pixels-per-point scale.
+Gravity controls placement. Installing an image removes a drawer and vice versa.
 
-## Contents
+A drawer descriptor contains a callback, userdata and optional destructor.
+Successful installation transfers userdata cleanup responsibility. The backend
+may call the drawer any number of times on the Scene thread, or never. It records
+local-space operations into a borrowed Canvas. The Scene is read-only during
+that callback: mutation, nested drawing and commit return errors. External state
+changes require `gr_content_layer_set_needs_display`.
 
-`ContentLayer` shows one of:
+Core retains the callback, not its recording. Backends cache their rendering and
+request it again when bounds, scale or display version change. Clearing a drawer
+leaves empty content. A drawer may borrow its own layer during its lifetime;
+strong self/ancestor ownership can create cycles. See [the contract](../src/CONTRACT.md).
 
-- `Contents::Image(image)`, placed according to `gravity` (`Resize` by
-  default). `Image` is premultiplied RGBA8 sRGB with a `scale` (pixels per
-  point).
-- A drawing. `set_drawer(|canvas, info| …)` installs a closure that records
-  into a `Canvas` in local space, over `info.bounds` (the layer's bounds,
-  snapped when pixel snapping is on).
+Canvas supports save/restore, affine transforms, multiplicative drawing alpha,
+rect/path clips, filled/stroked paths, rectangles and images. Finishing balances
+the saved state and returns an owned DisplayList, leaving the Canvas reusable.
+Paints include solid colors and linear/radial gradients. Canvas blend modes and
+shadows are not exposed.
 
-Drawers are **pure functions**. Core never stores what they record: the
-backend runs a drawer whenever it needs the drawing (when the layer is first
-shown, after `set_needs_display()`, when the bounds or the backing scale
-change, or whenever the platform dropped its backing store) and keeps only
-its own rendering of the result. A drawer may therefore run at any time on
-the scene's thread, any number of times, or never for a layer that is not
-shown. It may read any layer property, but the scene is read-only while it
-runs: setters, tree changes and `Scene::commit` panic. Call
-`set_needs_display()` when state the drawer reads outside the layer tree
-changes.
-
-`set_drawer` replaces contents set with `set_contents` and vice versa;
-`contents()` is `Contents::None` while a drawer is installed, and
-`clear_drawer` leaves the layer empty.
-
-If a drawer needs to refer to its own layer or an ancestor, capture a
-`WeakLayer` (`layer.downgrade()`). A strong handle would keep the layer alive
-until the scene is dropped.
-
-## Canvas
-
-`Canvas` records a `DisplayList`. The op set is the intersection that every
-backend implements exactly:
-
-- state: `save`, `restore`, `with_saved`, `concat_transform`, `set_alpha`
-  (which multiplies);
-- clipping: `clip_rect`, `clip_path`;
-- paths: `fill_path` (with a fill rule), `stroke_path` (width, cap, join,
-  miter limit, dash), `fill_rect`;
-- `draw_image`.
-
-Paints are solid colors and linear or radial gradients. Blend modes and
-canvas shadows are intentionally absent, because Direct2D cannot match
-CoreGraphics there.
-
-## Shapes and gradients
-
-- `ShapeLayer` paths are in local space. `stroke_start` and `stroke_end`
-  trim the stroked portion as fractions of the path length.
-- `GradientLayer` gradients are in **unit coordinates** of the bounds
-  (`(0, 0)` top-left, `(1, 1)` bottom-right), so they follow the layer's
-  size. A radial gradient is an ellipse with radii `radius · size`.
-
-## Resources
-
-`Path`, `Image`, `DisplayList` and paints are immutable and shareable.
-Identity (`ResourceId`, or `Arc` pointer equality) is how backends detect
-changes and cache native counterparts. Build them once and reuse them.
-
-## Backing scale and pixel snapping
-
-The backend reports the host's device-pixel ratio through
-`Scene::set_backing_scale`. Pixel snapping (on by default) rounds positions,
-the sizes of axis-aligned boxes and border widths to device pixels, so UI
-edges stay crisp at fractional scales; see
-[architecture](architecture.md#pixel-snapping).
+Shape paths use local coordinates. Stroke start/end trim by path-length fraction.
+Gradient-layer coordinates are normalized to bounds; radial radii scale with
+width and height. Paths, paints, strokes, images and DisplayLists are immutable
+reference-counted resources. Reuse resources to benefit from native caches.

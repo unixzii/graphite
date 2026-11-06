@@ -7,7 +7,7 @@ Each model layer maps to an outer CALayer and a kind-specific body. The outer
 owns transform, opacity, visibility and shadow; the body owns local bounds,
 clipping, background, border, contents and mask. Images use a dedicated first
 sublayer. Image CGImages are shared by resource identity with per-node usage
-counts. Shape gradient paints retain the Rust backend's first-stop fallback.
+counts. Shape gradient paints currently fall back to the first stop.
 
 Drawn content uses a CALayerDelegate. Core Animation requests display, the
 delegate invokes the drawer provider with its display version and the native
@@ -22,8 +22,8 @@ links; dropping a host does not detach views/layers retained by their native
 parent. NSView hosting requires the AppKit main thread and tracks window backing
 scale automatically. Layer/offscreen hosting uses the Scene's owning thread.
 
-Offscreen rendering uses CARenderer with a shared BGRA8 Metal texture, the same
-sRGB color space and command-queue fence as the Rust backend. Readback is flipped
+Offscreen rendering uses CARenderer with a shared BGRA8 Metal texture, an
+sRGB color space and a command-queue fence. Readback is flipped
 and swizzled to top-down premultiplied RGBA8. The standalone layer renderer
 requires a root layer without a superlayer. The offscreen host API creates and
 owns that container for callers.

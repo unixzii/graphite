@@ -186,7 +186,7 @@ bool demo_platform_snapshot(demo *d, const char *path)
         CFDataRef bytes = CFDataCreate(NULL, pixels.data, (CFIndex)(pixels.width * pixels.height * 4));
         CGDataProviderRef provider = CGDataProviderCreateWithCFData(bytes);
         CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        /* Store the exact readback bytes, matching the Rust PNG writer. */
+        /* Store the exact premultiplied readback bytes. */
         CGImageRef image = CGImageCreate(pixels.width, pixels.height, 8, 32, pixels.width * 4, space,
                                          kCGImageAlphaLast | kCGBitmapByteOrderDefault, provider, NULL, false,
                                          kCGRenderingIntentDefault);

@@ -3,9 +3,9 @@
 ## Done
 
 - **Core model**: scenes, layer handles with reference counting, dirty
-  tracking with dependency propagation, the two-phase commit, `CommitBatch`
+  tracking with dependency propagation, the two-phase commit, `gr_commit_batch`
   and resolved values, pixel snapping, `Canvas` → `DisplayList`, and the
-  `testing::Recorder` / `MirrorTree`.
+  recording backend and mirror tree tests.
 - **macOS backend**: layer mapping, run-loop commit scheduling, CoreGraphics
   replay, view and layer hosting with backing-scale tracking, and `CARenderer`
   offscreen rendering.
@@ -24,18 +24,24 @@
 - **Conformance suite**: 26 semantic and 7 measured cases at 1×, 1.5× and 2×;
   macOS, GTK and Windows pass all of them. Shadow σ is calibrated for all
   three backends.
-  `run_main` serves main-thread-bound backends.
+  The runner executes on the platform-required thread.
 - **Platform-neutral demo** with two scenes (`showcase`, `ui`), `--selftest`,
   `--fps` and `--snapshot`.
 
 ## Next
 
+Investigate intermittent early-frame commit ordering in the macOS showcase
+selftest (`uncommitted=[2]` was observed during repeated runs). Keep display-link
+updates and backend commits ordered before relying on this as a stable timing
+harness.
+
+
 1. **Resource release notifications**: let backends evict native caches
-   keyed by `ResourceId`. All backends currently share image textures
+   keyed by resource identity. All backends currently share image textures
    through per-layer reference counts. Caching paths or drawings across
    layers would need explicit notifications.
-2. **Text**: `AttributedString`, `TextLayout` (measurement, line metrics,
-   index/position queries, max lines, truncation) and `Canvas::draw_text`.
+2. **Text**: attributed text and opaque text layouts (measurement, line metrics,
+   index/position queries, max lines, truncation) and Canvas text drawing.
    Design it against CoreText, Pango and DirectWrite side by side. See
    [testing](testing.md#text-future) for the test strategy.
 3. **Tier C review**: generate a side-by-side page from
@@ -55,7 +61,7 @@ roughly in priority order:
 2. **Image sampling.** A magnification/minification filter property:
    nearest for pixel art and QR codes, trilinear (mipmaps) for downscaled
    thumbnails and icons. Native on Core Animation, GSK and WinComp.
-3. **Gradient paints on `ShapeLayer` for Core Animation.** They degrade to
+3. **Gradient paints on shape layers for Core Animation.** They degrade to
    the first stop today (a gradient layer masked by the shape would fix it),
    while GTK draws them; add conformance cases once both agree.
 4. **Inset shadows**, for recessed fields and pressed states. GSK has a
@@ -65,11 +71,11 @@ roughly in priority order:
 6. **Large drawn contents.** Partial redisplay (`set_needs_display_in_rect`)
    and tiling for very large drawn layers: a single bitmap has a size limit
    in Core Animation (around 8 000 pt tall at 2×). Backends already decide
-   when to draw; this adds a dirty / requested rect to `DrawInfo` so they
+   when to draw; this adds a dirty / requested rect to `gr_draw_info` so they
    can draw tiles (`CATiledLayer` on Core Animation).
 7. **Image decoding** from encoded bytes through the platform decoders
    (ImageIO, gdk-pixbuf/glycin, WIC, `createImageBitmap`). Until then,
-   applications decode themselves (for example with the `image` crate).
+   applications decode images before creating resources.
 
 Not planned: **hit testing and coordinate conversion** on the layer tree.
 Layers are the output of a toolkit; the toolkit routes input with its own
@@ -88,9 +94,17 @@ position of an animating layer would then live in the compositor (like
   content filters, blend modes, backdrop blur.
 - A compositor-driven keyframe animation primitive (Core Animation and
   WinComp run animations off the main thread).
-- A C ABI (`cbindgen`) for non-Rust consumers.
 
 ## Open questions
 
 - Final minimum platform versions (proposed: macOS 14, Windows 11, GTK 4.22).
-- Whether text on the web should use the DOM or a Rust layout engine.
+- Whether web text should use DOM layout or an independent layout engine.
+
+## Text design direction
+
+A backend layout operation will accept text and constraints and return an opaque,
+reference-counted platform layout. Canvas will draw it; measurement, line data,
+hit testing, caret and selection queries belong to the layout. Internal query
+structures may be lazy. Core will not cache layouts; clients/backends own policy.
+Paint-only attributes should not alter shaping/cache keys. Finalize index and
+affinity semantics, ligature paint boundaries and threading before adding APIs.

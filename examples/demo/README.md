@@ -1,17 +1,15 @@
 # Graphite demo
 
-The C demo contains the same two scenes and animations as the Rust reference in
-`../demo-rs`. Scene code uses only the public Graphite C API; the native event loop
-and PNG snapshot writers live in the platform-specific macOS, GTK and Windows shells.
+Scene code uses the public C API; native event loops and PNG writers live in
+platform-specific macOS, GTK and Windows shells.
 
 - `showcase` (960 × 640): six animated cards covering transforms, Canvas paths and
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
-- `ui` (1000 × 600): the original control/gallery layout with placeholder text
+- `ui` (1000 × 600): a control/gallery layout with placeholder text
   bars, animated switch, slider, caret, spinner and progress bar.
 
 The windowed C executable supports macOS 14+, Linux with GTK 4.22+, and Windows 11.
-The scene library builds independently of the native shell. The old Rust demo
-retains its GTK/Windows/macOS shells, with its Cargo example now named `demo-rs`.
+The scene library builds independently of the native shell.
 
 ```sh
 cmake -S . -B /tmp/graphite-c -DCMAKE_BUILD_TYPE=Release
@@ -25,7 +23,7 @@ cmake --build /tmp/graphite-c --target graphite_demo
 /tmp/graphite-c/examples/demo/demo --scene ui --snapshot ui.png
 ```
 
-`--snapshot` poses the scene at 2.4 seconds and renders at 1x, matching Rust.
+`--snapshot` poses the scene at 2.4 seconds and renders at 1x.
 On macOS, the window registers a display-associated `CADisplayLink` on the main
 run loop in common modes. On GTK, a widget frame-clock tick updates the Scene
 before the backend commits in layout. The Windows shell posts compositor-clock events from a worker to the UI thread.
@@ -50,62 +48,15 @@ Icon drawers own copied glyph descriptions; the animated Canvas drawer borrows
 its enclosing demo state, which outlives the Scene. Temporary paths/paints/strokes
 are released after recording or assignment; the public Graphite API retains them.
 
-## Rust comparison
+## Platform setup
 
-Generate each pair in fresh output directories and compare decoded RGBA pixels:
+On Linux configure with `-DGRAPHITE_GTK=ON`. `GSK_RENDERER=gl` or `cairo` selects
+snapshot/window rendering; software GL can avoid virtual GPU driver problems.
+On Windows build from a Visual Studio developer prompt. Shared builds place the
+executable and DLLs under `build/bin`. Compositor-clock updates require an awake
+interactive display. See the [CMake guide](../../docs/cmake.md).
 
-```sh
-mkdir -p /tmp/demo-parity/rust /tmp/demo-parity/c
-cargo run --example demo-rs -- --snapshot /tmp/demo-parity/rust/showcase.png
-cargo run --example demo-rs -- --scene ui --snapshot /tmp/demo-parity/rust/ui.png
-/tmp/graphite-c/examples/demo/demo --snapshot /tmp/demo-parity/c/showcase.png
-/tmp/graphite-c/examples/demo/demo --scene ui --snapshot /tmp/demo-parity/c/ui.png
-python3 -B conformance/compare.py /tmp/demo-parity/rust /tmp/demo-parity/c
-```
-
-Both snapshots were verified pixel-identical to Rust on macOS 27.2 arm64 with
-AppleClang 21. PNG metadata/compression can differ; the comparison uses decoded
-pixels without tolerances. This snapshot comparison covers the 2.4-second pose;
-the window selftests separately check animation scheduling.
-
-Validation also passed both 60-tick real-window selftests in Release and Debug
-ASan/UBSan (`uncommitted=[]`, 2x backing scale), the full nine-entry CTest check,
-four invalid-argument cases, and a live `--fps` report. macOS `leaks --atExit`
-reported zero leaked bytes for the UI selftest. All 16 Rust source files were
-verified unchanged byte-for-byte after moving to `demo-rs`.
-
-## GTK
-
-```sh
-cmake -S . -B /tmp/graphite-gtk -DGRAPHITE_GTK=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/graphite-gtk --target graphite_demo
-GSK_RENDERER=gl /tmp/graphite-gtk/examples/demo/demo
-GSK_RENDERER=gl /tmp/graphite-gtk/examples/demo/demo --scene ui --fps
-GSK_RENDERER=cairo /tmp/graphite-gtk/examples/demo/demo --scene ui --snapshot ui.png
-```
-
-GTK snapshots honor `GSK_RENDERER=cairo`, `gl`/`ngl`/`opengl`; the default tries
-Vulkan then GL, matching the Rust reference. In the supplied VM, use `gl` with
-`LIBGL_ALWAYS_SOFTWARE=1` or `cairo` to avoid the known virtual Vulkan issue. SSH
-runs also need the graphical-session variables described in the
-[GTK backend guide](../../src/platforms/gtk/README.md).
-
-On that Ubuntu 26.04.1/GTK 4.22.4 VM, showcase and UI snapshots were both
-pixel-identical to Rust for GL and Cairo (4/4 captures). Both real-window
-60-callback selftests passed with `uncommitted=[]` at 2x in Release and Debug
-ASan/UBSan. The sanitizer run uses the explicit Fontconfig/EGL leak exclusions
-documented in the backend guide. FPS reporting was checked in a live window.
-
-## Windows
-
-Build from a Visual Studio developer prompt. `graphite_demo` uses the Windows
-backend automatically and produces `examples/demo/demo.exe`, with the same CLI
-options. Animation is driven by the compositor clock; the display must be awake
-for selftest callbacks. All Scene updates stay on the window thread, and closing
-the window stops/joins the clock worker before freeing state.
-
-On the supplied ARM64 Windows VM, both 60-frame selftests pass in Debug and
-Release with `uncommitted=[]` at 1.75x. Both scenes' Debug and Release snapshots
-are pixel-identical to the unchanged Rust Windows demo. See the
-[Windows backend guide](../../src/platforms/windows/README.md) for compiler and
-interactive-session requirements.
+The macOS showcase selftest has intermittently reported an uncommitted second
+frame during repeated runs. This scheduling issue remains under investigation;
+see [roadmap](../../docs/roadmap.md). Selftest callback rate is not a renderer
+throughput benchmark.

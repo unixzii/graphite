@@ -393,6 +393,36 @@ static void drawers(void)
     gr_layer_unref(l);
 }
 
+static void rejected_drawer_preserves_ownership(void)
+{
+    recorder r;
+    gr_scene *s = new_scene(&r);
+    gr_layer *content = gr_layer_new(s, GR_LAYER_CONTENT);
+    draw_state installed = {.s = s, .l = content}, rejected = {0};
+    gr_drawer good = {&installed, draw_callback, draw_destroy};
+    gr_drawer bad = {&rejected, NULL, draw_destroy};
+    OK(gr_layer_add_child(gr_scene_get_root(s), content));
+    OK(gr_content_layer_set_drawer(content, &good));
+    OK(gr_scene_commit(s));
+    CHECK(gr_content_layer_set_drawer(content, &bad) == GR_ERROR_ARGUMENT);
+    bad.draw = draw_callback;
+    CHECK(gr_content_layer_set_drawer(gr_scene_get_root(s), &bad) == GR_ERROR_KIND);
+    CHECK(installed.destroys == 0 && rejected.destroys == 0);
+    CHECK(gr_content_layer_has_drawer(content) && !gr_scene_needs_commit(s));
+    const gr_resolved *resolved = &update(&r, content)->resolved;
+    gr_draw_info info = gr_resolved_get_draw_info(resolved, 1);
+    gr_display_list *list = NULL;
+    OK(gr_drawer_provider_draw(r.provider, content, resolved->content.value.display_version, &info, &list));
+    CHECK(installed.draws == 1 && rejected.draws == 0);
+    gr_display_list_unref(list);
+    gr_scene_unref(s);
+    CHECK(installed.destroys == 1 && rejected.destroys == 0);
+    gr_layer_unref(content);
+    /* Failed transfer leaves cleanup to the caller. */
+    bad.destroy(bad.userdata);
+    CHECK(rejected.destroys == 1);
+}
+
 static void geometry(void)
 {
     recorder r;
@@ -668,6 +698,107 @@ static void deep_tree(void)
     gr_scene_unref(s);
 }
 
+static void borrowed_reparent_and_reorder(void)
+{
+    recorder r;
+    gr_scene *s = new_scene(&r);
+    gr_layer *root = gr_scene_get_root(s);
+    gr_layer *a = gr_layer_new(s, GR_LAYER_CONTAINER), *b = gr_layer_new(s, GR_LAYER_CONTAINER);
+    gr_layer *child = gr_layer_new(s, GR_LAYER_CONTAINER);
+    OK(gr_layer_add_child(root, a));
+    OK(gr_layer_add_child(root, b));
+    OK(gr_layer_add_child(a, child));
+    gr_layer_unref(child);
+    OK(gr_scene_commit(s));
+    child = gr_layer_get_child(a, 0);
+    /* Reparent with only the old parent's reference keeping the child alive. */
+    OK(gr_layer_add_child(b, child));
+    CHECK(gr_layer_get_child_count(a) == 0 && gr_layer_get_parent(child) == b);
+    OK(gr_scene_commit(s));
+    CHECK(r.realized == 0 && r.released == 0 && node(&r, child)->parent == b);
+    OK(gr_layer_insert_child(root, b, 0));
+    OK(gr_scene_commit(s));
+    CHECK(node(&r, root)->children[0] == b && node(&r, root)->children[1] == a);
+    OK(gr_layer_insert_child(root, b, SIZE_MAX));
+    OK(gr_scene_commit(s));
+    CHECK(node(&r, root)->count == 2);
+    CHECK(node(&r, root)->children[0] == a && node(&r, root)->children[1] == b);
+    CHECK(r.realized == 0 && r.released == 0);
+    OK(gr_layer_remove_from_parent(child));
+    CHECK(gr_scene_get_layer_count(s) == 3);
+    OK(gr_scene_commit(s));
+    CHECK(r.released == 1 && node(&r, b)->count == 0);
+    gr_layer_unref(a);
+    gr_layer_unref(b);
+    gr_scene_unref(s);
+}
+
+static void rejected_mutations_stay_clean(void)
+{
+    recorder r;
+    gr_scene *s = new_scene(&r), *other = gr_scene_new((gr_size){1, 1});
+    gr_layer *root = gr_scene_get_root(s), *a = gr_layer_new(s, GR_LAYER_CONTAINER);
+    gr_layer *child = gr_layer_new(s, GR_LAYER_CONTAINER), *mask = gr_layer_new(s, GR_LAYER_SHAPE);
+    OK(gr_layer_add_child(root, a));
+    OK(gr_layer_add_child(a, child));
+    OK(gr_layer_set_mask(a, mask));
+    OK(gr_layer_set_position(a, (gr_point){12, 34}));
+    OK(gr_scene_commit(s));
+    size_t requests = r.requests, applies = r.applies;
+    CHECK(gr_layer_add_child(child, a) == GR_ERROR_CYCLE);
+    CHECK(gr_layer_add_child(gr_scene_get_root(other), child) == GR_ERROR_SCENE);
+    CHECK(gr_layer_add_child(root, mask) == GR_ERROR_STATE);
+    CHECK(gr_layer_set_mask(a, gr_scene_get_root(other)) == GR_ERROR_SCENE);
+    CHECK(gr_layer_set_mask(a, a) == GR_ERROR_CYCLE);
+    CHECK(gr_layer_set_mask(a, child) == GR_ERROR_STATE);
+    CHECK(gr_layer_set_position(a, (gr_point){NAN, 0}) == GR_ERROR_ARGUMENT);
+    CHECK(gr_layer_set_corner_radius(a, -1) == GR_ERROR_ARGUMENT);
+    CHECK(gr_layer_set_masked_corners(a, (gr_corners)0x80) == GR_ERROR_ARGUMENT);
+    CHECK(gr_scene_set_backing_scale(s, 0) == GR_ERROR_ARGUMENT);
+    CHECK(gr_layer_get_parent(child) == a && gr_layer_get_parent(a) == root);
+    CHECK(gr_layer_get_child_count(a) == 1 && gr_layer_get_mask(a) == mask);
+    CHECK(gr_layer_get_position(a).x == 12 && gr_layer_get_position(a).y == 34);
+    CHECK(gr_layer_get_corner_radius(a) == 0 && gr_layer_get_masked_corners(a) == GR_CORNERS_ALL);
+    CHECK(gr_scene_get_backing_scale(s) == 1);
+    CHECK(!gr_scene_needs_commit(s) && r.requests == requests);
+    OK(gr_scene_commit(s));
+    CHECK(r.applies == applies);
+    gr_layer_unref(a);
+    gr_layer_unref(child);
+    gr_layer_unref(mask);
+    gr_scene_unref(other);
+    gr_scene_unref(s);
+}
+
+static void mask_replacement_lifetime(void)
+{
+    recorder r;
+    gr_scene *s = new_scene(&r);
+    gr_layer *owner = gr_layer_new(s, GR_LAYER_CONTAINER);
+    gr_layer *old = gr_layer_new(s, GR_LAYER_SHAPE), *replacement = gr_layer_new(s, GR_LAYER_SHAPE);
+    OK(gr_layer_add_child(gr_scene_get_root(s), owner));
+    OK(gr_layer_set_mask(owner, old));
+    gr_layer_unref(old);
+    OK(gr_scene_commit(s));
+    CHECK(update(&r, owner)->resolved.mask == gr_layer_get_mask(owner));
+    OK(gr_layer_set_mask(owner, replacement));
+    CHECK(gr_scene_get_layer_count(s) == 3);
+    gr_layer_unref(replacement);
+    OK(gr_scene_commit(s));
+    CHECK(r.realized == 1 && r.released == 1);
+    CHECK(update(&r, owner)->changed == GR_DIRTY_MASK);
+    CHECK(update(&r, owner)->resolved.mask == gr_layer_get_mask(owner));
+    CHECK(node(&r, gr_layer_get_mask(owner)));
+    OK(gr_layer_set_mask(owner, gr_layer_get_mask(owner)));
+    CHECK(!gr_scene_needs_commit(s));
+    OK(gr_layer_set_mask(owner, NULL));
+    CHECK(gr_scene_get_layer_count(s) == 2);
+    OK(gr_scene_commit(s));
+    CHECK(r.realized == 0 && r.released == 1 && !update(&r, owner)->resolved.mask);
+    gr_layer_unref(owner);
+    gr_scene_unref(s);
+}
+
 void graphite_lifecycle_example(void);
 
 int main(int argc, char **argv)
@@ -675,7 +806,11 @@ int main(int argc, char **argv)
     const gr_test_case cases[] = {
         GR_TEST_CASE(basics),
         GR_TEST_CASE(tree),
+        GR_TEST_CASE(borrowed_reparent_and_reorder),
+        GR_TEST_CASE(rejected_mutations_stay_clean),
+        GR_TEST_CASE(mask_replacement_lifetime),
         GR_TEST_CASE(drawers),
+        GR_TEST_CASE(rejected_drawer_preserves_ownership),
         GR_TEST_CASE(geometry),
         GR_TEST_CASE(cascade),
         GR_TEST_CASE(property_dependencies),

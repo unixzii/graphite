@@ -1,12 +1,4 @@
-# Phase 1: C interface review
-
-This contract accompanies the existing Rust implementation and the C migration.
-Stages 2 and 3 implement resources, Canvas, Scene/Layer and the core backend
-interface through CMake. The macOS native backend and rendering conformance are
-also implemented. The GTK backend is available with `GRAPHITE_GTK=ON`; the
-Windows backend is also implemented with native tests and Rust parity checks.
-See [implementation status](README.md)
-for build instructions, coverage and validation limits. Text is a later feature.
+# Public API and ownership contract
 
 Entry points (paths relative to the repository root):
 
@@ -17,20 +9,16 @@ Entry points (paths relative to the repository root):
   drawing and DisplayList replay.
 - `tests/lifecycle.c`: executable ownership/deferred-work example in the Scene suite.
 
-## Decisions carried into the headers
+## API conventions
 
 Stable pointers; new/ref/unref; C core and native-language backends; CMake;
 single-thread Scene/Layer operations without thread checks; immutable resources
 with cross-thread reference counting; no vtable version/size fields; no external
-SDK or container types in public headers.
+SDK or container types in core public headers. Platform hosting headers may expose native types.
 
-## Concrete proposals for review
+## Values and ownership
 
-These settle previously open details for this draft, rather than claiming they
-were already approved:
-
-- C11-compatible declarations, also includable from C++/Objective-C. No build
-  system is introduced in this stage.
+- C11-compatible declarations, also includable from C++/Objective-C. CMake builds the library and platform backends.
 - Allocation failure aborts. Invalid constructor arguments return NULL; ordinary
   recoverable API errors use gr_result. No custom allocator or global error slot.
 - Unknown enum values/nonfinite numeric inputs are invalid; sizes, radii, widths
@@ -60,7 +48,7 @@ were already approved:
 - A backend identity lease keeps a retired layer's allocation alive until its
   release notification is consumed. It is distinct from public ref ownership,
   so a native map does not prevent core from recognizing retirement.
-- No weak-layer API in this draft. A drawer can borrow its owning layer as
+- There is no weak-layer API. A drawer can borrow its owning layer as
   userdata without ref'ing it: core keeps the allocation valid through that
   drawer's destruction. Do not use that borrowed pointer after callback ownership
   ends. Other captured objects need explicit owned references or externally
@@ -68,7 +56,7 @@ were already approved:
 
 ## Defaults and structural errors
 
-Layer property defaults match Rust: zero bounds/position, anchor (0.5,0.5),
+Layer property defaults: zero bounds/position, anchor (0.5,0.5),
 identity transform, opacity 1, visible, no clipping/background/border/shadow,
 radius 0 and all corners. Shape defaults: no path/fill/stroke, nonzero fill rule,
 stroke range [0,1]. Gravity defaults to resize. Stroke defaults: width 1, butt,
@@ -76,7 +64,7 @@ miter, limit 10, no dash, phase 0. Scene scale is 1 and pixel snapping is enable
 
 Kind-specific setters return GR_ERROR_KIND for the wrong kind; kind-specific
 getters require the correct kind (programmer precondition). Finite set_frame
-preserves the Rust semantics, preserving bounds.origin and assuming an identity transform; it does not reset
+preserves bounds.origin and assumes an identity transform; it does not reset
 the transform.
 Root is a container; its resolved transform is identity.
 
@@ -88,8 +76,7 @@ atomic with respect to callbacks; keep it alive across detach/attach.
 
 ## Callback and destruction ordering
 
-The current Rust source makes Scene read-only during drawers. Earlier discussion
-of drawers replacing themselves does NOT apply to this baseline: draw callbacks
+The Scene is read-only during drawers. Draw callbacks
 may read properties and record resources, but Scene mutation, nested draw and
 commit are rejected. The caller must not release its last Scene ownership from a
 drawer; balanced temporary ref/unref is allowed. Other releases cannot physically
@@ -129,8 +116,7 @@ one outstanding request coalesces changes. apply cannot fail transactionally:
 platform error reporting/recovery belongs to the backend, and core does not replay
 a partially applied batch automatically.
 
-Provider draw verifies the current display version. This is an explicit C
-contract addition to reject stale deferred work. A deferred backend uses a newer
+Provider draw verifies the current display version. Stale deferred work is rejected. A deferred backend uses a newer
 snapshot after GR_ERROR_STATE. Core pins the current callback while executing it.
 The callback canvas and DrawInfo cannot escape; a finished owned DisplayList is
 returned to the backend, which can discard it after rasterizing. Core stores no
@@ -142,24 +128,13 @@ alone is insufficient. Pointer identities and provider references use the distin
 lifetimes documented in backend.h. The provider must not be called for a retired
 identity after the release batch returns, even though the provider itself lives.
 
-## Review scenarios and validation limits
+## Validation
 
-The lifecycle fixture covers root ownership, attaching and dropping a local
-layer reference, resource capture by a recording, userdata transfer on success
-and failure, weak scheduling, and an external layer reference surviving Scene
-teardown. Its mock backend uses no platform SDK.
+`tests/lifecycle.c` demonstrates parent ownership, resource capture, userdata
+transfer, weak scheduling and handles surviving Scene teardown. Resource and
+Scene tests exercise callback cleanup, release notifications, stale deferred
+versions, structural errors, mask ownership and shared resource references.
+See [testing](../docs/testing.md) for commands and sanitizer configuration.
 
-Header syntax alone does not prove runtime ownership. Runtime tests now cover
-release notifications without public-reference cycles, callback cleanup reentry,
-cross-Scene/cycle errors, stale deferred versions, mask ownership, Scene teardown
-and thread-safe resource reference counting under sanitizers.
-
-Validation performed for this review: all seven headers compile independently
-as C11, C++17, and Objective-C with `-Wall -Wextra -Werror -pedantic`; the
-lifecycle fixture passes C11 syntax checking with the same warnings. Those were
-stage 1 checks; subsequent resource/Scene runtime validation is recorded in README.md.
-
-Text, platform hosting constructors, geometry
-helpers and error-reporting callbacks are not implemented by this review. Hosting
-APIs will be specified with the corresponding backend port. The text contract
-remains in docs/c-migration.md and is not prematurely frozen here.
+Platform hosting APIs are declared in macos.h, gtk.h and windows.h. Text layout
+is planned separately; see the [roadmap](../docs/roadmap.md).

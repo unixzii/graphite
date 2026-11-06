@@ -152,7 +152,7 @@ bool demo_platform_snapshot(demo *content, const char *path)
         gr_scene_commit(content->scene) == GR_OK && gr_gtk_renderer_render(renderer, host, 1, &pixels))
     {
         GBytes *bytes = g_bytes_new(pixels.data, (size_t)pixels.width * pixels.height * 4);
-        /* Preserve readback bytes verbatim, as the Rust and macOS snapshot writers do. */
+        /* Preserve premultiplied readback bytes verbatim. */
         GdkTexture *texture = gdk_memory_texture_new((int)pixels.width, (int)pixels.height, GDK_MEMORY_R8G8B8A8, bytes,
                                                      (size_t)pixels.width * 4);
         ok = gdk_texture_save_to_png(texture, path);

@@ -142,7 +142,6 @@ and Homebrew ships 4.24.
   needs Pango 1.50. Pango 2 is stalled.
 - Color management is opt-in (`GDK_DEBUG=color-mgmt`) and `GdkColor` is
   private.
-- Rust bindings: gtk4-rs / gsk4 0.11.5 have feature flags up to `v4_24`.
 - Measured while implementing the backend (GTK 4.22.4): `GskNglRenderer`
   no longer realizes (use `GskGLRenderer`); the blur node's radius is 2σ;
   GTK falls back to GL for windows when Vulkan lacks dmabuf support. See
@@ -160,4 +159,4 @@ and Homebrew ships 4.24.
 The plan is to use the native stack per platform behind an
 `AttributedString → TextLayout` API. Max-lines and truncation are
 implemented in core, since no platform offers both. On the web, layout is
-done in Rust with `Intl.Segmenter` and `measureText`, at reduced fidelity.
+implemented with `Intl.Segmenter` and `measureText`, at reduced fidelity.

@@ -1,37 +1,39 @@
-# graphite
+# Graphite
 
-A cross-platform, retained-mode 2D layer library with a `CALayer`-style API
-and a CGContext-style drawing API, rendered by each platform's native compositor.
-The C migration includes the core, macOS and Windows backends, and optional
-GTK 4.22 support (`-DGRAPHITE_GTK=ON`). The Rust reference
-implementation retains its macOS, GTK and Windows backends; Web is planned.
+A cross-platform, retained-mode 2D layer library with a CALayer-style model and
+an immediate-mode drawing API. A C11 core exposes opaque, reference-counted C
+handles. Native backends use Core Animation on macOS, GTK 4.22 / GSK on Linux,
+and Windows.UI.Composition on Windows 11.
 
-Build and run the C demo on macOS:
-
-```sh
-cmake -S . -B /tmp/graphite-c -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/graphite-c --target graphite_demo
-/tmp/graphite-c/examples/demo/demo                  # feature showcase
-/tmp/graphite-c/examples/demo/demo --scene ui       # typical application window
-/tmp/graphite-c/examples/demo/demo --selftest       # verify 60 animation ticks
-```
-
-On Windows 11, build from a Visual Studio developer prompt; the same target
-produces `examples/demo/demo.exe` with compositor-clock animation.
-
-For Linux, configure with `-DGRAPHITE_GTK=ON` (GTK 4.22+); the same demo target
-uses GTK frame-clock updates. `GSK_RENDERER=gl` or `cairo` selects the renderer.
-
-The original Rust demo is preserved in `examples/demo-rs`:
+## Build
 
 ```sh
-cargo run --example demo-rs
-cargo run --example demo-rs -- --scene ui
-cargo test --workspace
+cmake -S . -B /tmp/graphite-build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/graphite-build --parallel
+/tmp/graphite-build/examples/demo/demo
+/tmp/graphite-build/examples/demo/demo --scene ui
 ```
 
-See the [demo guide](examples/demo/README.md), [C build and tests](src/README.md),
-and [contributor documentation](docs/README.md).
+On Linux add `-DGRAPHITE_GTK=ON` and install GTK 4.22+ development headers. On
+Windows use a Visual Studio developer prompt; the demo is `demo.exe`. Shared
+Windows builds put executables and DLLs together in `build/bin`.
 
-For static/shared installation, build switches and `find_package` integration,
-see the [CMake package guide](docs/cmake.md).
+`BUILD_SHARED_LIBS` selects static/shared libraries. `BUILD_TESTING`,
+`GRAPHITE_BUILD_EXAMPLES` and `GRAPHITE_BUILD_CONFORMANCE` independently control
+auxiliary targets. See the [CMake guide](docs/cmake.md) for installation into a
+private prefix and `find_package(graphite CONFIG REQUIRED)` integration.
+
+## Development
+
+```sh
+cmake --build /tmp/graphite-build --target check
+```
+
+The check target requires clang-format 18. Native rendering tests require a
+working graphical session. Core-only CI does not require a window server.
+
+- [Documentation](docs/README.md)
+- [Public API and ownership contract](src/CONTRACT.md)
+- [Demo](examples/demo/README.md)
+- [Conformance](conformance/README.md)
+- [Benchmarks](benchmarks/README.md)
