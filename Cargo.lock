@@ -77,6 +77,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphite-conformance"
+version = "0.0.1"
+dependencies = [
+ "graphite",
+ "png",
+]
+
+[[package]]
 name = "graphite-examples"
 version = "0.0.0"
 dependencies = [
@@ -96,6 +104,7 @@ version = "0.0.1"
 dependencies = [
  "block2",
  "graphite",
+ "graphite-conformance",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",

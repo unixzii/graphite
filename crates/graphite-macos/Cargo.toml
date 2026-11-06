@@ -18,6 +18,7 @@ objc2-metal = "0.3.2"
 block2 = "0.6.2"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+graphite-conformance = { path = "../graphite-conformance" }
 png = "0.18"
 
 # Needs the main thread (AppKit), so it provides its own `main`.

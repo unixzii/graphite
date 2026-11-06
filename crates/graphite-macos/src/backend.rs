@@ -271,6 +271,8 @@ impl CaBackend {
         let r = &update.layer;
         let p = &r.props;
         let scale = self.scale;
+        // The local space actually used: bounds with the (snapped) origin.
+        let local_bounds = Rect { origin: (-r.bounds_offset).to_point(), size: p.bounds.size };
 
         if changed.contains(DirtyBits::GEOMETRY) {
             let node = self.node(id);
@@ -282,10 +284,11 @@ impl CaBackend {
                 outer.setTransform(CATransform3D::new_affine_transform(cg_affine(graphite::Affine::IDENTITY)));
             } else {
                 outer.setAnchorPoint(cg_point(p.anchor_point));
-                outer.setPosition(cg_point(p.position));
+                // `snap_offset` keeps CA's position/anchor model pixel-aligned.
+                outer.setPosition(cg_point(p.position + r.snap_offset));
                 outer.setTransform(CATransform3D::new_affine_transform(cg_affine(p.transform)));
             }
-            node.body.layer().setBounds(cg_rect(p.bounds));
+            node.body.layer().setBounds(cg_rect(local_bounds));
         }
 
         if changed.contains(DirtyBits::APPEARANCE) {
@@ -317,7 +320,8 @@ impl CaBackend {
                     outer.setShadowColor(Some(&cg_color(opaque)));
                     outer.setShadowOpacity(shadow.color.a);
                     outer.setShadowOffset(CGSize::new(shadow.offset.x, shadow.offset.y));
-                    // Treated as a Gaussian sigma; to be calibrated.
+                    // Calibrated by the conformance suite (shadow_blur_matches_sigma):
+                    // Core Animation's shadowRadius is the Gaussian σ.
                     outer.setShadowRadius(shadow.blur_sigma);
                     let path = match shape {
                         ShadowShape::RoundedRect { rect, radius, corners } => {
@@ -360,7 +364,7 @@ impl CaBackend {
             self.apply_content(id, &r.content, scale);
         }
         if changed.intersects(DirtyBits::GEOMETRY | DirtyBits::CONTENT) {
-            self.sync_content_geometry(id, &r.content, p.bounds, scale);
+            self.sync_content_geometry(id, &r.content, local_bounds, scale);
         }
     }
 

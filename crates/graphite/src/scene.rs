@@ -141,6 +141,7 @@ pub(crate) struct SceneInner {
     commit_requested: Cell<bool>,
     committing: Cell<bool>,
     backing_scale: Cell<f64>,
+    pixel_snapping: Cell<bool>,
 }
 
 /// Sets a flag for the duration of a scope, resetting it even on panic.
@@ -163,6 +164,16 @@ fn mark(map: &mut LayerMap, dirty: &mut Vec<LayerKey>, key: LayerKey, bits: Dirt
     if d.attached && !d.in_dirty_list {
         d.in_dirty_list = true;
         dirty.push(key);
+    }
+}
+
+/// The groups whose resolved values depend on pixel snapping.
+fn snap_dependents(d: &LayerData) -> DirtyBits {
+    // Custom shadow paths are offset by the (snapped) bounds offset.
+    if d.props.shadow.as_ref().is_some_and(|s| s.path.is_some()) {
+        DirtyBits::GEOMETRY | DirtyBits::SHADOW
+    } else {
+        DirtyBits::GEOMETRY
     }
 }
 
@@ -401,6 +412,19 @@ impl SceneInner {
         self.note_dirty();
     }
 
+    /// Marks every layer with the bits `f` returns, then requests a commit.
+    fn mark_all(&self, mut f: impl FnMut(&mut LayerData) -> DirtyBits) {
+        {
+            let mut map = self.layers.borrow_mut();
+            let mut dirty = self.dirty.borrow_mut();
+            let marks: Vec<(LayerKey, DirtyBits)> = map.iter_mut().map(|(k, d)| (k, f(d))).collect();
+            for (k, bits) in marks {
+                mark(&mut map, &mut dirty, k, bits);
+            }
+        }
+        self.note_dirty();
+    }
+
     // ── commit ──
 
     fn note_dirty(&self) {
@@ -491,7 +515,8 @@ impl SceneInner {
                     KindData::Shape(s) => ResolvedContentSource::Shape(s),
                     KindData::Gradient(g) => ResolvedContentSource::Gradient(g.as_ref()),
                 };
-                let layer = resolve(&d.props, source, mask_id, key == self.root);
+                let snap = self.pixel_snapping.get().then(|| self.backing_scale.get());
+                let layer = resolve(&d.props, source, mask_id, key == self.root, snap);
                 batch.updates.push(LayerUpdate { id, changed, layer });
             }
             if matches!(&d.kind, KindData::Content(c) if c.needs_display && c.drawer.is_some()) {
@@ -542,6 +567,7 @@ impl Scene {
                 commit_requested: Cell::new(false),
                 committing: Cell::new(false),
                 backing_scale: Cell::new(1.0),
+                pixel_snapping: Cell::new(true),
             }),
         }
     }
@@ -600,34 +626,44 @@ impl Scene {
         self.inner.backing_scale.get()
     }
 
-    /// Called by the backend when the surface's scale changes. Every layer
-    /// with a drawer is redisplayed at the next commit, and every
-    /// non-container layer is committed with [`DirtyBits::CONTENT`] so that
-    /// backends re-rasterize scale-dependent contents.
+    /// Called by the backend when the host's scale changes. Every layer with
+    /// a drawer is redisplayed at the next commit, and every non-container
+    /// layer is committed with [`DirtyBits::CONTENT`] so that backends
+    /// re-rasterize scale-dependent contents. With pixel snapping on, every
+    /// layer's geometry is re-resolved too.
     pub fn set_backing_scale(&self, scale: f64) {
         let inner = &*self.inner;
         if inner.backing_scale.replace(scale) == scale {
             return;
         }
-        {
-            let mut map = inner.layers.borrow_mut();
-            let mut dirty = inner.dirty.borrow_mut();
-            let keys: Vec<LayerKey> = map
-                .iter_mut()
-                .filter_map(|(k, d)| match &mut d.kind {
-                    KindData::Container => None,
-                    KindData::Content(c) => {
-                        c.needs_display |= c.drawer.is_some();
-                        Some(k)
-                    }
-                    KindData::Shape(_) | KindData::Gradient(_) => Some(k),
-                })
-                .collect();
-            for k in keys {
-                mark(&mut map, &mut dirty, k, DirtyBits::CONTENT);
+        let snapping = inner.pixel_snapping.get();
+        inner.mark_all(|d| {
+            let mut bits = if snapping { snap_dependents(d) } else { DirtyBits::empty() };
+            match &mut d.kind {
+                KindData::Container => {}
+                KindData::Content(c) => {
+                    c.needs_display |= c.drawer.is_some();
+                    bits |= DirtyBits::CONTENT;
+                }
+                KindData::Shape(_) | KindData::Gradient(_) => bits |= DirtyBits::CONTENT,
             }
+            bits
+        });
+    }
+
+    /// Whether layer positions and bounds offsets are rounded to device
+    /// pixels (on by default). Snapping keeps axis-aligned edges crisp at
+    /// the cost of moving in whole-pixel steps; it is applied per layer, so
+    /// fractional offsets in deep hierarchies can accumulate up to half a
+    /// pixel per level. Sizes are never snapped.
+    pub fn pixel_snapping(&self) -> bool {
+        self.inner.pixel_snapping.get()
+    }
+
+    pub fn set_pixel_snapping(&self, enabled: bool) {
+        if self.inner.pixel_snapping.replace(enabled) != enabled {
+            self.inner.mark_all(|d| snap_dependents(d));
         }
-        inner.note_dirty();
     }
 
     /// Number of live layers, including the root and detached layers.

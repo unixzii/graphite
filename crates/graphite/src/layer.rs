@@ -228,7 +228,11 @@ impl Layer {
             if old == bounds {
                 return (DirtyBits::empty(), ());
             }
-            let extra = if old.size != bounds.size { size_dependents(d) } else { DirtyBits::empty() };
+            let mut extra = if old.size != bounds.size { size_dependents(d) } else { DirtyBits::empty() };
+            // A custom shadow path is in local space, so it moves with the origin.
+            if old.origin != bounds.origin && d.props.shadow.as_ref().is_some_and(|s| s.path.is_some()) {
+                extra |= DirtyBits::SHADOW;
+            }
             d.props.bounds = bounds;
             (DirtyBits::GEOMETRY | extra, ())
         });

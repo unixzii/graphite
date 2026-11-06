@@ -95,9 +95,16 @@ pub struct Resolved {
     /// The raw properties as set by the user (CA-like backends use these).
     pub props: LayerProps,
     /// Maps box space to the superlayer's local space:
-    /// `T(position) · transform · T(-anchor_point · size)`. Identity for the root.
+    /// `T(position) · transform · T(-anchor_point · size)`, with its
+    /// translation snapped to device pixels when pixel snapping is on.
+    /// Identity for the root.
     pub transform: Affine,
-    /// `-bounds.origin`: translate local-space content by this to reach box space.
+    /// What snapping added to `transform`'s translation, in the superlayer's
+    /// local space. Backends that build geometry from the raw properties
+    /// (Core Animation) add it to `position`.
+    pub snap_offset: Vec2,
+    /// `-bounds.origin` (snapped when pixel snapping is on): translate
+    /// local-space content by this to reach box space.
     pub bounds_offset: Vec2,
     pub mask: Option<LayerId>,
     /// Present iff `props.shadow` is.
@@ -129,14 +136,35 @@ pub enum ResolvedContent {
     Gradient(Gradient),
 }
 
+/// Rounds `v` to the device-pixel grid of `scale`.
+fn snap(v: f64, scale: f64) -> f64 {
+    (v * scale).round() / scale
+}
+
+/// `snap_scale` is the backing scale when pixel snapping is on.
+///
+/// Snapping is local: each layer's translation and bounds offset land on
+/// the device-pixel grid. Under translation-only ancestors that makes every
+/// layer's absolute origin pixel-aligned without having to re-resolve
+/// descendants when an ancestor moves. Sizes are not snapped.
 pub(crate) fn resolve(
     props: &LayerProps,
     contents: ResolvedContentSource<'_>,
     mask: Option<LayerId>,
     is_root: bool,
+    snap_scale: Option<f64>,
 ) -> Resolved {
     let size = props.bounds.size;
-    let transform = if is_root { Affine::IDENTITY } else { props.box_to_parent() };
+    let mut transform = if is_root { Affine::IDENTITY } else { props.box_to_parent() };
+    let mut snap_offset = Vec2::ZERO;
+    let mut bounds_offset = -props.bounds.origin.to_vec2();
+    if let Some(s) = snap_scale.filter(|s| *s > 0.0) {
+        let (tx, ty) = (snap(transform.tx, s), snap(transform.ty, s));
+        snap_offset = Vec2::new(tx - transform.tx, ty - transform.ty);
+        transform.tx = tx;
+        transform.ty = ty;
+        bounds_offset = Vec2::new(snap(bounds_offset.x, s), snap(bounds_offset.y, s));
+    }
     let shadow_shape = props.shadow.as_ref().map(|s| match &s.path {
         Some(p) => ShadowShape::Path(p.clone()),
         None => ShadowShape::RoundedRect {
@@ -156,14 +184,7 @@ pub(crate) fn resolve(
         ResolvedContentSource::Gradient(Some(g)) => ResolvedContent::Gradient(g.clone()),
         ResolvedContentSource::Gradient(None) => ResolvedContent::None,
     };
-    Resolved {
-        props: props.clone(),
-        transform,
-        bounds_offset: -props.bounds.origin.to_vec2(),
-        mask,
-        shadow_shape,
-        content,
-    }
+    Resolved { props: props.clone(), transform, snap_offset, bounds_offset, mask, shadow_shape, content }
 }
 
 pub(crate) enum ResolvedContentSource<'a> {

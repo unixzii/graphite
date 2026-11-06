@@ -14,7 +14,8 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_quartz_core::{
-    CACurrentMediaTime, CALayer, CARenderer, CATransaction, kCARendererColorSpace, kCARendererMetalCommandQueue,
+    CACurrentMediaTime, CALayer, CARenderer, CATransaction, CATransform3D, kCARendererColorSpace,
+    kCARendererMetalCommandQueue,
 };
 
 use crate::convert::{cf_as_object, srgb};
@@ -33,6 +34,33 @@ impl Pixels {
         let i = (y * self.width + x) * 4;
         [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
     }
+}
+
+/// Renders `layer` (which must not have a superlayer) at `scale` device
+/// pixels per point. `width` × `height` is the area to render, in points,
+/// starting at the layer's superlayer-space origin; the result is
+/// `round(width · scale)` × `round(height · scale)` pixels. Set the layer
+/// tree's `contentsScale` to `scale` for crisp contents.
+pub fn render_scaled(layer: &CALayer, width: f64, height: f64, scale: f64) -> Option<Pixels> {
+    let (w, h) = ((width * scale).round() as usize, (height * scale).round() as usize);
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    let wrapper = CALayer::new();
+    wrapper.setAnchorPoint(CGPoint::new(0.0, 0.0));
+    wrapper.setPosition(CGPoint::new(0.0, 0.0));
+    wrapper.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w as f64, h as f64)));
+    // Applied around the wrapper's anchor point, its (unflipped) bottom-left.
+    wrapper.setSublayerTransform(CATransform3D::new_scale(scale, scale, 1.0));
+    wrapper.addSublayer(layer);
+    CATransaction::commit();
+
+    let pixels = render(&wrapper, w, h);
+
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    layer.removeFromSuperlayer();
+    CATransaction::commit();
+    pixels
 }
 
 /// Renders `layer` (which must not have a superlayer) into a `width` ×

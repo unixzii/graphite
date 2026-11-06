@@ -60,6 +60,10 @@ impl Vec2 {
     pub const fn new(x: f64, y: f64) -> Self {
         Vec2 { x, y }
     }
+
+    pub fn to_point(self) -> Point {
+        Point::new(self.x, self.y)
+    }
 }
 
 impl Neg for Vec2 {

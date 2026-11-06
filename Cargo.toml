@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [".", "crates/graphite", "crates/graphite-macos"]
+members = [".", "crates/graphite", "crates/graphite-macos", "crates/graphite-conformance"]
 
 [workspace.package]
 edition = "2024"

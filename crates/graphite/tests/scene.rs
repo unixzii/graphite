@@ -515,3 +515,65 @@ fn releasing_a_detached_layer_requests_a_commit() {
     scene.commit();
     assert_eq!(rec.last().released, vec![id]);
 }
+
+// ───────────────────────────── pixel snapping ─────────────────────────────
+
+fn resolved_of(rec: &Recorder, id: LayerId) -> Resolved {
+    rec.tree().node(id).expect("realized").layer.clone()
+}
+
+#[test]
+fn translations_snap_to_device_pixels() {
+    let (scene, rec) = scene();
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(10.3, 20.7, 10.0, 10.0));
+    layer.set_bounds(Rect::new(0.4, 0.6, 10.0, 10.0));
+    scene.root().add_sublayer(&layer);
+    scene.commit();
+
+    let r = resolved_of(&rec, layer.id());
+    assert!(approx(r.transform.transform_point(Point::ZERO), Point::new(10.0, 21.0)));
+    assert!((r.snap_offset.x + 0.3).abs() < 1e-9 && (r.snap_offset.y - 0.3).abs() < 1e-9);
+    assert_eq!(r.bounds_offset, Vec2::new(0.0, -1.0));
+    assert_eq!(r.props.position, Point::new(15.3, 25.7), "raw properties are untouched");
+
+    scene.set_backing_scale(2.0);
+    scene.commit();
+    let batch = rec.last();
+    assert!(batch.updates.iter().any(|u| u.id == layer.id() && u.changed.contains(DirtyBits::GEOMETRY)));
+    drop(batch);
+    let r = resolved_of(&rec, layer.id());
+    assert!(approx(r.transform.transform_point(Point::ZERO), Point::new(10.5, 20.5)));
+    assert_eq!(r.bounds_offset, Vec2::new(-0.5, -0.5));
+}
+
+#[test]
+fn pixel_snapping_can_be_disabled() {
+    let (scene, rec) = scene();
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(10.3, 0.0, 10.0, 10.0));
+    scene.root().add_sublayer(&layer);
+    scene.commit();
+    assert!(scene.pixel_snapping());
+
+    scene.set_pixel_snapping(false);
+    assert!(scene.needs_commit());
+    scene.commit();
+    let r = resolved_of(&rec, layer.id());
+    assert!(approx(r.transform.transform_point(Point::ZERO), Point::new(10.3, 0.0)));
+    assert_eq!(r.snap_offset, Vec2::ZERO);
+}
+
+#[test]
+fn moving_a_custom_shadow_path_with_the_bounds_origin() {
+    let (scene, rec) = scene();
+    let layer = Layer::new(&scene);
+    let mut shadow = Shadow::new(Color::BLACK, Vec2::ZERO, 1.0);
+    shadow.path = Some(Path::rect(Rect::new(0.0, 0.0, 5.0, 5.0)));
+    layer.set_shadow(Some(shadow));
+    scene.root().add_sublayer(&layer);
+    scene.commit();
+    layer.set_bounds(Rect::new(3.0, 0.0, 0.0, 0.0));
+    scene.commit();
+    assert_eq!(rec.last().updates[0].changed, DirtyBits::GEOMETRY | DirtyBits::SHADOW);
+}
