@@ -1,4 +1,4 @@
-add_library(graphite STATIC
+add_library(graphite
     core/base.c
     core/resource.c
     core/path.c
@@ -8,7 +8,9 @@ add_library(graphite STATIC
     core/resolve.c
 )
 add_library(graphite::graphite ALIAS graphite)
-target_include_directories(graphite PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(graphite PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(graphite PUBLIC c_std_11)
 set_target_properties(graphite PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 if(MSVC)

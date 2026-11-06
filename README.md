@@ -32,3 +32,6 @@ cargo test --workspace
 
 See the [demo guide](examples/demo/README.md), [C build and tests](src/README.md),
 and [contributor documentation](docs/README.md).
+
+For static/shared installation, build switches and `find_package` integration,
+see the [CMake package guide](docs/cmake.md).

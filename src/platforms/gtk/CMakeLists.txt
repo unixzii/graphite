@@ -1,6 +1,6 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.22)
-add_library(graphite_gtk STATIC convert.c draw.c tree.c host.c widget.c offscreen.c)
+add_library(graphite_gtk convert.c draw.c tree.c host.c widget.c offscreen.c)
 add_library(graphite::gtk ALIAS graphite_gtk)
 target_link_libraries(graphite_gtk PUBLIC graphite PkgConfig::GTK4)
 target_compile_features(graphite_gtk PRIVATE c_std_11)
