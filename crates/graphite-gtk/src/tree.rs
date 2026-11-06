@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use graphite::{
-    CommitBatch, Corners, DirtyBits, Gradient, LayerId, LayerUpdate, Path, Rect, Resolved, ResolvedContent, ResourceId,
+    CommitBatch, Corners, DirtyBits, Gradient, LayerId, LayerUpdate, Rect, Resolved, ResolvedContent, ResourceId,
     ShadowShape, ShapeProps, Size, Vec2,
 };
 use gtk::prelude::*;
@@ -347,7 +347,7 @@ fn compose(
     mask: Option<Option<gsk::RenderNode>>,
 ) -> Option<gsk::RenderNode> {
     let p = &layer.props;
-    let size = p.bounds.size;
+    let size = layer.size;
     let bounds = Rect::from_size(size);
     let to_local = convert::offset(layer.bounds_offset);
     let rounded = p.corner_radius > 0.0 && !p.masked_corners.is_empty();
@@ -367,21 +367,18 @@ fn compose(
         // avoids drivers that render blur nodes wrongly (virgl).
         let hides_interior = p.background.is_some_and(|c| c.a >= 1.0) && mask.is_none();
         match shape {
-            ShadowShape::RoundedRect { rect, radius, corners } if hides_interior => s.append_outset_shadow(
+            ShadowShape::RoundedRect { rect, radius, corners, spread } if hides_interior => s.append_outset_shadow(
+                // GSK grows the outline by the spread the same way Core does
+                // (rounded corners grow, square ones stay square).
                 &convert::rounded_rect(*rect, *radius, *corners),
                 &convert::rgba(shadow.color),
                 shadow.offset.x as f32,
                 shadow.offset.y as f32,
-                0.0,
+                *spread as f32,
                 (shadow.blur_sigma * OUTSET_BLUR_PER_SIGMA) as f32,
             ),
             _ => {
-                let path = match shape {
-                    ShadowShape::RoundedRect { rect, radius, corners } => {
-                        convert::path(&Path::rounded_rect(*rect, *radius, *corners), Vec2::ZERO)
-                    }
-                    ShadowShape::Path(path) => convert::path(path, layer.bounds_offset),
-                };
+                let path = convert::path(&shape.path(layer.bounds_offset), Vec2::ZERO);
                 s.save();
                 s.translate(&convert::offset(shadow.offset));
                 let blurred = shadow.blur_sigma > 0.0;
@@ -464,7 +461,7 @@ fn compose(
         s.restore();
     }
 
-    if let Some(border) = p.border.filter(|b| b.width > 0.0) {
+    if let Some(border) = layer.border.filter(|b| b.width > 0.0) {
         let corners = if rounded { p.masked_corners } else { Corners::empty() };
         let outline = convert::rounded_rect(bounds, p.corner_radius, corners);
         let w = border.width as f32;

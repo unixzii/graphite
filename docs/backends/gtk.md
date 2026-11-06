@@ -57,7 +57,8 @@ Notes:
   analytic outset shadow node, which is exact there, cheaper than blurring,
   and the same node GTK uses for CSS `box-shadow`. Otherwise (translucent or
   missing background, a mask, or a custom shadow path) it blurs a fill of
-  the shape, so the shadow also shows under the layer.
+  the shape, so the shadow also shows under the layer. The outset node takes
+  the spread natively and grows corners the same way Core does.
 - Transforms are always built from 2D operations (translate, rotate, skew,
   scale): general affine matrices are decomposed rather than passed as a
   raw matrix (see lessons learned).

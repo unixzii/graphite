@@ -167,14 +167,23 @@ fn mark(map: &mut LayerMap, dirty: &mut Vec<LayerKey>, key: LayerKey, bits: Dirt
     }
 }
 
-/// The groups whose resolved values depend on pixel snapping.
+/// The groups whose resolved values depend on pixel snapping: geometry
+/// (translation, bounds offset, size), the border width, the shadow shape,
+/// and size-dependent contents.
 fn snap_dependents(d: &LayerData) -> DirtyBits {
-    // Custom shadow paths are offset by the (snapped) bounds offset.
-    if d.props.shadow.as_ref().is_some_and(|s| s.path.is_some()) {
-        DirtyBits::GEOMETRY | DirtyBits::SHADOW
-    } else {
-        DirtyBits::GEOMETRY
+    let mut bits = DirtyBits::GEOMETRY;
+    if d.props.border.is_some() {
+        bits |= DirtyBits::APPEARANCE;
     }
+    if d.props.shadow.is_some() {
+        bits |= DirtyBits::SHADOW;
+    }
+    if matches!(&d.kind, KindData::Content(c) if matches!(c.contents, Contents::Image(_)))
+        || matches!(d.kind, KindData::Gradient(_))
+    {
+        bits |= DirtyBits::CONTENT;
+    }
+    bits
 }
 
 /// Updates `attached` for `key`'s whole subtree (sublayers and masks).

@@ -104,7 +104,12 @@ fn size_changes_dirty_dependent_groups() {
     }
     assert_eq!(
         update.layer.shadow_shape,
-        Some(ShadowShape::RoundedRect { rect: Rect::new(0.0, 0.0, 10.0, 10.0), radius: 0.0, corners: Corners::ALL })
+        Some(ShadowShape::RoundedRect {
+            rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+            radius: 0.0,
+            corners: Corners::ALL,
+            spread: 0.0
+        })
     );
 }
 
@@ -576,4 +581,59 @@ fn moving_a_custom_shadow_path_with_the_bounds_origin() {
     layer.set_bounds(Rect::new(3.0, 0.0, 0.0, 0.0));
     scene.commit();
     assert_eq!(rec.last().updates[0].changed, DirtyBits::GEOMETRY | DirtyBits::SHADOW);
+}
+
+#[test]
+fn sizes_and_border_widths_snap_to_device_pixels() {
+    let (scene, rec) = scene();
+    scene.set_backing_scale(4.0 / 3.0);
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(10.0, 10.0, 40.0, 20.0)); // 53.33 × 26.67 device pixels
+    layer.set_border(Some(Border { width: 1.0, color: Color::BLACK }));
+    let rotated = Layer::new(&scene);
+    rotated.set_frame(Rect::new(0.0, 0.0, 40.0, 20.0));
+    rotated.set_transform(Affine::rotate(0.3));
+    scene.root().add_sublayer(&layer);
+    scene.root().add_sublayer(&rotated);
+    scene.commit();
+
+    let s = 4.0 / 3.0;
+    let r = resolved_of(&rec, layer.id());
+    let px = |v: f64| v * s;
+    assert!((px(r.size.width) - 53.0).abs() < 1e-9 && (px(r.size.height) - 27.0).abs() < 1e-9, "{:?}", r.size);
+    let origin = r.transform.transform_point(Point::ZERO);
+    let far = r.transform.transform_point(Point::new(r.size.width, r.size.height));
+    for v in [origin.x, origin.y, far.x, far.y] {
+        assert!((px(v) - px(v).round()).abs() < 1e-9, "edge {v} is not on the pixel grid");
+    }
+    assert_eq!(r.border.map(|b| px(b.width).round()), Some(1.0));
+    assert_eq!(r.props.bounds.size, Size::new(40.0, 20.0), "raw properties are untouched");
+
+    // Only axis-aligned boxes are resized.
+    assert_eq!(resolved_of(&rec, rotated.id()).size, Size::new(40.0, 20.0));
+}
+
+#[test]
+fn shadow_spread_grows_rounded_corners_only() {
+    let (scene, rec) = scene();
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(0.0, 0.0, 40.0, 20.0));
+    layer.set_corner_radius(4.0);
+    layer.set_masked_corners(Corners::TOP_LEFT);
+    layer.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, 2.0).with_spread(3.0)));
+    scene.root().add_sublayer(&layer);
+    scene.commit();
+    let shape = resolved_of(&rec, layer.id()).shadow_shape.unwrap();
+    assert_eq!(
+        shape,
+        ShadowShape::RoundedRect {
+            rect: Rect::new(0.0, 0.0, 40.0, 20.0),
+            radius: 4.0,
+            corners: Corners::TOP_LEFT,
+            spread: 3.0
+        }
+    );
+    assert_eq!(grow_rounded_rect(Rect::new(0.0, 0.0, 40.0, 20.0), 4.0, 3.0), (Rect::new(-3.0, -3.0, 46.0, 26.0), 7.0));
+    assert_eq!(grow_rounded_rect(Rect::new(0.0, 0.0, 40.0, 20.0), 0.0, 3.0).1, 0.0, "square corners stay square");
+    assert_eq!(grow_rounded_rect(Rect::new(0.0, 0.0, 4.0, 4.0), 1.0, -3.0), (Rect::new(2.0, 2.0, 0.0, 0.0), 0.0));
 }

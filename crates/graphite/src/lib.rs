@@ -54,7 +54,9 @@ pub mod testing;
 pub use backend::Backend;
 pub use canvas::{Canvas, DisplayList, DrawOp};
 pub use color::Color;
-pub use commit::{CommitBatch, DirtyBits, LayerId, LayerUpdate, Resolved, ResolvedContent, ShadowShape};
+pub use commit::{
+    CommitBatch, DirtyBits, LayerId, LayerUpdate, Resolved, ResolvedContent, ShadowShape, grow_rounded_rect,
+};
 pub use geometry::{Affine, Point, Rect, Size, TransformKind, Vec2};
 pub use layer::{ContentLayer, DrawInfo, GradientLayer, Layer, ShapeLayer, TypedLayer, WeakLayer};
 pub use props::{Border, Contents, Corners, Gradient, Gravity, LayerKind, LayerProps, Shadow, ShapeProps};

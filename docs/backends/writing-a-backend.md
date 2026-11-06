@@ -46,9 +46,10 @@ Rules:
   as long as children are installed with the two-pass algorithm documented
   on `CommitBatch`.
 - **Use `Resolved`, not raw props**, for anything Core derives: `transform`
-  (already snapped), `bounds_offset`, `shadow_shape`, the image `rect`. If
-  you build geometry from raw `position` the way Core Animation does, add
-  `snap_offset`.
+  (already snapped), `bounds_offset`, `size`, `border`, `shadow_shape`
+  (`ShadowShape::path` for the final outline, or its fields if the platform
+  has a native spread), the image `rect`. If you build geometry from raw
+  `position` the way Core Animation does, add `snap_offset`.
 - **Respect the coordinate spaces.** Background, border, clip, image and
   default shadow are in box space. Sublayers, drawings, paths, custom shadow
   paths and masks are in local space (box space minus `bounds_offset`).

@@ -372,6 +372,65 @@ pub(crate) fn fractional_positions_snap_to_device_pixels(ctx: &mut Ctx) {
     ctx.expect_color_within(&f, "nested row before", p(20.0, top - px / 2.0), CLEAR, 3);
 }
 
+/// With pixel snapping, an axis-aligned box at a fractional position and
+/// size has no partially covered pixels on any edge, and its border is a
+/// whole number of device pixels: scanning across it only finds its fill,
+/// its border, or nothing.
+pub(crate) fn edges_and_borders_are_crisp(ctx: &mut Ctx) {
+    let scene = ctx.scene();
+    let boxed = solid(&scene, Rect::new(10.3, 10.6, 40.45, 20.7), red());
+    boxed.set_border(Some(Border { width: 1.0, color: Color::BLACK }));
+    let parent = Layer::new(&scene);
+    parent.set_frame(Rect::new(5.2, 50.4, 80.0, 40.0));
+    scene.root().add_sublayer(&parent);
+    let child = Layer::new(&scene);
+    child.set_frame(Rect::new(3.3, 2.6, 30.7, 12.9));
+    child.set_background(Some(blue()));
+    parent.add_sublayer(&child);
+    let f = ctx.render(&scene);
+
+    let flat = [CLEAR, RED, BLACK, BLUE].map(|c| c.map(|v| v as f64 / 255.0));
+    let scans = [
+        ("row through the bordered box", p(2.0, 21.0), p(60.0, 21.0)),
+        ("column through the bordered box", p(30.0, 2.0), p(30.0, 40.0)),
+        ("row through the nested box", p(2.0, 59.5), p(60.0, 59.5)),
+        ("column through the nested box", p(20.0, 45.0), p(20.0, 75.0)),
+    ];
+    for (label, from, to) in scans {
+        for (d, c) in f.profile(from, to) {
+            let is_flat = flat.iter().any(|k| k.iter().zip(c).all(|(a, b)| (a - b).abs() <= 10.0 / 255.0));
+            if !is_flat {
+                let rgba = c.map(|v| (v * 255.0).round() as u8);
+                ctx.check(false, || format!("{label}: partially covered pixel {rgba:?} at {d:.2} pt from the start"));
+                break;
+            }
+        }
+    }
+}
+
+/// A spread grows the shadow's shape: it extends past the layer by the
+/// spread (blur aside), whether or not the layer's background hides its
+/// interior.
+pub(crate) fn shadow_spread_grows_the_shape(ctx: &mut Ctx) {
+    // Spread 8: the shadow's edge is 8 pt outside each layer; probes stay
+    // 4 pt or more away from it (blur approximations differ near edges).
+    let scene = ctx.scene();
+    let opaque = solid(&scene, Rect::new(20.0, 20.0, 30.0, 30.0), Color::WHITE);
+    opaque.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, 0.5).with_spread(8.0)));
+    let hollow = Layer::new(&scene);
+    hollow.set_frame(Rect::new(60.0, 60.0, 30.0, 30.0));
+    hollow.set_corner_radius(4.0);
+    hollow.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, 0.5).with_spread(8.0)));
+    scene.root().add_sublayer(&hollow);
+    let f = ctx.render(&scene);
+    ctx.expect_color(&f, "opaque: within the spread", p(35.0, 16.0), BLACK);
+    ctx.expect_color(&f, "opaque: beyond the spread", p(35.0, 6.0), CLEAR);
+    ctx.expect_color(&f, "opaque: the layer", p(35.0, 35.0), WHITE);
+    ctx.expect_color(&f, "hollow: within the spread", p(75.0, 56.0), BLACK);
+    ctx.expect_color(&f, "hollow: beyond the spread", p(75.0, 46.0), CLEAR);
+    ctx.expect_color(&f, "hollow: under the layer", p(75.0, 75.0), BLACK);
+}
+
 pub(crate) fn updates_and_removals_reach_the_screen(ctx: &mut Ctx) {
     let scene = ctx.scene();
     let layer = solid(&scene, Rect::new(0.0, 0.0, 20.0, 20.0), red());

@@ -162,18 +162,30 @@ every backend interprets the model identically. Two coordinate spaces matter:
 | `transform` | Box space to the superlayer's local space: `T(position) · transform · T(-anchor · size)`; identity for the root |
 | `bounds_offset` | `-bounds.origin`; translate local-space content by it to reach box space |
 | `snap_offset` | What pixel snapping added to the translation; backends that use raw `position` (Core Animation) add it |
-| `shadow_shape` | The custom path, or the rounded bounds |
+| `size` | The box size to draw (snapped); use it instead of `props.bounds.size` |
+| `border` | The border with its width snapped; use it instead of `props.border` |
+| `shadow_shape` | The custom path, or the rounded bounds with the spread; `ShadowShape::path` gives the final outline |
 | `content` | Kind-specific contents; image rectangles are already placed according to `gravity` |
 
 ## Pixel snapping
 
-When enabled (the default, `Scene::set_pixel_snapping`), each layer's
-translation and bounds offset are rounded to the device-pixel grid of the
-backing scale. Snapping is per layer: under translation-only ancestors this
-makes absolute origins pixel-aligned without re-resolving descendants when an
-ancestor moves. The cost is that fractional offsets in deep hierarchies can
-accumulate up to half a device pixel per level. Sizes are never snapped.
-Changing the scale or the setting re-resolves every layer's geometry.
+When enabled (the default, `Scene::set_pixel_snapping`), Core rounds to the
+device-pixel grid of the backing scale:
+
+- each layer's translation and bounds offset;
+- its size, when its own transform is a translation, so the far edges land
+  on the grid too (a box keeps at least one device pixel);
+- border widths, to whole device pixels (at least one), so a 1 pt border
+  is a solid line at any scale.
+
+Together these keep every edge of an axis-aligned box crisp at fractional
+scales; without size snapping, a box at 1.333× had one sharp and one blurred
+edge. Snapping is per layer: under translation-only ancestors all edges are
+pixel-aligned without re-resolving descendants when an ancestor moves. The
+costs: fractional offsets in deep hierarchies can accumulate up to half a
+device pixel per level, and a box may be drawn up to one device pixel larger
+or smaller than its bounds. Changing the scale or the setting re-resolves
+every layer's geometry, border, shadow and size-dependent contents.
 
 ## Conventions
 

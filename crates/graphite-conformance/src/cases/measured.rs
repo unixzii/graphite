@@ -46,6 +46,28 @@ fn measure_shadow_blur(ctx: &mut Ctx, background: Option<Color>) {
     );
 }
 
+/// The edge of a spread shadow (its 50 % alpha point) sits `spread` outside
+/// the layer, with or without a background.
+pub(crate) fn shadow_spread_moves_the_edge(ctx: &mut Ctx) {
+    const SPREAD: f64 = 6.0;
+    for (label, background) in [("opaque", Some(Color::WHITE)), ("hollow", None)] {
+        let scene = ctx.scene();
+        let layer = Layer::new(&scene);
+        layer.set_frame(Rect::new(10.0, 10.0, 40.0, 80.0));
+        layer.set_background(background);
+        layer.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, 4.0).with_spread(SPREAD)));
+        scene.root().add_sublayer(&layer);
+        let f = ctx.render(&scene);
+        let profile = f.profile(Point::new(50.0, 50.0), Point::new(95.0, 50.0));
+        ctx.expect_near(
+            &format!("{label}: distance to 50% alpha (= spread)"),
+            crossing(&profile, ALPHA, 0.5),
+            SPREAD,
+            0.6,
+        );
+    }
+}
+
 pub(crate) fn linear_gradient_interpolates_monotonically(ctx: &mut Ctx) {
     let scene = ctx.scene();
     let layer = GradientLayer::new(&scene);

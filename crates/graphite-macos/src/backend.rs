@@ -24,7 +24,7 @@ use std::rc::Rc;
 use block2::RcBlock;
 use graphite::{
     Backend, CommitBatch, DirtyBits, Gradient, LayerId, LayerKind, LayerUpdate, Paint, Rect, ResolvedContent,
-    ResourceId, ShadowShape, ShapeProps, WeakScene,
+    ResourceId, ShapeProps, WeakScene,
 };
 use objc2::rc::Retained;
 use objc2_core_foundation::{
@@ -272,12 +272,12 @@ impl CaBackend {
         let p = &r.props;
         let scale = self.scale;
         // The local space actually used: bounds with the (snapped) origin.
-        let local_bounds = Rect { origin: (-r.bounds_offset).to_point(), size: p.bounds.size };
+        let local_bounds = Rect { origin: (-r.bounds_offset).to_point(), size: r.size };
 
         if changed.contains(DirtyBits::GEOMETRY) {
             let node = self.node(id);
             let outer = &node.outer;
-            outer.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(p.bounds.width(), p.bounds.height())));
+            outer.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(r.size.width, r.size.height)));
             if is_root {
                 outer.setAnchorPoint(CGPoint::new(0.0, 0.0));
                 outer.setPosition(CGPoint::new(0.0, 0.0));
@@ -300,7 +300,7 @@ impl CaBackend {
             body.setBackgroundColor(p.background.map(cg_color).as_deref());
             body.setCornerRadius(p.corner_radius);
             body.setMaskedCorners(ca_corners(p.masked_corners));
-            match p.border {
+            match r.border {
                 Some(b) => {
                     body.setBorderWidth(b.width);
                     body.setBorderColor(Some(&cg_color(b.color)));
@@ -323,13 +323,8 @@ impl CaBackend {
                     // Calibrated by the conformance suite (shadow_blur_matches_sigma):
                     // Core Animation's shadowRadius is the Gaussian σ.
                     outer.setShadowRadius(shadow.blur_sigma);
-                    let path = match shape {
-                        ShadowShape::RoundedRect { rect, radius, corners } => {
-                            cg_path(&graphite::Path::rounded_rect(*rect, *radius, *corners), graphite::Vec2::ZERO)
-                        }
-                        // Local space → outer (box) space.
-                        ShadowShape::Path(path) => cg_path(path, r.bounds_offset),
-                    };
+                    // In outer (box) space, grown by the spread.
+                    let path = cg_path(&shape.path(r.bounds_offset), graphite::Vec2::ZERO);
                     outer.setShadowPath(Some(&path));
                 }
                 _ => {

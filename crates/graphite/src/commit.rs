@@ -3,9 +3,9 @@
 use bitflags::bitflags;
 
 use crate::canvas::DisplayList;
-use crate::geometry::{Affine, Rect, Vec2};
-use crate::props::{Contents, Corners, Gradient, Gravity, LayerKind, LayerProps, ShapeProps};
-use crate::resource::{Image, Path};
+use crate::geometry::{Affine, Rect, Size, TransformKind, Vec2};
+use crate::props::{Border, Contents, Corners, Gradient, Gravity, LayerKind, LayerProps, ShapeProps};
+use crate::resource::{Image, Path, PathEl};
 
 /// Stable identity of a layer, as seen by backends. Never reused within a
 /// scene (the slot generation is part of the id).
@@ -106,6 +106,14 @@ pub struct Resolved {
     /// `-bounds.origin` (snapped when pixel snapping is on): translate
     /// local-space content by this to reach box space.
     pub bounds_offset: Vec2,
+    /// The box size to draw: `bounds.size`, snapped so that the far edges
+    /// land on device pixels too when pixel snapping is on. Use it instead
+    /// of `props.bounds.size`.
+    pub size: Size,
+    /// `props.border` with its width rounded to whole device pixels (at
+    /// least one) when pixel snapping is on. Use it instead of
+    /// `props.border`.
+    pub border: Option<Border>,
     pub mask: Option<LayerId>,
     /// Present iff `props.shadow` is.
     pub shadow_shape: Option<ShadowShape>,
@@ -115,10 +123,51 @@ pub struct Resolved {
 /// The shape that casts a layer's shadow.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShadowShape {
-    /// In box space.
-    RoundedRect { rect: Rect, radius: f64, corners: Corners },
+    /// The layer's rounded box (`rect`, in box space) grown by `spread`.
+    /// Backends with a native spread (GSK's outset shadow) use the fields;
+    /// others use [`ShadowShape::path`].
+    RoundedRect { rect: Rect, radius: f64, corners: Corners, spread: f64 },
     /// In local space (the user-provided `Shadow::path`).
     Path(Path),
+}
+
+impl ShadowShape {
+    /// The final shadow outline in box space (`bounds_offset` moves a custom
+    /// path out of local space).
+    pub fn path(&self, bounds_offset: Vec2) -> Path {
+        match self {
+            ShadowShape::RoundedRect { rect, radius, corners, spread } => {
+                let (rect, radius) = grow_rounded_rect(*rect, *radius, *spread);
+                Path::rounded_rect(rect, radius, *corners)
+            }
+            ShadowShape::Path(path) => Path::from_elements(
+                path.elements()
+                    .iter()
+                    .map(|el| match *el {
+                        PathEl::MoveTo(p) => PathEl::MoveTo(p + bounds_offset),
+                        PathEl::LineTo(p) => PathEl::LineTo(p + bounds_offset),
+                        PathEl::QuadTo(c, p) => PathEl::QuadTo(c + bounds_offset, p + bounds_offset),
+                        PathEl::CurveTo(c1, c2, p) => {
+                            PathEl::CurveTo(c1 + bounds_offset, c2 + bounds_offset, p + bounds_offset)
+                        }
+                        PathEl::Close => PathEl::Close,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+/// `rect` grown by `spread` on every side (never below zero size); a
+/// non-zero radius grows with it (never below zero), a zero radius stays
+/// square. This matches GSK's outset shadows.
+pub fn grow_rounded_rect(rect: Rect, radius: f64, spread: f64) -> (Rect, f64) {
+    let w = (rect.width() + 2.0 * spread).max(0.0);
+    let h = (rect.height() + 2.0 * spread).max(0.0);
+    let cx = rect.min_x() + rect.width() / 2.0;
+    let cy = rect.min_y() + rect.height() / 2.0;
+    let radius = if radius > 0.0 { (radius + spread).max(0.0) } else { 0.0 };
+    (Rect::new(cx - w / 2.0, cy - h / 2.0, w, h), radius)
 }
 
 /// Kind-specific contents, resolved.
@@ -141,12 +190,19 @@ fn snap(v: f64, scale: f64) -> f64 {
     (v * scale).round() / scale
 }
 
+/// Rounds a positive length to whole device pixels, keeping at least one.
+fn snap_length(v: f64, scale: f64) -> f64 {
+    if v <= 0.0 { v } else { (v * scale).round().max(1.0) / scale }
+}
+
 /// `snap_scale` is the backing scale when pixel snapping is on.
 ///
 /// Snapping is local: each layer's translation and bounds offset land on
-/// the device-pixel grid. Under translation-only ancestors that makes every
-/// layer's absolute origin pixel-aligned without having to re-resolve
-/// descendants when an ancestor moves. Sizes are not snapped.
+/// the device-pixel grid, and so does its size when its own transform is a
+/// translation (so all four edges are crisp). Under translation-only
+/// ancestors that makes every layer's edges pixel-aligned without having to
+/// re-resolve descendants when an ancestor moves. Border widths become whole
+/// device pixels.
 pub(crate) fn resolve(
     props: &LayerProps,
     contents: ResolvedContentSource<'_>,
@@ -154,11 +210,22 @@ pub(crate) fn resolve(
     is_root: bool,
     snap_scale: Option<f64>,
 ) -> Resolved {
-    let size = props.bounds.size;
-    let mut transform = if is_root { Affine::IDENTITY } else { props.box_to_parent() };
+    let snap_scale = snap_scale.filter(|s| *s > 0.0);
+    let axis_aligned = props.transform.kind() <= TransformKind::Translate;
+    let size = match snap_scale {
+        Some(s) if axis_aligned => {
+            Size::new(snap_length(props.bounds.width(), s), snap_length(props.bounds.height(), s))
+        }
+        _ => props.bounds.size,
+    };
+    let border = match (props.border, snap_scale) {
+        (Some(b), Some(s)) => Some(Border { width: snap_length(b.width, s), ..b }),
+        (border, _) => border,
+    };
+    let mut transform = if is_root { Affine::IDENTITY } else { props.box_to_parent_with_size(size) };
     let mut snap_offset = Vec2::ZERO;
     let mut bounds_offset = -props.bounds.origin.to_vec2();
-    if let Some(s) = snap_scale.filter(|s| *s > 0.0) {
+    if let Some(s) = snap_scale {
         let (tx, ty) = (snap(transform.tx, s), snap(transform.ty, s));
         snap_offset = Vec2::new(tx - transform.tx, ty - transform.ty);
         transform.tx = tx;
@@ -171,6 +238,7 @@ pub(crate) fn resolve(
             rect: Rect::from_size(size),
             radius: props.corner_radius,
             corners: props.masked_corners,
+            spread: s.spread,
         },
     });
     let content = match contents {
@@ -184,7 +252,7 @@ pub(crate) fn resolve(
         ResolvedContentSource::Gradient(Some(g)) => ResolvedContent::Gradient(g.clone()),
         ResolvedContentSource::Gradient(None) => ResolvedContent::None,
     };
-    Resolved { props: props.clone(), transform, snap_offset, bounds_offset, mask, shadow_shape, content }
+    Resolved { props: props.clone(), transform, snap_offset, bounds_offset, size, border, mask, shadow_shape, content }
 }
 
 pub(crate) enum ResolvedContentSource<'a> {

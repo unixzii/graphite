@@ -51,7 +51,8 @@ pub struct Border {
 ///
 /// Unlike `CALayer`, the shadow is **not** clipped by the layer's own
 /// `masks_to_bounds`, and it is never derived from the alpha of the layer's
-/// contents: its shape is `path` if set, otherwise the layer's rounded bounds.
+/// contents: its shape is `path` if set, otherwise the layer's rounded bounds
+/// grown by `spread`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shadow {
     pub color: Color,
@@ -59,13 +60,21 @@ pub struct Shadow {
     /// Gaussian standard deviation, in points. Backends convert to their own
     /// notion of "blur radius".
     pub blur_sigma: f64,
+    /// Grows (or, when negative, shrinks) the default rounded-bounds shape
+    /// on every side, like CSS `box-shadow`'s spread: rounded corners grow
+    /// with it, square corners stay square. Ignored when `path` is set.
+    pub spread: f64,
     /// Shadow shape in the layer's local (bounds) coordinate space.
     pub path: Option<Path>,
 }
 
 impl Shadow {
     pub fn new(color: Color, offset: Vec2, blur_sigma: f64) -> Self {
-        Shadow { color, offset, blur_sigma, path: None }
+        Shadow { color, offset, blur_sigma, spread: 0.0, path: None }
+    }
+
+    pub fn with_spread(self, spread: f64) -> Self {
+        Shadow { spread, ..self }
     }
 }
 
@@ -116,7 +125,12 @@ impl LayerProps {
     /// Maps the layer's box space (`(0, 0)` = its top-left corner) to its
     /// superlayer's local space: `T(position) · transform · T(-anchor · size)`.
     pub fn box_to_parent(&self) -> Affine {
-        let size = self.bounds.size;
+        self.box_to_parent_with_size(self.bounds.size)
+    }
+
+    /// [`box_to_parent`](Self::box_to_parent) for a box of `size` (the
+    /// snapped size, when pixel snapping changed it).
+    pub fn box_to_parent_with_size(&self, size: Size) -> Affine {
         Affine::translate(Vec2::new(-self.anchor_point.x * size.width, -self.anchor_point.y * size.height))
             .then(self.transform)
             .then(Affine::translate(self.position.to_vec2()))

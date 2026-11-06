@@ -64,7 +64,8 @@ core feature set because the platforms disagree on how they flatten.
 - `corner_radius` with `masked_corners` rounds the background and border;
   `masks_to_bounds` also clips contents and sublayers to that rounded shape.
   There are no per-corner radii (Core Animation cannot express them).
-- `border` is drawn inside the bounds, above contents and sublayers.
+- `border` is drawn inside the bounds, above contents and sublayers. With
+  pixel snapping, its width is rounded to whole device pixels.
 
 ### Shadows: deliberate differences from CALayer
 
@@ -77,6 +78,10 @@ core feature set because the platforms disagree on how they flatten.
   shows through a layer without an opaque background (as with a `CALayer`
   that has a `shadowPath`, and unlike CSS `box-shadow`).
 - `blur_sigma` is a Gaussian standard deviation in points.
+- `spread` (`Shadow::with_spread`) grows the default shape on every side,
+  like CSS `box-shadow`'s spread: rounded corners grow with it, square
+  corners stay square; negative values shrink it. It is ignored for custom
+  paths. Use it for focus rings and soft glows.
 
 ## Masks
 
@@ -144,5 +149,7 @@ changes and cache native counterparts. Build them once and reuse them.
 ## Backing scale and pixel snapping
 
 The backend reports the host's device-pixel ratio through
-`Scene::set_backing_scale`. Pixel snapping (on by default) is described in
+`Scene::set_backing_scale`. Pixel snapping (on by default) rounds positions,
+the sizes of axis-aligned boxes and border widths to device pixels, so UI
+edges stay crisp at fractional scales; see
 [architecture](architecture.md#pixel-snapping).
