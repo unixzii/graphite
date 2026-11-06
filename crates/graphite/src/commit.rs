@@ -54,6 +54,9 @@ bitflags! {
 pub struct CommitBatch {
     /// Set on the first commit only: the scene's root layer.
     pub root: Option<LayerId>,
+    /// Device pixels per point to rasterize at. When it changes, every
+    /// non-container layer comes with [`DirtyBits::CONTENT`].
+    pub backing_scale: f64,
     pub realized: Vec<(LayerId, LayerKind)>,
     pub children: Vec<(LayerId, Vec<LayerId>)>,
     pub updates: Vec<LayerUpdate>,

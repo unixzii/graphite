@@ -458,7 +458,7 @@ impl SceneInner {
 
     /// Phase 2: turn the dirty list into a batch.
     fn build_batch(&self) -> CommitBatch {
-        let mut batch = CommitBatch::default();
+        let mut batch = CommitBatch { backing_scale: self.backing_scale.get(), ..CommitBatch::default() };
         let keys = std::mem::take(&mut *self.dirty.borrow_mut());
         let mut map = self.layers.borrow_mut();
         // Layers whose drawer asked for display again while drawing.
@@ -601,7 +601,9 @@ impl Scene {
     }
 
     /// Called by the backend when the surface's scale changes. Every layer
-    /// with a drawer is redisplayed at the next commit.
+    /// with a drawer is redisplayed at the next commit, and every
+    /// non-container layer is committed with [`DirtyBits::CONTENT`] so that
+    /// backends re-rasterize scale-dependent contents.
     pub fn set_backing_scale(&self, scale: f64) {
         let inner = &*self.inner;
         if inner.backing_scale.replace(scale) == scale {
@@ -613,11 +615,12 @@ impl Scene {
             let keys: Vec<LayerKey> = map
                 .iter_mut()
                 .filter_map(|(k, d)| match &mut d.kind {
-                    KindData::Content(c) if c.drawer.is_some() => {
-                        c.needs_display = true;
+                    KindData::Container => None,
+                    KindData::Content(c) => {
+                        c.needs_display |= c.drawer.is_some();
                         Some(k)
                     }
-                    _ => None,
+                    KindData::Shape(_) | KindData::Gradient(_) => Some(k),
                 })
                 .collect();
             for k in keys {

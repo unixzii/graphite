@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::color::Color;
 use crate::geometry::{Point, Rect, Size};
+use crate::props::Corners;
 
 /// Process-unique identity of a resource. Never reused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -77,6 +78,14 @@ impl Path {
         b.build()
     }
 
+    /// A rectangle whose `corners` are rounded with `radius` (clamped to half
+    /// the shorter side), matching how layers round their bounds.
+    pub fn rounded_rect(r: Rect, radius: f64, corners: Corners) -> Path {
+        let mut b = Path::builder();
+        b.add_rounded_rect(r, radius, corners);
+        b.build()
+    }
+
     pub fn id(&self) -> ResourceId {
         self.0.id
     }
@@ -97,6 +106,9 @@ impl std::fmt::Debug for Path {
         f.debug_struct("Path").field("id", &self.0.id).field("len", &self.0.elements.len()).finish()
     }
 }
+
+/// Control-point distance for a quarter circle of radius 1: 4/3 · (√2 − 1).
+const ELLIPSE_K: f64 = 0.552_284_749_830_793_6;
 
 /// Builds a [`Path`].
 #[derive(Default)]
@@ -138,9 +150,40 @@ impl PathBuilder {
             .close()
     }
 
+    /// Adds a rectangle with rounded `corners`; see [`Path::rounded_rect`].
+    pub fn add_rounded_rect(&mut self, r: Rect, radius: f64, corners: Corners) -> &mut Self {
+        let radius = radius.max(0.0).min(r.width().abs() / 2.0).min(r.height().abs() / 2.0);
+        if radius == 0.0 || corners.is_empty() {
+            return self.add_rect(r);
+        }
+        let k = radius * (1.0 - ELLIPSE_K); // distance from the corner to the control points
+        let rad = |c: Corners| if corners.contains(c) { radius } else { 0.0 };
+        let (tl, tr, br, bl) =
+            (rad(Corners::TOP_LEFT), rad(Corners::TOP_RIGHT), rad(Corners::BOTTOM_RIGHT), rad(Corners::BOTTOM_LEFT));
+        let (x0, y0, x1, y1) = (r.min_x(), r.min_y(), r.max_x(), r.max_y());
+        let kk = |rr: f64| if rr > 0.0 { k } else { 0.0 };
+        self.move_to(Point::new(x0 + tl, y0)).line_to(Point::new(x1 - tr, y0));
+        if tr > 0.0 {
+            self.curve_to(Point::new(x1 - kk(tr), y0), Point::new(x1, y0 + kk(tr)), Point::new(x1, y0 + tr));
+        }
+        self.line_to(Point::new(x1, y1 - br));
+        if br > 0.0 {
+            self.curve_to(Point::new(x1, y1 - kk(br)), Point::new(x1 - kk(br), y1), Point::new(x1 - br, y1));
+        }
+        self.line_to(Point::new(x0 + bl, y1));
+        if bl > 0.0 {
+            self.curve_to(Point::new(x0 + kk(bl), y1), Point::new(x0, y1 - kk(bl)), Point::new(x0, y1 - bl));
+        }
+        self.line_to(Point::new(x0, y0 + tl));
+        if tl > 0.0 {
+            self.curve_to(Point::new(x0, y0 + kk(tl)), Point::new(x0 + kk(tl), y0), Point::new(x0 + tl, y0));
+        }
+        self.close()
+    }
+
     /// Adds an ellipse inscribed in `r`, approximated with four cubic Béziers.
     pub fn add_ellipse(&mut self, r: Rect) -> &mut Self {
-        const K: f64 = 0.552_284_749_830_793_6; // 4/3 * (sqrt(2) - 1)
+        const K: f64 = ELLIPSE_K;
         let (rx, ry) = (r.width() / 2.0, r.height() / 2.0);
         let (cx, cy) = (r.min_x() + rx, r.min_y() + ry);
         let (ox, oy) = (rx * K, ry * K);
@@ -319,5 +362,23 @@ pub struct Stroke {
 impl Stroke {
     pub fn new(paint: impl Into<Paint>, width: f64) -> Self {
         Stroke { paint: paint.into(), style: StrokeStyle::with_width(width) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rounded_rect_clamps_and_skips_square_corners() {
+        let r = Rect::new(0.0, 0.0, 20.0, 10.0);
+        let all = Path::rounded_rect(r, 100.0, Corners::ALL);
+        // move + 4 × (line + curve) + close
+        assert_eq!(all.elements().len(), 10);
+        assert_eq!(all.elements()[0], PathEl::MoveTo(Point::new(5.0, 0.0)), "radius clamped to h/2");
+        let top = Path::rounded_rect(r, 4.0, Corners::TOP_LEFT | Corners::TOP_RIGHT);
+        let curves = top.elements().iter().filter(|e| matches!(e, PathEl::CurveTo(..))).count();
+        assert_eq!(curves, 2);
+        assert_eq!(Path::rounded_rect(r, 0.0, Corners::ALL).elements().len(), 5);
     }
 }

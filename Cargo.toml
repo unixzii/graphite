@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/graphite"]
+members = [".", "crates/graphite", "crates/graphite-macos"]
 
 [workspace.package]
 edition = "2024"
@@ -10,3 +10,24 @@ rust-version = "1.88"
 [workspace.dependencies]
 slotmap = "1.0"
 bitflags = "2"
+
+# The root package only hosts the project-level examples in `examples/`.
+[package]
+name = "graphite-examples"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dev-dependencies]
+graphite = { path = "crates/graphite" }
+png = "0.18"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+graphite-macos = { path = "crates/graphite-macos" }
+objc2 = "0.6.5"
+objc2-foundation = "0.3.2"
+objc2-app-kit = "0.3.2"
+objc2-quartz-core = "0.3.2"
+block2 = "0.6.2"
