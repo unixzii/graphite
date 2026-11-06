@@ -1,5 +1,8 @@
-//! A window showing the main layer features, animated at 60 Hz, on the
-//! native backend of the current platform.
+//! A window showing everything graphite supports so far — layer geometry
+//! and nested transforms, clipping and scrolling, corners, borders, shadows,
+//! masks, group opacity and z-order, images, shapes, gradients and
+//! immediate-mode drawing — animated at 60 Hz on the native backend of the
+//! current platform.
 //!
 //! ```sh
 //! cargo run --example demo                        # open a window
@@ -20,8 +23,10 @@ use graphite::Scene;
 
 use crate::scene::Demo;
 
-/// Frames per animation cycle.
-const CYCLE: u32 = 120;
+/// Ticks per second the shells aim for.
+const FPS: f64 = 60.0;
+/// The moment `--snapshot` renders, in seconds.
+const SNAPSHOT_TIME: f64 = 2.4;
 /// Frames animated by `--selftest`.
 const SELFTEST_FRAMES: u32 = 60;
 
@@ -63,7 +68,7 @@ impl App {
         if self.frame > 1 && self.scene.needs_commit() {
             self.unflushed.push(self.frame);
         }
-        self.demo.pose((self.frame % CYCLE) as f64 / CYCLE as f64);
+        self.demo.update(self.frame as f64 / FPS);
 
         if self.selftest && self.frame == SELFTEST_FRAMES {
             println!(
@@ -117,8 +122,8 @@ fn main() -> ExitCode {
         }
         Ok(Command::Window { selftest }) => platform::run(App::new(selftest)),
         Ok(Command::Snapshot(path)) => {
-            let app = App::new(false);
-            app.demo.pose(0.7);
+            let mut app = App::new(false);
+            app.demo.update(SNAPSHOT_TIME);
             let Some(image) = platform::snapshot(&app.scene) else {
                 eprintln!("offscreen rendering is not available on this platform");
                 return ExitCode::FAILURE;

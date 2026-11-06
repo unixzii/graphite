@@ -34,7 +34,7 @@ pub fn run(app: App) -> ExitCode {
     };
     // SAFETY: we keep a strong reference to the window.
     unsafe { window.setReleasedWhenClosed(false) };
-    window.setTitle(ns_string!("graphite demo · Core Animation"));
+    window.setTitle(ns_string!("graphite demo (Core Animation)"));
 
     let content = window.contentView().expect("a window has a content view");
     let _host = graphite_macos::attach_to_view(app.scene(), &content, mtm);

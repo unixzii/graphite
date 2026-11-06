@@ -26,7 +26,7 @@ pub fn run(app: App) -> ExitCode {
     }
     let size = app.scene().root().bounds().size;
     let window = gtk::Window::new();
-    window.set_title(Some("graphite demo · GTK"));
+    window.set_title(Some("graphite demo (GTK)"));
     window.set_default_size(size.width as i32, size.height as i32);
     let host = graphite_gtk::attach(app.scene());
     let widget = host.widget().expect("attach creates a widget").clone();
