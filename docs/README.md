@@ -13,6 +13,7 @@ Start here if you are new to the project.
 | [Windows backend](backends/windows.md) | see how layers map onto composition visuals, how pixels are read back from DWM, and how to test on Windows |
 | [Platform notes](platform-notes.md) | check verified facts about each platform's rendering stack and the capability matrix |
 | [Status and roadmap](roadmap.md) | see what is done, what is next, and the open questions |
+| [C migration plan](c-migration.md) | review the agreed C core/backend boundaries, ownership rules, and migration stages |
 
 API reference: `cargo doc --workspace --no-deps --open`.
 
