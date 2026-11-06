@@ -19,6 +19,7 @@ macro_rules! __with_case_names {
         $crate::$callback!($($args)*;
             semantic geometry_is_y_down
             semantic transform_rotates_around_the_anchor_point
+            semantic skew_transforms_apply
             semantic z_order_follows_sublayer_order
             semantic hidden_hides_the_subtree
             semantic masks_to_bounds_clips_sublayers

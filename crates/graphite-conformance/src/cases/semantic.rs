@@ -33,6 +33,19 @@ pub(crate) fn transform_rotates_around_the_anchor_point(ctx: &mut Ctx) {
     ctx.expect_color(&f, "former bar end", p(35.0, 50.0), CLEAR);
 }
 
+/// A general affine transform (here a shear around the anchor point): the
+/// lower half of a bar slides right, the upper half left.
+pub(crate) fn skew_transforms_apply(ctx: &mut Ctx) {
+    let scene = ctx.scene();
+    let bar = solid(&scene, Rect::new(30.0, 40.0, 40.0, 20.0), red());
+    bar.set_transform(Affine { a: 1.0, b: 0.0, c: 1.0, d: 1.0, tx: 0.0, ty: 0.0 });
+    let f = ctx.render(&scene);
+    ctx.expect_color(&f, "lower half, slid right", p(75.0, 58.0), RED);
+    ctx.expect_color(&f, "upper half, slid left", p(25.0, 42.0), RED);
+    ctx.expect_color(&f, "right of the upper half", p(75.0, 42.0), CLEAR);
+    ctx.expect_color(&f, "left of the lower half", p(25.0, 58.0), CLEAR);
+}
+
 pub(crate) fn z_order_follows_sublayer_order(ctx: &mut Ctx) {
     let scene = ctx.scene();
     solid(&scene, Rect::new(10.0, 10.0, 40.0, 40.0), red());

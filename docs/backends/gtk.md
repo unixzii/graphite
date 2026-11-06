@@ -58,8 +58,9 @@ Notes:
   and the same node GTK uses for CSS `box-shadow`. Otherwise (translucent or
   missing background, a mask, or a custom shadow path) it blurs a fill of
   the shape, so the shadow also shows under the layer.
-- Transforms use the cheapest `GskTransform` category (translate,
-  scale-translate, or matrix).
+- Transforms are always built from 2D operations (translate, rotate, skew,
+  scale): general affine matrices are decomposed rather than passed as a
+  raw matrix (see lessons learned).
 - Drawings are clipped to the layer's bounds, like a bitmap backing store
   (and like Core Animation). Shapes and images are not clipped.
 - Unlike Core Animation, shapes support gradient paints natively. The
@@ -115,7 +116,7 @@ cargo run --example demo -- --selftest
 ```
 
 - **Conformance** runs every case with each selected renderer (`gl`,
-  `vulkan`, `cairo`). All cases pass with Vulkan and GL on conformant
+  `vulkan`, `cairo`). All cases pass with all three renderers on conformant
   drivers.
 
 On a QEMU VM with virgl/Venus (see lessons learned), use software drivers
@@ -151,6 +152,19 @@ it with `GSK_RENDERER=vulkan`.
   (about one run in two of the suite has a failure; `GSK_DEBUG=sync` reduces
   this but does not fix it). Plain color nodes do not trigger it; lavapipe
   never does (15 of 15 clean runs).
+- **Never pass a raw matrix to `GskTransform`.** `gsk_transform_matrix` is
+  categorized as possibly 3D. The Cairo renderer cannot draw such nodes and
+  paints them hot pink (`#FF69B4`), and the GPU renderers take slower paths.
+  `convert::transform` decomposes affine matrices into translate · rotate ·
+  skew · scale (checked by a debug assertion); the `skew_transforms_apply`
+  case covers the skew.
+- **Vulkan windows flicker on Venus.** GTK itself refuses Vulkan there ("no
+  dmabuf support") and falls back to GL; forcing `GSK_RENDERER=vulkan`
+  bypasses that check. Logs show nothing wrong, the self-test commits every
+  frame, and the same node trees render steadily with GL. Together with the
+  stale offscreen frames above, this points at the driver. Compare with a
+  pure GTK app (`GSK_RENDERER=vulkan gtk4-widget-factory`) or with lavapipe
+  (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`).
 - **Download before unrealizing.** A GPU texture's contents belong to the
   renderer's device. Unrealizing first produced empty frames.
 - **A busy frame clock hides scheduling bugs.** Right after a window maps,

@@ -22,20 +22,47 @@ pub(crate) fn offset(v: Vec2) -> graphene::Point {
     graphene::Point::new(v.x as f32, v.y as f32)
 }
 
-/// The cheapest `GskTransform` for `m`: GSK renders translations and
-/// scales much faster than general matrices.
+/// The cheapest `GskTransform` for `m`, always categorized as 2D.
+///
+/// A raw `gsk_transform_matrix` is categorized as possibly 3D, which the
+/// Cairo renderer cannot draw (it paints the node hot pink) and the GPU
+/// renderers handle less efficiently. General affine matrices are therefore
+/// decomposed into translate · rotate · skew · scale.
 pub(crate) fn transform(m: Affine) -> Option<gsk::Transform> {
-    match m.kind() {
-        TransformKind::Identity => None,
-        TransformKind::Translate => Some(gsk::Transform::new().translate(&offset(Vec2::new(m.tx, m.ty)))),
-        TransformKind::ScaleTranslate => {
-            Some(gsk::Transform::new().translate(&offset(Vec2::new(m.tx, m.ty))).scale(m.a as f32, m.d as f32))
-        }
+    let origin = offset(Vec2::new(m.tx, m.ty));
+    let t = match m.kind() {
+        TransformKind::Identity => return None,
+        TransformKind::Translate => gsk::Transform::new().translate(&origin),
+        TransformKind::ScaleTranslate => gsk::Transform::new().translate(&origin).scale(m.a as f32, m.d as f32),
         TransformKind::Affine => {
-            // graphene: x' = xx·x + xy·y + x0, y' = yx·x + yy·y + y0.
-            Some(gsk::Transform::new().matrix(&graphene::Matrix::from_2d(m.a, m.b, m.c, m.d, m.tx, m.ty)))
+            // Rotating the first column onto the x axis leaves an upper
+            // triangular matrix [sx shear; 0 sy] = skew(shear / sy) · scale.
+            let sx = m.a.hypot(m.b);
+            let sy = m.determinant() / sx;
+            if sx == 0.0 || sy == 0.0 || !sy.is_finite() {
+                // Degenerate (draws nothing); keep it exact.
+                return Some(gsk::Transform::new().matrix(&graphene::Matrix::from_2d(m.a, m.b, m.c, m.d, m.tx, m.ty)));
+            }
+            let angle = m.b.atan2(m.a);
+            let shear = (m.a * m.c + m.b * m.d) / sx;
+            let mut t = gsk::Transform::new().translate(&origin).rotate(angle.to_degrees() as f32);
+            if shear != 0.0 {
+                t = t.skew((shear / sy).atan().to_degrees() as f32, 0.0);
+            }
+            t.scale(sx as f32, sy as f32)
         }
-    }
+    };
+    debug_assert!(
+        {
+            let (xx, yx, xy, yy, dx, dy) = t.to_2d();
+            let tol = 1e-3 * (1.0 + m.a.abs() + m.b.abs() + m.c.abs() + m.d.abs());
+            [(xx, m.a), (yx, m.b), (xy, m.c), (yy, m.d)].iter().all(|(g, e)| (*g as f64 - e).abs() <= tol)
+                && (dx as f64 - m.tx).abs() <= 1e-2
+                && (dy as f64 - m.ty).abs() <= 1e-2
+        },
+        "GskTransform decomposition does not match {m:?}"
+    );
+    Some(t)
 }
 
 /// A rectangle with rounded `corners`, radii clamped to half the shorter

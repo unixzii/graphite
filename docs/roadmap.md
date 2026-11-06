@@ -12,8 +12,8 @@
 - **GTK backend** (Linux): per-layer render-node caching, DisplayList → GSK
   nodes (no Cairo), frame-clock commits in the layout phase, and
   fractional-scale tracking. Passes the whole conformance suite with the
-  Vulkan and GL renderers, and has a real-window test.
-- **Conformance suite**: 23 semantic and 6 measured cases at 1×, 1.5× and 2×;
+  Vulkan, GL and Cairo renderers, and has a real-window test.
+- **Conformance suite**: 24 semantic and 6 measured cases at 1×, 1.5× and 2×;
   macOS and GTK pass all of them. Shadow σ is calibrated for both backends.
   `run_main` serves main-thread-bound backends.
 - **Platform-neutral demo** with `--selftest` and `--snapshot`.

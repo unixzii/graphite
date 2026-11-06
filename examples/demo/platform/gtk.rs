@@ -50,9 +50,14 @@ pub fn snapshot(scene: &Scene) -> Option<Rgba> {
     let host = graphite_gtk::attach_offscreen(scene);
     scene.set_backing_scale(1.0);
     scene.commit();
-    // Vulkan is GTK's default on Wayland; fall back to GL.
-    let px = offscreen::render(&host, RendererKind::Vulkan, 1.0)
-        .or_else(|_| offscreen::render(&host, RendererKind::Gl, 1.0))
-        .ok()?;
+    // Honor GSK_RENDERER like windows do; otherwise Vulkan (GTK's default on
+    // Wayland), falling back to GL.
+    let px = match std::env::var("GSK_RENDERER").as_deref() {
+        Ok("cairo") => offscreen::render(&host, RendererKind::Cairo, 1.0),
+        Ok("gl" | "ngl" | "opengl") => offscreen::render(&host, RendererKind::Gl, 1.0),
+        _ => offscreen::render(&host, RendererKind::Vulkan, 1.0)
+            .or_else(|_| offscreen::render(&host, RendererKind::Gl, 1.0)),
+    }
+    .ok()?;
     Some(Rgba { width: px.width, height: px.height, data: px.data })
 }
