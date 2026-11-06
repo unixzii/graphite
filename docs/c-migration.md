@@ -1,8 +1,9 @@
 # C migration: decisions and implementation plan
 
-Status: stages 1 and 2 committed; stage 3 Scene/Layer implementation and its
-recording-backend tests are ready for review in `src/`. Native backend migration
-has not started. See
+Status: stages 1–3 committed. The C conformance suite and macOS backend are
+implemented and validated against the unchanged Rust backend; GTK/Windows ports
+remain future work. The direct macOS port was used instead of a temporary Rust
+backend adapter. See
 [interface contracts](../src/CONTRACT.md) and [implementation status](../src/README.md).
 
 Planning baseline: `4e612d7135cf39a47fd3ad6e9b12dbfe7cd7887e` (2026-11-06).

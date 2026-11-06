@@ -15,6 +15,9 @@ Start here if you are new to the project.
 | [Status and roadmap](roadmap.md) | see what is done, what is next, and the open questions |
 | [C migration plan](c-migration.md) | review the agreed C core/backend boundaries, ownership rules, and migration stages |
 
+[C conformance](../conformance/README.md) documents the translated suite and
+macOS capture comparison against the Rust baseline.
+
 API reference: `cargo doc --workspace --no-deps --open`.
 
 ## Conventions for contributors

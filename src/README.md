@@ -2,8 +2,9 @@
 
 The C and Rust implementations coexist. CMake currently builds a static
 `graphite::graphite` target containing immutable resources, Canvas recording,
-Scene/Layer and the commit interface. Native backends and text remain planned
-work; this target cannot yet replace the complete Rust rendering library.
+Scene/Layer and the commit interface. On macOS, `graphite::macos` provides the
+native Core Animation backend. GTK/Windows backend migration and text remain
+future work.
 
 ## Build and test
 
@@ -21,7 +22,8 @@ them. Headers are also compatible with C++ and Objective-C.
 
 ## Formatting and test harness
 
-Use **clang-format 18** for all first-party C-family sources/headers in `src/`, `include/`, and `tests/`.
+Use **clang-format 18** for all first-party C-family sources/headers in `src/`,
+`include/`, `tests/`, and `conformance/` (including Objective-C).
 The root `.clang-format` enforces multiline function/control-flow bodies and
 separation between definitions. Vendored files are excluded and stay unchanged.
 If needed, configure `-DCLANG_FORMAT=/path/to/clang-format-18`.
@@ -58,6 +60,8 @@ uses the harness so its checks remain active in Release.
 
 - `include/graphite/`: public C headers.
 - `src/core/`: C implementation and private headers.
+- `src/platforms/macos/`: Objective-C Core Animation backend and hosting.
+- `conformance/`: backend-neutral cases, measurements and comparison tools.
 - `tests/`: test harness, resource/Scene suites and lifecycle example.
 - `vendor/`: pinned third-party sources and license information.
 
@@ -105,7 +109,7 @@ On macOS arm64 with AppleClang 21:
   apply, external handles after teardown, and iterative release of a 4096-level tree.
 - The Scene tests also report zero leaked bytes under macOS `leaks --atExit`.
   Clang's static analyzer reports no diagnostics for scene.c/layer.c/resolve.c.
-- All 133 currently declared public entry points have library definitions.
+- All 133 core public entry points have library definitions.
 - The unchanged Rust core suite passed: 6 unit tests, 38 Scene tests and 1 doctest.
   The C recorder checks corresponding representative behaviors; this is not a
   claim that a native renderer or every Rust test has been mechanically ported.
@@ -114,8 +118,15 @@ On macOS arm64 with AppleClang 21:
   formatting and an intentionally failing check compiled with `NDEBUG`, including
   failure diagnostics; listing/filtering/unknown-case behavior also passed.
 
-Linux and Windows runtime/compiler validation has not yet been performed.
-This is not rendering, performance, or native-backend conformance evidence.
+Subsequent macOS validation passed Debug ASan/UBSan and Release `check`: format,
+core suites, six native host/offscreen cases, four conformance helper cases,
+Python comparison tests, and all 33 rendering cases. Both builds' 111 captures
+exactly match the unchanged Rust backend's decoded RGBA pixels. All 39
+measurement-log groups also match. See reproducible commands and scope in
+[conformance validation](../conformance/README.md#macos-migration-validation).
+
+Linux and Windows runtime/compiler validation has not yet been performed. These
+checks do not establish performance parity or pixel equality on other OS versions.
 
 ## Scene implementation notes
 

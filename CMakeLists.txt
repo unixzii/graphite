@@ -4,9 +4,14 @@ project(graphite VERSION 0.0.1 LANGUAGES C)
 include(CTest)
 option(GRAPHITE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
 add_subdirectory(src)
+if(APPLE)
+    enable_language(OBJC)
+    add_subdirectory(src/platforms/macos)
+endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+add_subdirectory(conformance)
 
 set(CLANG_FORMAT "" CACHE FILEPATH "Path to clang-format 18")
 add_custom_target(format-check
@@ -27,4 +32,8 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         DEPENDS graphite_resource_tests graphite_scene_tests format-check
         USES_TERMINAL)
+    add_dependencies(check graphite_conformance_tests)
+    if(TARGET graphite_macos_conformance)
+        add_dependencies(check graphite_macos_conformance graphite_macos_tests)
+    endif()
 endif()
