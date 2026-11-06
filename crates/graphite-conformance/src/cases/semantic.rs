@@ -315,6 +315,20 @@ pub(crate) fn shadow_offset_is_y_down_and_escapes_masks_to_bounds(ctx: &mut Ctx)
     ctx.expect_color(&f, "nothing above", p(40.0, 20.0), CLEAR);
 }
 
+/// The shadow's shape is the whole rounded bounds, so it shows through a
+/// layer that does not cover it (like a `CALayer` with a `shadowPath`).
+pub(crate) fn shadow_is_drawn_under_layers_without_background(ctx: &mut Ctx) {
+    let scene = ctx.scene();
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(30.0, 30.0, 40.0, 40.0));
+    layer.set_corner_radius(6.0);
+    layer.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, 0.5)));
+    scene.root().add_sublayer(&layer);
+    let f = ctx.render(&scene);
+    ctx.expect_color(&f, "under the layer", p(50.0, 50.0), BLACK);
+    ctx.expect_color(&f, "outside the shadow", p(50.0, 20.0), CLEAR);
+}
+
 pub(crate) fn fractional_positions_snap_to_device_pixels(ctx: &mut Ctx) {
     let s = ctx.scale();
     let snap = |v: f64| (v * s).round() / s;

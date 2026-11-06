@@ -25,7 +25,10 @@
 //! graphite_conformance::conformance_tests!(my_backend::ConformanceHarness);
 //! ```
 //!
-//! Every case runs at 1× and 2× backing scale.
+//! Backends bound to the main thread use [`run_main`] from a test target
+//! with `harness = false` instead.
+//!
+//! Every case runs at 1×, 1.5× and 2× backing scale.
 
 mod cases;
 mod ctx;
@@ -71,8 +74,8 @@ pub struct Case {
     pub run: fn(&mut Ctx),
 }
 
-/// Backing scales every case runs at.
-pub const SCALES: [f64; 2] = [1.0, 2.0];
+/// Backing scales every case runs at, including a fractional one.
+pub const SCALES: [f64; 3] = [1.0, 1.5, 2.0];
 
 /// All cases.
 pub fn cases() -> &'static [Case] {
@@ -105,6 +108,43 @@ pub fn run_named(harness: &dyn Harness, name: &str) {
             ctx::output_dir(harness.name()).display()
         );
     }
+}
+
+/// Runs every case with every harness, sequentially on the calling thread,
+/// and reports like libtest. For backends whose objects are bound to the
+/// main thread (GTK): use it from a test target with `harness = false`.
+///
+/// Positional command-line arguments filter cases by substring (matched
+/// against `<harness>::<case>`); flags such as `--nocapture` are ignored.
+pub fn run_main(harnesses: &[&dyn Harness]) -> std::process::ExitCode {
+    let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
+    let selected: Vec<(&dyn Harness, &Case)> = harnesses
+        .iter()
+        .flat_map(|h| cases().iter().map(move |c| (*h, c)))
+        .filter(|(h, c)| {
+            let full = format!("{}::{}", h.name(), c.name);
+            filters.is_empty() || filters.iter().any(|f| full.contains(f.as_str()))
+        })
+        .collect();
+    println!("\nrunning {} conformance cases", selected.len());
+    let mut failed = Vec::new();
+    for (harness, case) in &selected {
+        let full = format!("{}::{}", harness.name(), case.name);
+        let failures = run(*harness, case);
+        if failures.is_empty() {
+            println!("test {full} ... ok");
+        } else {
+            println!("test {full} ... FAILED");
+            failed.push((full, failures));
+        }
+    }
+    for (full, failures) in &failed {
+        println!("\n---- {full} ----\n  - {}", failures.join("\n  - "));
+    }
+    let passed = selected.len() - failed.len();
+    let verdict = if failed.is_empty() { "ok" } else { "FAILED" };
+    println!("\ntest result: {verdict}. {passed} passed; {} failed\n", failed.len());
+    if failed.is_empty() { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::FAILURE }
 }
 
 /// Expands to one `#[test]` per conformance case, each running the case

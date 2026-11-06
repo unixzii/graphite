@@ -37,9 +37,11 @@ macro_rules! __with_case_names {
             semantic linear_gradient_unit_space_is_y_down
             semantic radial_gradient_is_centered
             semantic shadow_offset_is_y_down_and_escapes_masks_to_bounds
+            semantic shadow_is_drawn_under_layers_without_background
             semantic fractional_positions_snap_to_device_pixels
             semantic updates_and_removals_reach_the_screen
             measured shadow_blur_matches_sigma
+            measured shadow_blur_matches_sigma_without_background
             measured linear_gradient_interpolates_monotonically
             measured stroke_width_matches
             measured corner_radius_follows_a_circular_arc

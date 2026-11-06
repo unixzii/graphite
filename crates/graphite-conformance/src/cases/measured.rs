@@ -17,9 +17,22 @@ const ALPHA: usize = 3;
 /// Outside a straight edge, a Gaussian shadow of standard deviation σ has
 /// alpha `Φ(-d/σ)` at distance `d`: 15.87 % at d = σ and 2.28 % at d = 2σ.
 pub(crate) fn shadow_blur_matches_sigma(ctx: &mut Ctx) {
+    measure_shadow_blur(ctx, Some(Color::WHITE));
+}
+
+/// Same measurement without a background: backends may draw the shadow
+/// differently when its interior can show (GSK: blur vs outset shadow).
+pub(crate) fn shadow_blur_matches_sigma_without_background(ctx: &mut Ctx) {
+    measure_shadow_blur(ctx, None);
+}
+
+fn measure_shadow_blur(ctx: &mut Ctx, background: Option<Color>) {
     const SIGMA: f64 = 4.0;
     let scene = ctx.scene();
-    let layer = solid(&scene, Rect::new(10.0, 10.0, 40.0, 80.0), Color::WHITE);
+    let layer = Layer::new(&scene);
+    layer.set_frame(Rect::new(10.0, 10.0, 40.0, 80.0));
+    layer.set_background(background);
+    scene.root().add_sublayer(&layer);
     layer.set_shadow(Some(Shadow::new(Color::BLACK, Vec2::ZERO, SIGMA)));
     let f = ctx.render(&scene);
     // Outward from the right edge, far from the corners.
