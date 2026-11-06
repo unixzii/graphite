@@ -1,9 +1,10 @@
 //! Core Animation backend for [graphite].
 //!
 //! Each graphite layer is mapped onto native `CALayer`s (see the
-//! `backend` module docs for the exact structure); drawings are replayed
-//! into CoreGraphics bitmaps; commits are scheduled on the current run loop
-//! right before Core Animation's own commit.
+//! `backend` module docs for the exact structure); drawn layers are
+//! displayed by Core Animation through a `CALayerDelegate` that replays the
+//! drawer's recording into the layer's backing store; commits are scheduled
+//! on the current run loop right before Core Animation's own commit.
 //!
 //! A scene is presented through a [`SceneHost`]:
 //! - [`attach_to_view`] creates a layer-hosting `NSView` that fills a parent
@@ -16,6 +17,7 @@
 
 mod backend;
 mod convert;
+mod delegate;
 mod draw;
 mod host;
 pub mod offscreen;

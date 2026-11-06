@@ -171,8 +171,8 @@ Measured on the development VM (Windows 11 build 26300, ARM64 under QEMU,
 VirtIO GPU, scale 1.75), release build: both demo scenes, `showcase` with
 nearly the whole window animating and `ui` with a few small animated
 regions, run at the full 60 Hz tick rate. Composition renders in DWM; the
-application thread only applies property changes and rasterizes drawings
-whose display list changed. Per-frame costs have not been profiled yet.
+application thread only applies property changes and redraws drawings
+whose `(display version, bounds, scale)` changed. Per-frame costs have not been profiled yet.
 
 ## Lessons learned
 
@@ -219,7 +219,9 @@ whose display list changed. Per-frame costs have not been profiled yet.
 - **Device loss is not handled.** After a Direct3D device loss, drawing
   surfaces lose their contents. The fix is to listen to
   `CompositionGraphicsDevice.RenderingDeviceReplaced`, recreate surfaces
-  and re-rasterize drawings, images and shadow masks.
+  and re-rasterize drawings, images and shadow masks. The backend keeps the
+  batch's `Drawers` so that drawings can be redrawn from that event without
+  waiting for a commit.
 - **Masks only cover the masked layer's box**: content outside it is
   hidden even where the mask layer extends. The mask's visual surface
   renders at the visual's own units, so mask edges may be soft at high

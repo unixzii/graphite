@@ -23,12 +23,15 @@ use crate::commit::{DirtyBits, LayerId};
 use crate::geometry::{Affine, Point, Rect};
 use crate::props::{Border, Contents, Corners, Gradient, Gravity, LayerKind, LayerProps, Shadow, ShapeProps};
 use crate::resource::{FillRule, Paint, Path, Stroke};
-use crate::scene::{ContentData, Drawer, KindData, LayerData, LayerKey, Parent, Scene, SceneInner};
+use crate::scene::{
+    ContentData, Drawer, KindData, LayerData, LayerKey, Parent, Scene, SceneInner, size_dependent_content,
+};
 
 /// Passed to a [`ContentLayer`]'s drawer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawInfo {
-    /// The layer's bounds: the area to draw, in the layer's local space.
+    /// The area to draw, in the layer's local space: the layer's bounds
+    /// (snapped to device pixels when pixel snapping is on).
     pub bounds: Rect,
     /// Device pixels per point the result will be rasterized at. Drawings are
     /// recorded in points; this is informational (e.g. for hairlines).
@@ -48,8 +51,7 @@ fn size_dependents(d: &LayerData) -> DirtyBits {
         bits |= DirtyBits::SHADOW;
     }
     match &d.kind {
-        KindData::Content(c) if matches!(c.contents, Contents::Image(_)) => bits |= DirtyBits::CONTENT,
-        KindData::Gradient(_) => bits |= DirtyBits::CONTENT,
+        _ if size_dependent_content(d) => bits |= DirtyBits::CONTENT,
         _ => {}
     }
     bits
@@ -232,6 +234,10 @@ impl Layer {
             // A custom shadow path is in local space, so it moves with the origin.
             if old.origin != bounds.origin && d.props.shadow.as_ref().is_some_and(|s| s.path.is_some()) {
                 extra |= DirtyBits::SHADOW;
+            }
+            // So does a drawing, which is drawn over the bounds.
+            if old.origin != bounds.origin && matches!(&d.kind, KindData::Content(c) if c.drawer.is_some()) {
+                extra |= DirtyBits::CONTENT;
             }
             d.props.bounds = bounds;
             (DirtyBits::GEOMETRY | extra, ())
@@ -512,6 +518,9 @@ impl ContentLayer {
         })
     }
 
+    /// The contents set with [`set_contents`](Self::set_contents);
+    /// [`Contents::None`] while a drawer is installed (drawings are not
+    /// stored).
     pub fn contents(&self) -> Contents {
         self.read_content(|c| c.contents.clone())
     }
@@ -522,7 +531,6 @@ impl ContentLayer {
             if c.contents == contents && c.drawer.is_none() {
                 return (DirtyBits::empty(), None);
             }
-            c.needs_display = false;
             let old = (mem::replace(&mut c.contents, contents), c.drawer.take());
             (DirtyBits::CONTENT, Some(old))
         });
@@ -543,37 +551,53 @@ impl ContentLayer {
         });
     }
 
-    /// Installs a drawer and schedules it to run at the next commit. The
-    /// drawer records into a [`Canvas`] in the layer's local space and runs
-    /// again after every [`set_needs_display`](Self::set_needs_display).
+    /// Makes the layer's contents drawn by `drawer`, replacing any contents
+    /// set with [`set_contents`](Self::set_contents). The drawer records into
+    /// a [`Canvas`] in the layer's local space.
+    ///
+    /// The drawer must be a pure function of the [`DrawInfo`] and whatever
+    /// state it reads: the backend runs it whenever it needs the drawing —
+    /// possibly at any time on the scene's thread, possibly several times,
+    /// possibly never for a layer that is not shown — and keeps only its own
+    /// rendering of the result. Call [`set_needs_display`](Self::set_needs_display)
+    /// when that state changes. The scene is read-only while a drawer runs:
+    /// it may read any layer property, but modifying the scene panics.
     ///
     /// Capture a [`WeakLayer`], not a [`Layer`], if the drawer needs to refer
     /// to its own layer or an ancestor; a strong handle would keep the layer
     /// alive until the scene is dropped.
+    #[track_caller]
     pub fn set_drawer(&self, drawer: impl Fn(&mut Canvas, &DrawInfo) + 'static) {
         let drawer: Drawer = Rc::new(drawer);
         let _old = self.update_content(|c| {
-            c.needs_display = true;
-            (DirtyBits::CONTENT, c.drawer.replace(drawer))
+            c.display_version += 1;
+            (DirtyBits::CONTENT, (c.drawer.replace(drawer), mem::take(&mut c.contents)))
         });
     }
 
-    /// Removes the drawer; the last drawing stays as the contents.
+    /// Removes the drawer, leaving the layer without contents.
+    #[track_caller]
     pub fn clear_drawer(&self) {
-        let _old = self.update_content(|c| (DirtyBits::empty(), c.drawer.take()));
+        let _old = self.update_content(|c| {
+            let old = c.drawer.take();
+            (if old.is_some() { DirtyBits::CONTENT } else { DirtyBits::empty() }, old)
+        });
     }
 
     pub fn has_drawer(&self) -> bool {
         self.read_content(|c| c.drawer.is_some())
     }
 
-    /// Asks the drawer to run again at the next commit. No-op without a drawer.
+    /// Tells the backend that the drawer's output changed: the next commit
+    /// carries a new display version, and the backend draws again when it
+    /// next needs the drawing. No-op without a drawer.
+    #[track_caller]
     pub fn set_needs_display(&self) {
         self.update_content(|c| {
-            if c.drawer.is_none() || c.needs_display {
+            if c.drawer.is_none() {
                 return (DirtyBits::empty(), ());
             }
-            c.needs_display = true;
+            c.display_version += 1;
             (DirtyBits::CONTENT, ())
         });
     }

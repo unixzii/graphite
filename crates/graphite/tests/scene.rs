@@ -394,8 +394,15 @@ fn a_mask_cannot_be_added_as_a_sublayer() {
 
 // ───────────────────────────── drawing ─────────────────────────────
 
+fn drawn_version(rec: &Recorder, id: LayerId) -> u64 {
+    match rec.tree().node(id).unwrap().layer.content {
+        ResolvedContent::Drawn { version } => version,
+        ref other => panic!("expected drawn content, got {other:?}"),
+    }
+}
+
 #[test]
-fn drawers_run_at_commit_and_on_demand() {
+fn backends_run_drawers_when_they_need_the_drawing() {
     let (scene, rec) = scene();
     let runs = Rc::new(Cell::new(0));
     let label = ContentLayer::new(&scene);
@@ -405,52 +412,126 @@ fn drawers_run_at_commit_and_on_demand() {
         counter.set(counter.get() + 1);
         cx.fill_rect(info.bounds, Color::BLACK);
     });
-    assert_eq!(runs.get(), 0, "drawers are lazy");
+    assert_eq!(runs.get(), 0, "installing a drawer does not run it");
+    assert_eq!(label.contents(), Contents::None, "drawings are not stored as contents");
 
     scene.commit();
-    assert_eq!(runs.get(), 0, "detached layers are not drawn");
+    assert_eq!(runs.get(), 0, "detached layers are not committed, so not drawn");
 
     scene.root().add_sublayer(&label);
     scene.commit();
     assert_eq!(runs.get(), 1);
+    let first = drawn_version(&rec, label.id());
     {
-        let batch = rec.last();
-        let update = batch.updates.iter().find(|u| u.id == label.id()).unwrap();
-        let ResolvedContent::Drawing(dl) = &update.layer.content else { panic!("expected a drawing") };
-        assert!(matches!(dl.ops(), [DrawOp::FillPath { .. }]));
+        let tree = rec.tree();
+        assert!(matches!(tree.drawing(label.id()).unwrap().ops(), [DrawOp::FillPath { .. }]));
+        let (_, info, _) = tree.node(label.id()).unwrap().drawing.as_ref().unwrap();
+        assert_eq!(*info, DrawInfo { bounds: Rect::new(0.0, 0.0, 50.0, 20.0), scale: 1.0 });
     }
 
     scene.commit();
-    assert_eq!(runs.get(), 1, "no redraw without set_needs_display");
+    label.set_opacity(0.5);
+    scene.commit();
+    assert_eq!(runs.get(), 1, "no redraw while version and draw info are unchanged");
+
     label.set_needs_display();
     label.set_needs_display();
     scene.commit();
     assert_eq!(runs.get(), 2);
     assert_eq!(rec.last().updates[0].changed, DirtyBits::CONTENT);
+    assert!(drawn_version(&rec, label.id()) > first);
 
+    let version = drawn_version(&rec, label.id());
     scene.set_backing_scale(2.0);
     scene.commit();
     assert_eq!(runs.get(), 3, "a scale change redraws");
+    assert_eq!(drawn_version(&rec, label.id()), version, "…without a new version");
+
+    label.set_bounds(Rect::new(0.0, 0.0, 60.0, 20.0));
+    scene.commit();
+    assert_eq!(runs.get(), 4, "a size change redraws");
+    assert!(rec.last().updates[0].changed.contains(DirtyBits::CONTENT));
+    label.set_bounds(Rect::new(5.0, 0.0, 60.0, 20.0));
+    scene.commit();
+    assert_eq!(runs.get(), 5, "so does a bounds origin change");
+    assert!(rec.last().updates[0].changed.contains(DirtyBits::CONTENT));
 }
 
 #[test]
-fn drawers_may_mutate_the_scene() {
+fn drawers_can_be_run_outside_commits() {
+    let (scene, rec) = scene();
+    let label = ContentLayer::new(&scene);
+    label.set_bounds(Rect::new(0.0, 0.0, 10.0, 10.0));
+    label.set_drawer(|cx, info| cx.fill_rect(info.bounds, Color::BLACK));
+    scene.root().add_sublayer(&label);
+    scene.commit();
+    let drawers = rec.last().drawers.clone();
+    let info = DrawInfo { bounds: Rect::new(0.0, 0.0, 4.0, 4.0), scale: 3.0 };
+
+    let list = drawers.draw(label.id(), &info).expect("drawn on demand");
+    assert!(!list.is_empty());
+    assert!(drawers.draw(scene.root().id(), &info).is_none(), "a layer without a drawer");
+
+    let id = label.id();
+    label.clear_drawer();
+    assert!(drawers.draw(id, &info).is_none(), "the drawer was removed");
+    scene.commit();
+    assert!(rec.tree().drawing(id).is_none(), "clearing the drawer clears the drawing");
+    assert_eq!(rec.tree().node(id).unwrap().layer.content, ResolvedContent::None);
+
+    label.remove_from_superlayer();
+    drop(label);
+    assert!(drawers.draw(id, &info).is_none(), "the layer is gone");
+    drop(scene);
+    assert!(drawers.draw(id, &info).is_none(), "the scene is gone");
+}
+
+#[test]
+fn drawers_read_the_scene() {
     let (scene, rec) = scene();
     let label = ContentLayer::new(&scene);
     let weak = label.downgrade();
-    label.set_drawer(move |_cx, _info| {
-        let me = weak.upgrade().unwrap();
-        me.set_opacity(0.5);
-        me.downcast_ref::<ContentLayer>().unwrap().set_needs_display(); // for the next commit
+    label.set_opacity(0.25);
+    label.set_drawer(move |cx, info| {
+        let me = weak.upgrade().unwrap(); // a temporary strong handle is fine
+        cx.set_alpha(me.opacity());
+        cx.fill_rect(info.bounds, Color::BLACK);
     });
     scene.root().add_sublayer(&label);
     scene.commit();
-    {
-        let batch = rec.last();
-        let update = batch.updates.iter().find(|u| u.id == label.id()).unwrap();
-        assert_eq!(update.layer.props.opacity, 0.5, "mutations made while drawing land in the same commit");
-    }
-    assert!(scene.needs_commit(), "set_needs_display from a drawer schedules another commit");
+    assert!(rec.tree().drawing(label.id()).is_some());
+    assert!(!scene.needs_commit(), "reading does not dirty the scene");
+}
+
+#[test]
+#[should_panic(expected = "a drawer must not modify the scene")]
+fn drawers_must_not_modify_the_scene() {
+    let (scene, _rec) = scene();
+    let label = ContentLayer::new(&scene);
+    let weak = label.downgrade();
+    label.set_drawer(move |_cx, _info| {
+        weak.upgrade().unwrap().set_opacity(0.5);
+    });
+    scene.root().add_sublayer(&label);
+    scene.commit();
+}
+
+#[test]
+fn drawers_and_contents_replace_each_other() {
+    let (scene, rec) = scene();
+    let layer = ContentLayer::new(&scene);
+    scene.root().add_sublayer(&layer);
+    let image = Image::from_rgba8_premultiplied(1, 1, 1.0, vec![255, 0, 0, 255]);
+    layer.set_contents(Contents::Image(image));
+    layer.set_drawer(|cx, info| cx.fill_rect(info.bounds, Color::BLACK));
+    assert_eq!(layer.contents(), Contents::None, "a drawer replaces the contents");
+    scene.commit();
+    assert!(matches!(rec.tree().node(layer.id()).unwrap().layer.content, ResolvedContent::Drawn { .. }));
+
+    layer.set_contents(Contents::None);
+    assert!(!layer.has_drawer(), "contents replace the drawer");
+    scene.commit();
+    assert!(rec.tree().drawing(layer.id()).is_none());
 }
 
 #[test]

@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bitflags::bitflags;
 
-use crate::canvas::DisplayList;
 use crate::color::Color;
 use crate::geometry::{Affine, Point, Rect, Size, Vec2};
 use crate::resource::{FillRule, GradientStop, Image, Paint, Path, Stroke};
@@ -208,14 +207,14 @@ impl Gravity {
     }
 }
 
-/// The contents of a [`crate::ContentLayer`].
+/// The contents of a [`crate::ContentLayer`] set with
+/// [`crate::ContentLayer::set_contents`]. Drawn contents are not stored: a
+/// drawer produces them whenever the backend needs them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Contents {
     #[default]
     None,
     Image(Image),
-    /// Drawing in the layer's local (bounds) coordinate space.
-    Drawing(DisplayList),
 }
 
 /// Properties of a [`crate::ShapeLayer`]. The path is in the layer's local

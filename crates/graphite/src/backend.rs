@@ -9,6 +9,12 @@ use crate::commit::CommitBatch;
 /// these methods; anything that needs the scene (typically running
 /// [`crate::Scene::commit`] at the platform's commit point) should hold a
 /// [`crate::WeakScene`] and do it later, from the event loop.
+///
+/// The one exception is drawing: [`CommitBatch::drawers`] runs layer
+/// drawers, inside [`apply`](Self::apply) or later (keep a clone), whenever
+/// the backend needs a drawing. Backends keep only their own rendering of
+/// it (a texture, a render node, a layer's backing store) and may drop that
+/// and draw again at any time.
 pub trait Backend {
     /// The scene went from clean to dirty. Arrange for [`crate::Scene::commit`]
     /// to run at the platform's commit point: the end of the current run-loop

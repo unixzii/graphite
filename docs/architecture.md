@@ -45,8 +45,7 @@ only so that the project-level `examples/` directory can exist.
 user code ──setters──► model (Scene + LayerData)            platform independent
                          │  once per frame: Scene::commit()
                          ▼
-                       phase 1: run drawers  → DisplayList
-                       phase 2: dirty layers → CommitBatch (with resolved values)
+                       dirty layers → CommitBatch (with resolved values)
                          │
                          ▼
                        Backend::apply(batch)                  per platform
@@ -54,6 +53,10 @@ user code ──setters──► model (Scene + LayerData)            platform i
                          │    keep an id → native object map, apply deltas
                          └─ snapshot backends (GSK):
                               cache one render node per layer, rebuild dirty subtrees
+                         │  whenever the backend needs a drawing (in apply or later)
+                         ▼
+                       batch.drawers.draw(id, info) → drawer → DisplayList
+                         → rendered by the backend, then dropped
 ```
 
 Why setters do not touch native objects directly:
@@ -117,12 +120,37 @@ placement follows the bounds).
 When the scene goes from clean to dirty it calls `Backend::request_commit`
 once. The backend calls `Scene::commit` at its platform's commit point (end
 of the run-loop iteration on macOS, `requestAnimationFrame` on the web, and
-so on). A commit has two phases:
+so on). The commit turns dirty, attached layers into a `CommitBatch`; it runs
+no user code.
 
-1. **Run drawers.** Content layers that need display run their drawer, which
-   records a `DisplayList`. No borrow is held while user code runs; drawers
-   may mutate the scene, and those mutations land in the same commit.
-2. **Build the batch.** Dirty, attached layers become a `CommitBatch`.
+## Drawing
+
+Drawn contents are not part of the model. A drawn layer resolves to
+`ResolvedContent::Drawn { version }`, where the version is bumped by
+`set_drawer` and `set_needs_display`. The backend gets the drawing through
+`CommitBatch::drawers`, a cheap `'static` handle (a weak scene pointer) that
+it may keep and call at any time on the scene's thread:
+`drawers.draw(id, &DrawInfo)` runs the drawer and returns the `DisplayList`.
+Because drawers are pure, a backend caches its rendering under
+`(version, DrawInfo)` and draws again whenever that key changes or it lost
+the rendering. The display list itself is dropped right away, so neither
+Core nor the backend holds recordings (and, later, the text layouts they
+will reference).
+
+`Drawers::draw` looks the drawer up by id, so the closure stays owned by
+Core and stale ids return `None`. While a drawer runs the scene is
+read-only (a `drawing` flag makes every mutation panic); reads borrow the
+layer map only briefly, so Core never calls into a backend while holding a
+borrow.
+
+How backends use it:
+
+- Core Animation sets a `CALayerDelegate` on the drawn layer and calls
+  `setNeedsDisplay` when the key changes; Core Animation owns the backing
+  store and calls `drawLayer:inContext:` when it needs to.
+- WinComp draws into a `CompositionDrawingSurface` during `apply` and keeps
+  the `Drawers` to redraw surfaces later (device loss).
+- GSK translates the recording into a render node during `apply`.
 
 ## The `CommitBatch` contract
 
@@ -136,7 +164,7 @@ A batch carries, in application order:
    `CHILDREN`);
 4. `released`: native objects to destroy;
 
-plus the `backing_scale` to rasterize at.
+plus the `backing_scale` to rasterize at and the `drawers` to draw with.
 
 Children lists must be applied in two passes, because a layer can move
 between parents in one commit. First detach, for every listed parent, the

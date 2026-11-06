@@ -12,6 +12,11 @@
 //!        └─ sublayers' outers
 //! ```
 //!
+//! A drawn layer's body has a [`DrawingDelegate`]: Core Animation owns the
+//! backing store and asks the delegate to display whenever it needs to; the
+//! backend only calls `setNeedsDisplay` when the display version, the local
+//! bounds or the scale change.
+//!
 //! Splitting off `outer` lets the shadow escape the body's `masksToBounds`
 //! (graphite's semantics, unlike plain `CALayer`), and keeps `body.bounds`
 //! equal to graphite's bounds so that `bounds.origin` scrolling, shape paths
@@ -23,10 +28,11 @@ use std::rc::Rc;
 
 use block2::RcBlock;
 use graphite::{
-    Backend, CommitBatch, DirtyBits, Gradient, LayerId, LayerKind, LayerUpdate, Paint, Rect, ResolvedContent,
+    Backend, CommitBatch, DirtyBits, Drawers, Gradient, LayerId, LayerKind, LayerUpdate, Paint, Rect, ResolvedContent,
     ResourceId, ShapeProps, WeakScene,
 };
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::{
     CFRetained, CFRunLoop, CFRunLoopActivity, CFRunLoopObserver, CGPoint, CGRect, CGSize, kCFRunLoopCommonModes,
 };
@@ -39,11 +45,14 @@ use objc2_quartz_core::{
 };
 
 use crate::convert::{ca_corners, cf_as_object, cg_affine, cg_color, cg_image, cg_path, cg_point, cg_rect, ns_numbers};
-use crate::draw;
+use crate::delegate::DrawingDelegate;
 
 /// Run before Core Animation's own commit observer (order 2 000 000), so
 /// that our changes reach the screen in the same frame.
 const COMMIT_OBSERVER_ORDER: isize = 1_999_000;
+
+/// What a drawn layer was displayed for: (display version, local bounds, scale).
+type DisplayKey = (u64, Rect, f64);
 
 enum Body {
     Plain(Retained<CALayer>),
@@ -77,8 +86,9 @@ struct Node {
     /// orientation-sensitive `contentsGravity`.
     image_layer: Option<Retained<CALayer>>,
     image: Option<ResourceId>,
-    /// What `body.contents` was rasterized from: (display list, bounds, scale).
-    drawing: Option<(ResourceId, Rect, f64)>,
+    /// For drawn layers: the body's delegate (the body only holds it
+    /// weakly) and what was last displayed.
+    drawing: Option<(Retained<DrawingDelegate>, Option<DisplayKey>)>,
     parent: Option<LayerId>,
     children: Vec<LayerId>,
     mask: Option<LayerId>,
@@ -189,6 +199,7 @@ pub(crate) struct CaBackend {
     nodes: HashMap<LayerId, Node>,
     images: ImageCache,
     scheduler: Scheduler,
+    drawers: Drawers,
     scale: f64,
     root: Option<LayerId>,
 }
@@ -200,6 +211,7 @@ impl CaBackend {
             nodes: HashMap::new(),
             images: ImageCache::default(),
             scheduler: Scheduler { scene, run_loop: CFRunLoop::current(), pending: Rc::new(Cell::new(false)) },
+            drawers: Drawers::default(),
             scale: 1.0,
             root: None,
         }
@@ -406,8 +418,18 @@ impl CaBackend {
             (Body::Shape(shape), ResolvedContent::Shape(props)) => apply_shape(shape, props),
             (Body::Gradient(layer), ResolvedContent::Gradient(g)) => apply_gradient(layer, Some(g)),
             (Body::Gradient(layer), _) => apply_gradient(layer, None),
-            (Body::Plain(_), ResolvedContent::Drawing(_)) => {} // rasterized in sync_content_geometry
+            (Body::Plain(body), ResolvedContent::Drawn { .. }) => {
+                if node.drawing.is_none() {
+                    let delegate = DrawingDelegate::new(self.drawers.clone(), id);
+                    body.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+                    self.node_mut(id).drawing = Some((delegate, None));
+                }
+                // Displayed in sync_content_geometry.
+            }
             (Body::Plain(body), _) => {
+                if node.drawing.is_some() {
+                    body.setDelegate(None);
+                }
                 // SAFETY: clearing contents is always valid.
                 unsafe { body.setContents(None) };
                 self.node_mut(id).drawing = None;
@@ -426,19 +448,13 @@ impl CaBackend {
                     layer.setFrame(cg_rect(local));
                 }
             }
-            ResolvedContent::Drawing(list) => {
-                let key = (list.id(), bounds, scale);
-                if self.node(id).drawing == Some(key) {
-                    return;
-                }
-                let image = draw::rasterize(list, bounds, scale);
+            &ResolvedContent::Drawn { version } => {
+                let key = Some((version, bounds, scale));
                 let node = self.node_mut(id);
-                node.drawing = Some(key);
-                let body = node.body.layer();
-                // SAFETY: a static constant; a CGImage is valid layer contents.
-                unsafe {
-                    body.setContentsGravity(kCAGravityResize);
-                    body.setContents(image.as_deref().map(cf_as_object));
+                let Some((_, displayed)) = &mut node.drawing else { return };
+                if *displayed != key {
+                    *displayed = key;
+                    node.body.layer().setNeedsDisplay();
                 }
             }
             _ => {}
@@ -448,6 +464,9 @@ impl CaBackend {
     fn release(&mut self, id: LayerId) {
         let Some(node) = self.nodes.remove(&id) else { return };
         node.outer.removeFromSuperlayer();
+        if node.drawing.is_some() {
+            node.body.layer().setDelegate(None);
+        }
         if let Some(img) = node.image {
             self.images.release(img);
         }
@@ -568,6 +587,7 @@ impl Backend for CaBackend {
     }
 
     fn apply(&mut self, batch: CommitBatch) {
+        self.drawers = batch.drawers.clone();
         CATransaction::begin();
         CATransaction::setDisableActions(true);
 

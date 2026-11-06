@@ -5,6 +5,10 @@
 //! asserts the [`CommitBatch`] contract (ids realized before use, never
 //! reused, children lists only naming live layers, …), so any test that
 //! commits also checks that Core emits well-formed batches.
+//!
+//! Like a real backend, the mirror tree draws [`ResolvedContent::Drawn`]
+//! layers through [`CommitBatch::drawers`] when their `(version, DrawInfo)`
+//! changes, and keeps the result.
 
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
@@ -12,7 +16,9 @@ use std::fmt::Write as _;
 use std::rc::Rc;
 
 use crate::backend::Backend;
-use crate::commit::{CommitBatch, DirtyBits, LayerId, Resolved};
+use crate::canvas::DisplayList;
+use crate::commit::{CommitBatch, DirtyBits, LayerId, Resolved, ResolvedContent};
+use crate::layer::DrawInfo;
 use crate::props::LayerKind;
 
 /// Records what a scene commits. Clone it to keep a handle while the scene
@@ -91,6 +97,9 @@ pub struct MirrorNode {
     pub children: Vec<LayerId>,
     /// The latest properties received.
     pub layer: Resolved,
+    /// For drawn layers: the last drawing and the `(version, DrawInfo)` it
+    /// was made for.
+    pub drawing: Option<(u64, DrawInfo, DisplayList)>,
 }
 
 /// The native-side view of a scene, rebuilt purely from commit batches.
@@ -99,6 +108,7 @@ pub struct MirrorTree {
     root: Option<LayerId>,
     nodes: HashMap<LayerId, MirrorNode>,
     pending: HashMap<LayerId, LayerKind>,
+    draws: usize,
 }
 
 impl MirrorTree {
@@ -120,6 +130,16 @@ impl MirrorTree {
 
     pub fn node(&self, id: LayerId) -> Option<&MirrorNode> {
         self.nodes.get(&id)
+    }
+
+    /// How many times the tree ran a drawer.
+    pub fn draws(&self) -> usize {
+        self.draws
+    }
+
+    /// The current drawing of a drawn layer.
+    pub fn drawing(&self, id: LayerId) -> Option<&DisplayList> {
+        self.nodes.get(&id)?.drawing.as_ref().map(|(_, _, list)| list)
     }
 
     pub fn children(&self, id: LayerId) -> &[LayerId] {
@@ -164,12 +184,24 @@ impl MirrorTree {
                 assert_eq!(update.changed, DirtyBits::all() - DirtyBits::CHILDREN, "first update must be complete");
                 self.nodes.insert(
                     update.id,
-                    MirrorNode { kind, parent: None, children: Vec::new(), layer: update.layer.clone() },
+                    MirrorNode { kind, parent: None, children: Vec::new(), layer: update.layer.clone(), drawing: None },
                 );
             } else {
                 let node =
                     self.nodes.get_mut(&update.id).unwrap_or_else(|| panic!("update for unknown {:?}", update.id));
                 node.layer = update.layer.clone();
+            }
+            let node = self.nodes.get_mut(&update.id).unwrap();
+            match node.layer.content {
+                ResolvedContent::Drawn { version } => {
+                    let info = node.layer.draw_info(batch.backing_scale);
+                    if !node.drawing.as_ref().is_some_and(|(v, i, _)| *v == version && *i == info) {
+                        let list = batch.drawers.draw(update.id, &info).expect("a drawn layer has a drawer");
+                        node.drawing = Some((version, info, list));
+                        self.draws += 1;
+                    }
+                }
+                _ => node.drawing = None,
             }
         }
         assert!(self.pending.is_empty(), "realized layers without an initial update: {:?}", self.pending.keys());

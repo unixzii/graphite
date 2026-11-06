@@ -2,35 +2,13 @@
 
 use std::ptr;
 
-use graphite::{DisplayList, DrawOp, FillRule, Paint, Path, Rect, StrokeStyle, Vec2};
-use objc2_core_foundation::{CFRetained, CGFloat, CGRect};
-use objc2_core_graphics::{
-    CGBitmapContextCreate, CGBitmapContextCreateImage, CGContext, CGGradientDrawingOptions, CGImage, CGImageAlphaInfo,
-    CGImageByteOrderInfo,
-};
+use graphite::{DisplayList, DrawOp, FillRule, Paint, Path, StrokeStyle, Vec2};
+use objc2_core_foundation::{CGFloat, CGRect};
+use objc2_core_graphics::{CGContext, CGGradientDrawingOptions};
 
 use crate::convert::{
-    cg_affine, cg_color, cg_gradient, cg_image, cg_line_cap, cg_line_join, cg_path, cg_point, cg_rect, srgb,
+    cg_affine, cg_color, cg_gradient, cg_image, cg_line_cap, cg_line_join, cg_path, cg_point, cg_rect,
 };
-
-/// Rasterizes `list`, recorded in a layer's local space, covering `bounds`
-/// at `scale` device pixels per point. Returns `None` for an empty area.
-pub(crate) fn rasterize(list: &DisplayList, bounds: Rect, scale: f64) -> Option<CFRetained<CGImage>> {
-    let w = (bounds.width() * scale).ceil();
-    let h = (bounds.height() * scale).ceil();
-    if !(w >= 1.0 && h >= 1.0) {
-        return None;
-    }
-    let info = CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::OrderDefault.0;
-    // SAFETY: a null data pointer lets CoreGraphics allocate the buffer.
-    let cx = unsafe { CGBitmapContextCreate(ptr::null_mut(), w as usize, h as usize, 8, 0, Some(&srgb()), info) }?;
-    // CoreGraphics is y-up; graphite is y-down with the origin at bounds.origin.
-    CGContext::translate_ctm(Some(&cx), 0.0, h);
-    CGContext::scale_ctm(Some(&cx), scale, -scale);
-    CGContext::translate_ctm(Some(&cx), -bounds.min_x(), -bounds.min_y());
-    replay(&cx, list);
-    CGBitmapContextCreateImage(Some(&cx))
-}
 
 /// Replays `list` into `cx`, whose CTM must already map graphite's y-down
 /// user space.

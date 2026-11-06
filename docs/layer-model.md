@@ -105,12 +105,23 @@ Violations panic (they are programming errors).
   default). `Image` is premultiplied RGBA8 sRGB with a `scale` (pixels per
   point).
 - A drawing. `set_drawer(|canvas, info| …)` installs a closure that records
-  into a `Canvas` in local space. It runs at the next commit and again after
-  every `set_needs_display()`. Drawings are recorded in points, so a change
-  of backing scale re-rasterizes them; the drawer is re-run as well, so it
-  can adapt (for example, hairlines).
+  into a `Canvas` in local space, over `info.bounds` (the layer's bounds,
+  snapped when pixel snapping is on).
 
-`set_contents` removes any drawer; `clear_drawer` keeps the last drawing.
+Drawers are **pure functions**. Core never stores what they record: the
+backend runs a drawer whenever it needs the drawing (when the layer is first
+shown, after `set_needs_display()`, when the bounds or the backing scale
+change, or whenever the platform dropped its backing store) and keeps only
+its own rendering of the result. A drawer may therefore run at any time on
+the scene's thread, any number of times, or never for a layer that is not
+shown. It may read any layer property, but the scene is read-only while it
+runs: setters, tree changes and `Scene::commit` panic. Call
+`set_needs_display()` when state the drawer reads outside the layer tree
+changes.
+
+`set_drawer` replaces contents set with `set_contents` and vice versa;
+`contents()` is `Contents::None` while a drawer is installed, and
+`clear_drawer` leaves the layer empty.
 
 If a drawer needs to refer to its own layer or an ancestor, capture a
 `WeakLayer` (`layer.downgrade()`). A strong handle would keep the layer alive

@@ -54,8 +54,14 @@ Rules:
   default shadow are in box space. Sublayers, drawings, paths, custom shadow
   paths and masks are in local space (box space minus `bounds_offset`).
 - **Trust the dirty bits.** Core already propagates dependencies (size →
-  shadow/content, scale → geometry/content). A drawing must be
-  re-rasterized when its display list, bounds or scale changes.
+  shadow/content, scale → geometry/content).
+- **Draw on demand.** For `ResolvedContent::Drawn { version }`, call
+  `batch.drawers.draw(id, &resolved.draw_info(scale))` when
+  `(version, DrawInfo)` differs from what you last rendered, render the
+  `DisplayList` into your native representation and drop it. Keep a clone of
+  `drawers` if the platform asks for displays outside `apply` (a layer
+  delegate, device loss). Do not run drawers while you hold state a drawer
+  could reach through the scene.
 - **Set every native property explicitly** when you realize a layer.
 - **Re-home masks defensively.** A layer can stop being a mask and become a
   sublayer, or the other way round, within one batch.

@@ -6,6 +6,9 @@
 //! Reusing unchanged nodes (same pointers) lets GSK diff damage and keep its
 //! texture, glyph and path caches warm.
 //!
+//! Drawn layers run their drawer (through `CommitBatch::drawers`) when their
+//! `(version, DrawInfo)` changes; only the translated node is kept.
+//!
 //! Each layer is composed like this (box space unless noted):
 //!
 //! ```text
@@ -23,8 +26,8 @@
 use std::collections::HashMap;
 
 use graphite::{
-    CommitBatch, Corners, DirtyBits, Gradient, LayerId, LayerUpdate, Rect, Resolved, ResolvedContent, ResourceId,
-    ShadowShape, ShapeProps, Size, Vec2,
+    CommitBatch, Corners, DirtyBits, DrawInfo, Drawers, Gradient, LayerId, LayerUpdate, Rect, Resolved,
+    ResolvedContent, ResourceId, ShadowShape, ShapeProps, Size, Vec2,
 };
 use gtk::prelude::*;
 use gtk::{gdk, gsk};
@@ -49,8 +52,9 @@ struct Node {
     mask: Option<LayerId>,
     mask_owner: Option<LayerId>,
     image: Option<(ResourceId, gdk::Texture)>,
-    /// The drawing's node, in local space, keyed by display list.
-    drawing: Option<(ResourceId, Option<gsk::RenderNode>)>,
+    /// The drawing's node, in local space, and the (version, draw info) it
+    /// was drawn for.
+    drawing: Option<((u64, DrawInfo), Option<gsk::RenderNode>)>,
     /// The shape's node, in local space.
     shape: Option<gsk::RenderNode>,
     /// `None`: stale. `Some(None)`: draws nothing.
@@ -140,7 +144,7 @@ impl Tree {
             self.root = Some(root);
         }
         for update in &batch.updates {
-            self.apply_update(update);
+            self.apply_update(update, batch.backing_scale, &batch.drawers);
         }
         self.apply_children(batch);
         for id in &batch.released {
@@ -153,7 +157,7 @@ impl Tree {
         Applied { redraw: changed, resize: self.root_size() != root_size }
     }
 
-    fn apply_update(&mut self, update: &LayerUpdate) {
+    fn apply_update(&mut self, update: &LayerUpdate, scale: f64, drawers: &Drawers) {
         let id = update.id;
         let r = &update.layer;
         if update.changed.contains(DirtyBits::MASK) {
@@ -171,6 +175,14 @@ impl Tree {
         }
         if update.changed.contains(DirtyBits::CONTENT) {
             self.apply_content(id, &r.content);
+        }
+        if let ResolvedContent::Drawn { version } = r.content {
+            let key = (version, r.draw_info(scale));
+            let node = self.node_mut(id);
+            if node.drawing.as_ref().map(|(k, _)| *k) != Some(key) {
+                let list = drawers.draw(id, &key.1);
+                node.drawing = Some((key, list.as_ref().and_then(draw::display_list_node)));
+            }
         }
         self.node_mut(id).layer = Some(r.clone());
         self.invalidate(id);
@@ -192,13 +204,8 @@ impl Tree {
         }
 
         let node = self.node_mut(id);
-        match content {
-            ResolvedContent::Drawing(list) => {
-                if node.drawing.as_ref().map(|(rid, _)| *rid) != Some(list.id()) {
-                    node.drawing = Some((list.id(), draw::display_list_node(list)));
-                }
-            }
-            _ => node.drawing = None,
+        if !matches!(content, ResolvedContent::Drawn { .. }) {
+            node.drawing = None;
         }
         node.shape = match content {
             ResolvedContent::Shape(shape) => shape_node(shape),
@@ -429,7 +436,7 @@ fn compose(
                 s.append_scaled_texture(texture, gsk::ScalingFilter::Linear, &convert::rect(*rect));
             }
         }
-        ResolvedContent::Drawing(_) => {
+        ResolvedContent::Drawn { .. } => {
             if let Some((_, Some(drawing))) = &node.drawing {
                 // Like a backing store, contents do not extend past the bounds.
                 s.push_clip(&draw::clip_to(bounds));

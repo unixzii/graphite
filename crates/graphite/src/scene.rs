@@ -15,6 +15,13 @@
 //! dropping a layer drops its drawer closure, which may own other handles
 //! whose `Drop` re-enters the scene.
 //!
+//! # Drawing
+//!
+//! Drawers are not run by the commit. Core only tracks a per-layer display
+//! version; backends call drawers through [`Drawers`] (carried by every
+//! [`CommitBatch`]) whenever they need the drawing, and keep whatever they
+//! make of it. While a drawer runs the scene is read-only.
+//!
 //! A layer is *attached* when it is reachable from the root through sublayer
 //! or mask edges. Only attached layers are committed. The first commit that
 //! sees an attached layer *realizes* it (the backend creates a native
@@ -24,10 +31,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use slotmap::{Key, SlotMap, new_key_type};
+use slotmap::{Key, KeyData, SlotMap, new_key_type};
 
 use crate::backend::Backend;
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, DisplayList};
 use crate::commit::{CommitBatch, DirtyBits, LayerId, LayerUpdate, ResolvedContentSource, resolve};
 use crate::geometry::{Rect, Size};
 use crate::layer::{DrawInfo, Layer};
@@ -40,6 +47,10 @@ new_key_type! {
 impl LayerKey {
     pub(crate) fn id(self) -> LayerId {
         LayerId(self.data().as_ffi())
+    }
+
+    fn from_id(id: LayerId) -> LayerKey {
+        KeyData::from_ffi(id.0).into()
     }
 }
 
@@ -60,10 +71,12 @@ impl Parent {
 }
 
 pub(crate) struct ContentData {
+    /// What the user set; never the output of the drawer.
     pub contents: Contents,
     pub gravity: Gravity,
     pub drawer: Option<Drawer>,
-    pub needs_display: bool,
+    /// Bumped whenever the drawer's output may have changed.
+    pub display_version: u64,
 }
 
 pub(crate) enum KindData {
@@ -90,7 +103,7 @@ impl KindData {
                 contents: Contents::None,
                 gravity: Gravity::default(),
                 drawer: None,
-                needs_display: false,
+                display_version: 0,
             }),
             LayerKind::Shape => KindData::Shape(ShapeProps::default()),
             LayerKind::Gradient => KindData::Gradient(None),
@@ -140,6 +153,8 @@ pub(crate) struct SceneInner {
     backend: RefCell<Option<Box<dyn Backend>>>,
     commit_requested: Cell<bool>,
     committing: Cell<bool>,
+    /// A drawer is running: the scene is read-only.
+    drawing: Cell<bool>,
     backing_scale: Cell<f64>,
     pixel_snapping: Cell<bool>,
 }
@@ -150,6 +165,15 @@ struct FlagGuard<'a>(&'a Cell<bool>);
 impl Drop for FlagGuard<'_> {
     fn drop(&mut self) {
         self.0.set(false);
+    }
+}
+
+/// Restores a flag's previous value at the end of a scope, even on panic.
+struct RestoreGuard<'a>(&'a Cell<bool>, bool);
+
+impl Drop for RestoreGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.1);
     }
 }
 
@@ -178,12 +202,20 @@ fn snap_dependents(d: &LayerData) -> DirtyBits {
     if d.props.shadow.is_some() {
         bits |= DirtyBits::SHADOW;
     }
-    if matches!(&d.kind, KindData::Content(c) if matches!(c.contents, Contents::Image(_)))
-        || matches!(d.kind, KindData::Gradient(_))
-    {
+    if size_dependent_content(d) {
         bits |= DirtyBits::CONTENT;
     }
     bits
+}
+
+/// Whether the resolved contents depend on the layer's size: placed images,
+/// gradients (in unit space) and drawings (drawn over the bounds).
+pub(crate) fn size_dependent_content(d: &LayerData) -> bool {
+    match &d.kind {
+        KindData::Content(c) => c.drawer.is_some() || matches!(c.contents, Contents::Image(_)),
+        KindData::Gradient(_) => true,
+        _ => false,
+    }
 }
 
 /// Updates `attached` for `key`'s whole subtree (sublayers and masks).
@@ -219,6 +251,15 @@ fn assert_not_ancestor(map: &LayerMap, key: LayerKey, ancestor: LayerKey, msg: &
 
 impl SceneInner {
     // ── handles and reference counting ──
+
+    /// Panics while a drawer runs: drawers must not modify the scene.
+    #[track_caller]
+    pub(crate) fn assert_mutable(&self) {
+        assert!(
+            !self.drawing.get(),
+            "a drawer must not modify the scene: drawers only read layer properties and record drawing"
+        );
+    }
 
     pub(crate) fn create(this: &Rc<SceneInner>, kind: LayerKind) -> Layer {
         let key = this.layers.borrow_mut().insert(LayerData::new(kind));
@@ -299,7 +340,9 @@ impl SceneInner {
     /// nothing changed) and a value that is handed back to the caller, so
     /// that anything with a non-trivial `Drop` (an old drawer) is dropped
     /// after the borrow is released.
+    #[track_caller]
     pub(crate) fn update<R>(&self, key: LayerKey, f: impl FnOnce(&mut LayerData) -> (DirtyBits, R)) -> Option<R> {
+        self.assert_mutable();
         let r = {
             let mut map = self.layers.borrow_mut();
             let d = map.get_mut(key)?;
@@ -315,6 +358,7 @@ impl SceneInner {
 
     #[track_caller]
     pub(crate) fn insert_sublayer(&self, parent: LayerKey, child: LayerKey, index: Option<usize>) {
+        self.assert_mutable();
         {
             let mut map = self.layers.borrow_mut();
             let mut dirty = self.dirty.borrow_mut();
@@ -351,7 +395,9 @@ impl SceneInner {
         self.note_dirty();
     }
 
+    #[track_caller]
     pub(crate) fn remove_from_parent(&self, child: LayerKey) {
+        self.assert_mutable();
         {
             let mut map = self.layers.borrow_mut();
             let mut dirty = self.dirty.borrow_mut();
@@ -377,6 +423,7 @@ impl SceneInner {
 
     #[track_caller]
     pub(crate) fn set_mask(&self, owner: LayerKey, mask: Option<LayerKey>) {
+        self.assert_mutable();
         let old = {
             let mut map = self.layers.borrow_mut();
             let mut dirty = self.dirty.borrow_mut();
@@ -422,7 +469,9 @@ impl SceneInner {
     }
 
     /// Marks every layer with the bits `f` returns, then requests a commit.
+    #[track_caller]
     fn mark_all(&self, mut f: impl FnMut(&mut LayerData) -> DirtyBits) {
+        self.assert_mutable();
         {
             let mut map = self.layers.borrow_mut();
             let mut dirty = self.dirty.borrow_mut();
@@ -451,51 +500,30 @@ impl SceneInner {
         }
     }
 
-    /// Phase 1: run drawers of attached layers that need display. Runs user
-    /// code, so no borrow is held while a drawer executes; drawers may mutate
-    /// the scene and those changes land in this commit.
-    fn run_drawers(&self) {
-        let scale = self.backing_scale.get();
-        let jobs: Vec<(LayerKey, Drawer, DrawInfo)> = {
-            let mut map = self.layers.borrow_mut();
-            let dirty = self.dirty.borrow();
-            dirty
-                .iter()
-                .filter_map(|&k| {
-                    let d = map.get_mut(k)?;
-                    let bounds = d.props.bounds;
-                    match &mut d.kind {
-                        KindData::Content(c) if d.attached && c.needs_display => {
-                            c.needs_display = false;
-                            c.drawer.clone().map(|f| (k, f, DrawInfo { bounds, scale }))
-                        }
-                        _ => None,
-                    }
-                })
-                .collect()
+    /// Runs `key`'s drawer for `info` with the scene read-only.
+    fn draw(&self, key: LayerKey, info: &DrawInfo) -> Option<DisplayList> {
+        let drawer = {
+            let map = self.layers.try_borrow().ok()?;
+            match &map.get(key)?.kind {
+                KindData::Content(c) => c.drawer.clone()?,
+                _ => return None,
+            }
         };
-        for (key, drawer, info) in jobs {
-            let mut canvas = Canvas::new();
-            drawer(&mut canvas, &info);
-            drop(drawer);
-            let list = canvas.finish();
-            self.update(key, |d| match &mut d.kind {
-                KindData::Content(c) => {
-                    c.contents = Contents::Drawing(list);
-                    (DirtyBits::CONTENT, ())
-                }
-                _ => (DirtyBits::empty(), ()),
-            });
-        }
+        let _guard = RestoreGuard(&self.drawing, self.drawing.replace(true));
+        let mut canvas = Canvas::new();
+        drawer(&mut canvas, info);
+        Some(canvas.finish())
     }
 
-    /// Phase 2: turn the dirty list into a batch.
-    fn build_batch(&self) -> CommitBatch {
-        let mut batch = CommitBatch { backing_scale: self.backing_scale.get(), ..CommitBatch::default() };
-        let keys = std::mem::take(&mut *self.dirty.borrow_mut());
-        let mut map = self.layers.borrow_mut();
-        // Layers whose drawer asked for display again while drawing.
-        let mut redisplay = Vec::new();
+    /// Turns the dirty list into a batch.
+    fn build_batch(this: &Rc<SceneInner>) -> CommitBatch {
+        let mut batch = CommitBatch {
+            backing_scale: this.backing_scale.get(),
+            drawers: Drawers { scene: Rc::downgrade(this) },
+            ..CommitBatch::default()
+        };
+        let keys = std::mem::take(&mut *this.dirty.borrow_mut());
+        let mut map = this.layers.borrow_mut();
         for key in keys {
             let mask_id = map.get(key).and_then(|d| d.mask).map(LayerKey::id);
             let Some(d) = map.get_mut(key) else { continue };
@@ -508,7 +536,7 @@ impl SceneInner {
                 d.realized = true;
                 d.dirty = DirtyBits::all();
                 batch.realized.push((id, d.kind.kind()));
-                if key == self.root {
+                if key == this.root {
                     batch.root = Some(id);
                 }
             }
@@ -520,24 +548,47 @@ impl SceneInner {
             if !changed.is_empty() {
                 let source = match &d.kind {
                     KindData::Container => ResolvedContentSource::None,
+                    KindData::Content(c) if c.drawer.is_some() => ResolvedContentSource::Drawn(c.display_version),
                     KindData::Content(c) => ResolvedContentSource::Contents(&c.contents, c.gravity),
                     KindData::Shape(s) => ResolvedContentSource::Shape(s),
                     KindData::Gradient(g) => ResolvedContentSource::Gradient(g.as_ref()),
                 };
-                let snap = self.pixel_snapping.get().then(|| self.backing_scale.get());
-                let layer = resolve(&d.props, source, mask_id, key == self.root, snap);
+                let snap = this.pixel_snapping.get().then(|| this.backing_scale.get());
+                let layer = resolve(&d.props, source, mask_id, key == this.root, snap);
                 batch.updates.push(LayerUpdate { id, changed, layer });
             }
-            if matches!(&d.kind, KindData::Content(c) if c.needs_display && c.drawer.is_some()) {
-                redisplay.push(key);
-            }
         }
-        let mut dirty = self.dirty.borrow_mut();
-        for key in redisplay {
-            mark(&mut map, &mut dirty, key, DirtyBits::CONTENT);
-        }
-        batch.released = std::mem::take(&mut *self.released.borrow_mut());
+        batch.released = std::mem::take(&mut *this.released.borrow_mut());
         batch
+    }
+}
+
+/// Runs the drawers of a scene's layers on behalf of its backend. Every
+/// [`CommitBatch`] carries one; a backend may keep a clone and draw at any
+/// time on the scene's thread, as often as it needs (for example when the
+/// platform asks a layer to display, or after losing its rendering device).
+///
+/// It does not keep the scene or any layer alive.
+#[derive(Clone, Default)]
+pub struct Drawers {
+    scene: Weak<SceneInner>,
+}
+
+impl Drawers {
+    /// Runs the drawer of layer `id` for `info` and returns what it recorded.
+    /// `None` if the scene or the layer is gone or the layer has no drawer.
+    ///
+    /// The scene is read-only while the drawer runs: modifying it panics.
+    /// Must not be called while the scene is being modified (backends are
+    /// never called back in that state).
+    pub fn draw(&self, id: LayerId, info: &DrawInfo) -> Option<DisplayList> {
+        self.scene.upgrade()?.draw(LayerKey::from_id(id), info)
+    }
+}
+
+impl std::fmt::Debug for Drawers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Drawers").field("alive", &(self.scene.strong_count() > 0)).finish()
     }
 }
 
@@ -575,6 +626,7 @@ impl Scene {
                 backend: RefCell::new(None),
                 commit_requested: Cell::new(false),
                 committing: Cell::new(false),
+                drawing: Cell::new(false),
                 backing_scale: Cell::new(1.0),
                 pixel_snapping: Cell::new(true),
             }),
@@ -592,6 +644,7 @@ impl Scene {
     /// If a backend was already set.
     #[track_caller]
     pub fn set_backend(&self, backend: Box<dyn Backend>) {
+        self.inner.assert_mutable();
         {
             let mut slot = self.inner.backend.borrow_mut();
             assert!(slot.is_none(), "a scene's backend can only be set once");
@@ -605,20 +658,24 @@ impl Scene {
         !self.inner.dirty.borrow().is_empty() || !self.inner.released.borrow().is_empty()
     }
 
-    /// Runs drawers that need display, builds a [`CommitBatch`] and hands it
-    /// to the backend. Normally called by the backend at its commit point;
-    /// call it directly to force a synchronous commit. Does nothing without a
-    /// backend or when called re-entrantly.
+    /// Builds a [`CommitBatch`] and hands it to the backend. Normally called
+    /// by the backend at its commit point; call it directly to force a
+    /// synchronous commit. Does nothing without a backend or when called
+    /// re-entrantly.
+    ///
+    /// # Panics
+    /// When called from a drawer.
+    #[track_caller]
     pub fn commit(&self) {
         let inner = &*self.inner;
+        inner.assert_mutable();
         if inner.committing.get() || inner.backend.borrow().is_none() {
             return;
         }
         inner.committing.set(true);
         {
             let _guard = FlagGuard(&inner.committing);
-            inner.run_drawers();
-            let batch = inner.build_batch();
+            let batch = SceneInner::build_batch(&self.inner);
             if !batch.is_empty()
                 && let Some(backend) = inner.backend.borrow_mut().as_mut()
             {
@@ -626,7 +683,7 @@ impl Scene {
             }
         }
         inner.commit_requested.set(false);
-        // Drawers may have asked for another display pass.
+        // Layers freed while the backend applied the batch.
         inner.note_dirty();
     }
 
@@ -635,12 +692,15 @@ impl Scene {
         self.inner.backing_scale.get()
     }
 
-    /// Called by the backend when the host's scale changes. Every layer with
-    /// a drawer is redisplayed at the next commit, and every non-container
-    /// layer is committed with [`DirtyBits::CONTENT`] so that backends
-    /// re-rasterize scale-dependent contents. With pixel snapping on, every
-    /// layer's geometry is re-resolved too.
+    /// Called by the backend when the host's scale changes. Every
+    /// non-container layer is committed with [`DirtyBits::CONTENT`] so that
+    /// backends re-rasterize scale-dependent contents (drawn layers keep
+    /// their display version: the new scale alone tells the backend to draw
+    /// again). With pixel snapping on, every layer's geometry is re-resolved
+    /// too.
+    #[track_caller]
     pub fn set_backing_scale(&self, scale: f64) {
+        self.inner.assert_mutable();
         let inner = &*self.inner;
         if inner.backing_scale.replace(scale) == scale {
             return;
@@ -648,28 +708,26 @@ impl Scene {
         let snapping = inner.pixel_snapping.get();
         inner.mark_all(|d| {
             let mut bits = if snapping { snap_dependents(d) } else { DirtyBits::empty() };
-            match &mut d.kind {
-                KindData::Container => {}
-                KindData::Content(c) => {
-                    c.needs_display |= c.drawer.is_some();
-                    bits |= DirtyBits::CONTENT;
-                }
-                KindData::Shape(_) | KindData::Gradient(_) => bits |= DirtyBits::CONTENT,
+            if !matches!(d.kind, KindData::Container) {
+                bits |= DirtyBits::CONTENT;
             }
             bits
         });
     }
 
-    /// Whether layer positions and bounds offsets are rounded to device
+    /// Whether layer positions, bounds offsets, sizes (of layers whose own
+    /// transform is a translation) and border widths are rounded to device
     /// pixels (on by default). Snapping keeps axis-aligned edges crisp at
     /// the cost of moving in whole-pixel steps; it is applied per layer, so
     /// fractional offsets in deep hierarchies can accumulate up to half a
-    /// pixel per level. Sizes are never snapped.
+    /// pixel per level.
     pub fn pixel_snapping(&self) -> bool {
         self.inner.pixel_snapping.get()
     }
 
+    #[track_caller]
     pub fn set_pixel_snapping(&self, enabled: bool) {
+        self.inner.assert_mutable();
         if self.inner.pixel_snapping.replace(enabled) != enabled {
             self.inner.mark_all(|d| snap_dependents(d));
         }

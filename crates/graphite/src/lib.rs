@@ -7,12 +7,14 @@
 //! user ─► build layer model (Scene + LayerData, platform independent)
 //!                          │  once per frame: Scene::commit()
 //!                          ▼
-//!                        phase 1: run drawers → DisplayList
-//!                        phase 2: dirty layers → CommitBatch (with derived values)
+//!                        dirty layers → CommitBatch (with derived values)
 //!                          │
 //!                          ▼
 //!                        Backend::apply  (Core Animation / Windows.UI.Composition /
 //!                                         GSK render nodes / DOM)
+//!                          │  whenever the backend needs a drawing
+//!                          ▼
+//!                        Drawers::draw → drawer → DisplayList (rendered, then dropped)
 //! ```
 //!
 //! Layers are mutable model objects owned by their [`Scene`]; resources
@@ -63,4 +65,4 @@ pub use props::{Border, Contents, Corners, Gradient, Gravity, LayerKind, LayerPr
 pub use resource::{
     FillRule, GradientStop, Image, LineCap, LineJoin, Paint, Path, PathBuilder, PathEl, ResourceId, Stroke, StrokeStyle,
 };
-pub use scene::{Scene, WeakScene};
+pub use scene::{Drawers, Scene, WeakScene};

@@ -25,6 +25,10 @@ pub(crate) fn cg_rect(r: Rect) -> CGRect {
     CGRect::new(cg_point(r.origin), cg_size(r.size))
 }
 
+pub(crate) fn graphite_rect(r: CGRect) -> Rect {
+    Rect::new(r.origin.x, r.origin.y, r.size.width, r.size.height)
+}
+
 pub(crate) fn cg_affine(m: Affine) -> CGAffineTransform {
     // Same layout and conventions as `CGAffineTransform`.
     CGAffineTransform { a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx, ty: m.ty }

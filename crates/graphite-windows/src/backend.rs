@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use graphite::{
-    Affine, Backend, CommitBatch, Corners, DirtyBits, FillRule, Gradient, GradientStop, LayerId, LayerKind,
+    Affine, Backend, CommitBatch, Corners, DirtyBits, Drawers, FillRule, Gradient, GradientStop, LayerId, LayerKind,
     LayerUpdate, Paint, Path, Rect, Resolved, ResolvedContent, ResourceId, ShadowShape, ShapeProps, Vec2, WeakScene,
 };
 use windows::UI::Composition::{
@@ -88,7 +88,8 @@ struct Masking {
 }
 
 struct Drawing {
-    key: (ResourceId, Rect, u64),
+    /// (display version, local bounds, scale) the surface was drawn for.
+    key: (u64, Rect, u64),
     surface: CompositionDrawingSurface,
     pixels: (u32, u32),
 }
@@ -126,6 +127,8 @@ pub(crate) struct WinCompBackend {
     scene: WeakScene,
     nodes: HashMap<LayerId, Node>,
     images: ImageCache,
+    /// Runs drawers; kept so that surfaces can be redrawn outside commits.
+    drawers: Drawers,
     scale: f64,
     root: Option<LayerId>,
     reported: bool,
@@ -153,6 +156,7 @@ impl WinCompBackend {
             scene,
             nodes: HashMap::new(),
             images: ImageCache::default(),
+            drawers: Drawers::default(),
             scale: 1.0,
             root: None,
             reported: false,
@@ -594,7 +598,7 @@ impl WinCompBackend {
                 sprite.SetBrush(&brush)?;
             }
         }
-        if !matches!(r.content, ResolvedContent::Drawing(_)) {
+        if !matches!(r.content, ResolvedContent::Drawn { .. }) {
             self.node_mut(id).drawing = None;
         }
 
@@ -605,7 +609,7 @@ impl WinCompBackend {
                 sprite.SetOffset(Vector3 { X: rect.min_x() as f32, Y: rect.min_y() as f32, Z: 0.0 })?;
                 sprite.SetSize(vec2(rect.width(), rect.height()))?;
             }
-            ResolvedContent::Drawing(list) => self.apply_drawing(id, list, r)?,
+            ResolvedContent::Drawn { version } => self.apply_drawing(id, *version, r)?,
             ResolvedContent::Gradient(gradient) => {
                 let sprite = self.content_sprite(id)?;
                 if content_changed {
@@ -618,20 +622,22 @@ impl WinCompBackend {
         Ok(())
     }
 
-    /// Rasterizes the drawing over the layer's bounds at the backing scale,
-    /// like a bitmap backing store (so it is clipped to the bounds).
-    fn apply_drawing(&mut self, id: LayerId, list: &graphite::DisplayList, r: &Resolved) -> Result<()> {
+    /// Runs the drawer and rasterizes the drawing over the layer's bounds at
+    /// the backing scale, like a bitmap backing store (so it is clipped to
+    /// the bounds). Only the surface is kept.
+    fn apply_drawing(&mut self, id: LayerId, version: u64, r: &Resolved) -> Result<()> {
         let scale = self.scale;
-        let local = Rect { origin: (-r.bounds_offset).to_point(), size: r.size };
-        let key = (list.id(), local, scale_key(scale));
+        let info = r.draw_info(scale);
+        let key = (version, info.bounds, scale_key(scale));
         if self.node(id).drawing.as_ref().is_some_and(|d| d.key == key) {
             return Ok(());
         }
         let (w, h) = ((r.size.width * scale).ceil(), (r.size.height * scale).ceil());
-        if !(w >= 1.0 && h >= 1.0) || list.is_empty() {
+        let list = if w >= 1.0 && h >= 1.0 { self.drawers.draw(id, &info) } else { None };
+        let Some(list) = list.filter(|l| !l.is_empty()) else {
             self.node_mut(id).drawing = None;
             return self.set_content(id, Content::None);
-        }
+        };
         let (w, h) = (w as u32, h as u32);
         let surface = match self.node_mut(id).drawing.take() {
             Some(d) if d.pixels == (w, h) => d.surface,
@@ -642,7 +648,7 @@ impl WinCompBackend {
         self.ctx.draw_surface(&surface, |dc, (ox, oy)| {
             let base =
                 Affine::translate(offset).then(Affine::scale(scale, scale)).then(Affine::translate(Vec2::new(ox, oy)));
-            draw::replay(dc, &factory, list, base)
+            draw::replay(dc, &factory, &list, base)
         })?;
         let sprite = self.content_sprite(id)?;
         let brush = self.comp().CreateSurfaceBrushWithSurface(&surface)?;
@@ -950,6 +956,7 @@ impl Backend for WinCompBackend {
     }
 
     fn apply(&mut self, batch: CommitBatch) {
+        self.drawers = batch.drawers.clone();
         let result = self.apply_batch(&batch);
         self.report("applying a commit", result);
     }

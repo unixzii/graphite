@@ -69,6 +69,10 @@ Notes:
 
 ## Drawings
 
+During `apply`, a drawn layer whose `(display version, DrawInfo)` changed
+runs its drawer through `batch.drawers`; the recording is translated into a
+node and dropped, and only the node is cached.
+
 `draw::display_list_node` turns a `DisplayList` into GPU-rendered nodes; no
 Cairo is involved:
 
@@ -109,7 +113,7 @@ the demo, which animates all six cards at once:
 | Per frame | Release | Debug |
 |---|---|---|
 | `Demo::update` (setters) | 0.02 ms | 0.05 ms |
-| `Scene::commit` (drawers, batch, apply) | 0.18 ms | 0.25 ms |
+| `Scene::commit` (batch, apply incl. drawers) | 0.18 ms | 0.25 ms |
 | Rebuilding layer nodes | 0.08 ms | 0.14 ms |
 | Full-frame raster, Cairo renderer | 64–69 ms | 60 ms |
 | Full-frame raster, GL renderer on llvmpipe | 40 ms | |

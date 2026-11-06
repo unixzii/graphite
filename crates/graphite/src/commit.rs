@@ -2,10 +2,11 @@
 
 use bitflags::bitflags;
 
-use crate::canvas::DisplayList;
 use crate::geometry::{Affine, Rect, Size, TransformKind, Vec2};
+use crate::layer::DrawInfo;
 use crate::props::{Border, Contents, Corners, Gradient, Gravity, LayerKind, LayerProps, ShapeProps};
 use crate::resource::{Image, Path, PathEl};
+use crate::scene::Drawers;
 
 /// Stable identity of a layer, as seen by backends. Never reused within a
 /// scene (the slot generation is part of the id).
@@ -61,6 +62,9 @@ pub struct CommitBatch {
     pub children: Vec<(LayerId, Vec<LayerId>)>,
     pub updates: Vec<LayerUpdate>,
     pub released: Vec<LayerId>,
+    /// Runs the drawers of [`ResolvedContent::Drawn`] layers. Clone it to
+    /// draw outside [`crate::Backend::apply`].
+    pub drawers: Drawers,
 }
 
 impl CommitBatch {
@@ -118,6 +122,14 @@ pub struct Resolved {
     /// Present iff `props.shadow` is.
     pub shadow_shape: Option<ShadowShape>,
     pub content: ResolvedContent,
+}
+
+impl Resolved {
+    /// What to pass to a drawer to draw this layer's whole box at `scale`:
+    /// the box in local space, `(-bounds_offset, size)`.
+    pub fn draw_info(&self, scale: f64) -> DrawInfo {
+        DrawInfo { bounds: Rect { origin: (-self.bounds_offset).to_point(), size: self.size }, scale }
+    }
 }
 
 /// The shape that casts a layer's shadow.
@@ -179,8 +191,13 @@ pub enum ResolvedContent {
         image: Image,
         rect: Rect,
     },
-    /// In local space.
-    Drawing(DisplayList),
+    /// Drawn by the layer's drawer, in local space. Get the drawing from
+    /// [`CommitBatch::drawers`]; it is a pure function of the
+    /// [`DrawInfo`] and `version`, so a backend can cache what it makes of
+    /// it under `(version, DrawInfo)` and draw again whenever it likes.
+    Drawn {
+        version: u64,
+    },
     Shape(ShapeProps),
     Gradient(Gradient),
 }
@@ -247,7 +264,7 @@ pub(crate) fn resolve(
         ResolvedContentSource::Contents(Contents::Image(image), gravity) => {
             ResolvedContent::Image { image: image.clone(), rect: gravity.place(image.size(), size) }
         }
-        ResolvedContentSource::Contents(Contents::Drawing(dl), _) => ResolvedContent::Drawing(dl.clone()),
+        ResolvedContentSource::Drawn(version) => ResolvedContent::Drawn { version },
         ResolvedContentSource::Shape(s) => ResolvedContent::Shape(s.clone()),
         ResolvedContentSource::Gradient(Some(g)) => ResolvedContent::Gradient(g.clone()),
         ResolvedContentSource::Gradient(None) => ResolvedContent::None,
@@ -258,6 +275,7 @@ pub(crate) fn resolve(
 pub(crate) enum ResolvedContentSource<'a> {
     None,
     Contents(&'a Contents, Gravity),
+    Drawn(u64),
     Shape(&'a ShapeProps),
     Gradient(Option<&'a Gradient>),
 }

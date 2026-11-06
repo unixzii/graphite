@@ -64,7 +64,9 @@ roughly in priority order:
 5. **Nine-slice images** (`contentsCenter`), for stretchable skinned assets.
 6. **Large drawn contents.** Partial redisplay (`set_needs_display_in_rect`)
    and tiling for very large drawn layers: a single bitmap has a size limit
-   in Core Animation (around 8 000 pt tall at 2×).
+   in Core Animation (around 8 000 pt tall at 2×). Backends already decide
+   when to draw; this adds a dirty / requested rect to `DrawInfo` so they
+   can draw tiles (`CATiledLayer` on Core Animation).
 7. **Image decoding** from encoded bytes through the platform decoders
    (ImageIO, gdk-pixbuf/glycin, WIC, `createImageBitmap`). Until then,
    applications decode themselves (for example with the `image` crate).

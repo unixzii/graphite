@@ -9,7 +9,8 @@ CoreGraphics, and uses the `objc2-*` bindings.
 |---|---|
 | `src/host.rs` | `SceneHost`, `attach_to_view`, `attach_to_layer` |
 | `src/backend.rs` | `CaBackend`: maps commit batches onto `CALayer`s; run-loop commit scheduling |
-| `src/draw.rs` | Replays a `DisplayList` into a `CGContext` and rasterizes it to a `CGImage` |
+| `src/draw.rs` | Replays a `DisplayList` into a `CGContext` |
+| `src/delegate.rs` | `GraphiteDrawingDelegate`, the `CALayerDelegate` that displays drawn layers |
 | `src/convert.rs` | Conversions to CG/CA values (paths, colors, images, transforms) |
 | `src/view.rs` | `GraphiteView`, the layer-hosting `NSView` that tracks the backing scale |
 | `src/offscreen.rs` | `CARenderer` + Metal offscreen rendering, used by the tests |
@@ -67,10 +68,22 @@ call `Scene::commit` yourself.
 
 ## Drawings
 
-`draw::rasterize` creates a premultiplied sRGB bitmap context of
-`ceil(bounds · scale)` pixels, flips the CTM to graphite's y-down local
-space, replays the display list, and sets the image as the body's contents.
-The rasterization is cached by `(display list id, bounds, scale)`.
+A drawn layer's body gets a `DrawingDelegate` (holding the batch's
+`Drawers` and the layer id) as its `CALayerDelegate`. Core Animation owns
+the backing store: the backend only calls `setNeedsDisplay` when
+`(display version, local bounds, scale)` changes, and Core Animation calls
+`drawLayer:inContext:` during its transaction commit (right after ours, so
+the drawer sees the committed state), on contents-scale changes, or after it
+purged the store. The delegate runs the drawer for the layer's current
+bounds and `contentsScale` and replays the recording straight into the
+context, flipping the CTM only if Core Animation did not already (under the
+flipped host layer it has).
+
+- `CALayer.delegate` is weak, so the node holds the delegate strongly and
+  clears it on release.
+- The class is not `MainThreadOnly` (offscreen rendering and tests use other
+  threads); it records the scene's thread and ignores displays requested
+  from any other thread, because `Drawers` is not `Send`.
 
 ## Lessons learned (keep these in mind)
 
