@@ -6,7 +6,8 @@ compositor (Core Animation on macOS and GSK on Linux today; Windows and Web
 planned).
 
 ```sh
-cargo run --example demo     # open the demo window (macOS, or Linux with GTK 4.22+)
+cargo run --example demo                 # the feature showcase (macOS, or Linux with GTK 4.22+)
+cargo run --example demo -- --scene ui   # a typical application window
 cargo test --workspace
 ```
 

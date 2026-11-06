@@ -100,6 +100,49 @@ fractional on Wayland; the test VM runs at 1.333. Core uses it for pixel
 snapping. GSK nodes are resolution independent, so nothing is rasterized
 by the backend.
 
+## Performance
+
+Measured on the VM (GTK 4.22, scale 1.333, 1280 × 853 device pixels) with
+the demo, which animates all six cards at once:
+
+| Per frame | Release | Debug |
+|---|---|---|
+| `Demo::update` (setters) | 0.02 ms | 0.05 ms |
+| `Scene::commit` (drawers, batch, apply) | 0.18 ms | 0.25 ms |
+| Rebuilding layer nodes | 0.08 ms | 0.14 ms |
+| Full-frame raster, Cairo renderer | 64–69 ms | 60 ms |
+| Full-frame raster, GL renderer on llvmpipe | 40 ms | |
+
+- Graphite's own work is well under 1 ms a frame; the time goes into
+  rasterizing pixels.
+- **Damage tracking works.** Moving a small layer, either at the root or
+  inside a card (so the card's node is rebuilt), keeps the Cairo renderer
+  at the frame clock's full rate (75–83 fps on the VM). Rebuilt
+  decoration nodes with unchanged values do not add damage.
+- The demo's two scenes make the comparison directly (`--scene … --fps`,
+  release build, frame clock at 60 Hz):
+
+  | Scene | Cairo | GL (virgl) |
+  |---|---|---|
+  | `ui`: an application window, a few small animated regions | 58–60 fps | 46–60 fps |
+  | `showcase`: nearly the whole window animating | 16–19 fps | 16–26 fps |
+
+- The `showcase` scene is slow with Cairo because nearly the whole
+  window changes every frame, and Cairo is a CPU renderer: masks and group
+  opacity need offscreen surfaces, and rotated images, clips and blurs are
+  costly. The compositing card alone costs about 20 ms. GTK's own widget
+  factory animates only small regions.
+- Folding `SetAlpha` into paint colors (instead of an opacity node per
+  primitive) made no measurable difference, so it was not kept.
+- On the VM, GL via virgl renders even the moving-dot scene at about 40 fps;
+  it appears to redraw whole windows. This is not representative of real
+  hardware.
+
+Ideas if CPU rendering matters: split static and animated parts of a
+drawing into separate layers, so that only the animated part is
+re-recorded and damaged; and cache static subtrees as textures (the
+`shouldRasterize` idea from the design discussion).
+
 ## Testing
 
 GTK objects are main-thread only, so `tests/conformance.rs` and

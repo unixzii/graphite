@@ -8,6 +8,7 @@ cargo test -p graphite-macos --test conformance -- --nocapture # …with measure
 cargo test -p graphite-gtk --test conformance                  # conformance on GTK (Linux, needs a session)
 cargo run --example demo -- --selftest                         # real window, 60 frames
 cargo run --example demo -- --snapshot out.png                 # offscreen render of the demo
+cargo run --release --example demo -- --scene ui --fps         # frame rate of the low-damage scene
 cargo clippy --workspace --all-targets
 ```
 
@@ -85,9 +86,10 @@ filters by substring (`<harness>::<case>`), and reports like libtest.
 ### Demo self-test
 
 `cargo run --example demo -- --selftest` animates the demo for 60 frames
-from a timer. It fails unless every timer-driven change was committed by the
-platform's commit scheduling before the next tick. This is the only test
-that exercises scheduling in a real event loop.
+from a timer or the frame clock. It fails unless every change made in a tick
+was committed by the platform's commit scheduling before the next tick. This
+is the only test that exercises scheduling in a real event loop. Run it for
+both scenes (`--scene showcase` and `--scene ui`).
 
 ## Text (future)
 

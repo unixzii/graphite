@@ -1,5 +1,5 @@
-//! The demo scene: six cards, each exercising one area of the API.
-//! Platform independent: only the graphite API is used.
+//! The `showcase` scene: six cards, each exercising one area of the API,
+//! all animated at once (nearly the whole window changes every frame).
 //!
 //! | Card | Shows |
 //! |---|---|
@@ -13,11 +13,11 @@
 mod canvas;
 mod clipping;
 mod compositing;
-mod images;
 mod masks;
 mod shapes;
 mod transforms;
-mod util;
+
+use super::{images, util};
 
 use graphite::*;
 
@@ -42,7 +42,7 @@ pub trait Tile {
     fn update(&mut self, t: f64);
 }
 
-pub struct Demo {
+pub struct Showcase {
     tiles: Vec<Box<dyn Tile>>,
 }
 
@@ -64,8 +64,8 @@ fn card(scene: &Scene, col: usize, row: usize) -> Layer {
     card
 }
 
-impl Demo {
-    pub fn build(scene: &Scene) -> Demo {
+impl Showcase {
+    pub fn build(scene: &Scene) -> Showcase {
         // A soft backdrop gradient behind the cards.
         let backdrop = GradientLayer::new(scene);
         backdrop.set_frame(Rect::from_size(SIZE));
@@ -84,13 +84,12 @@ impl Demo {
             Box::new(clipping::Clipping::build(scene, &card(scene, 1, 1))),
             Box::new(compositing::Compositing::build(scene, &card(scene, 2, 1))),
         ];
-        let mut demo = Demo { tiles };
-        demo.update(0.0);
-        demo
+        Showcase { tiles }
     }
+}
 
-    /// Poses the whole scene for time `t`, in seconds.
-    pub fn update(&mut self, t: f64) {
+impl super::DemoScene for Showcase {
+    fn update(&mut self, t: f64) {
         for tile in &mut self.tiles {
             tile.update(t);
         }

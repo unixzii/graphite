@@ -1,27 +1,35 @@
-//! A window showing everything graphite supports so far — layer geometry
-//! and nested transforms, clipping and scrolling, corners, borders, shadows,
-//! masks, group opacity and z-order, images, shapes, gradients and
-//! immediate-mode drawing — animated at 60 Hz on the native backend of the
-//! current platform.
+//! A window showing graphite on the native backend of the current platform,
+//! animated at 60 Hz. Two scenes:
+//!
+//! - `showcase` (default): everything graphite supports so far — geometry
+//!   and nested transforms, clipping and scrolling, corners, borders,
+//!   shadows, masks, opacity and z-order, images, shapes, gradients and
+//!   immediate-mode drawing — with nearly the whole window animating.
+//! - `ui`: a typical application window (header bar, lists, switches,
+//!   sliders, a calendar, buttons, a text view) where only a few small
+//!   regions animate; the counterpart for comparing redraw costs.
 //!
 //! ```sh
-//! cargo run --example demo                        # open a window
-//! cargo run --example demo -- --selftest          # animate 60 frames, verify commits, exit
-//! cargo run --example demo -- --snapshot out.png  # render offscreen into a PNG, exit
+//! cargo run --example demo                                  # open the showcase
+//! cargo run --example demo -- --scene ui                    # open the UI scene
+//! cargo run --example demo -- --scene ui --fps              # …printing the frame rate
+//! cargo run --example demo -- --selftest                    # animate 60 frames, verify commits, exit
+//! cargo run --example demo -- --scene ui --snapshot ui.png  # render offscreen into a PNG, exit
 //! ```
 //!
-//! Everything except `platform/` is platform independent: the scene, the
+//! Everything except `platform/` is platform independent: the scenes, the
 //! animation and the self-test only use the graphite API.
 
 mod platform;
-mod scene;
+mod scenes;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use graphite::Scene;
 
-use crate::scene::Demo;
+use crate::scenes::{DemoScene, SceneKind};
 
 /// Ticks per second the shells aim for.
 const FPS: f64 = 60.0;
@@ -29,6 +37,8 @@ const FPS: f64 = 60.0;
 const SNAPSHOT_TIME: f64 = 2.4;
 /// Frames animated by `--selftest`.
 const SELFTEST_FRAMES: u32 = 60;
+/// How often `--fps` reports.
+const FPS_REPORT_SECONDS: f64 = 2.0;
 
 /// What the platform shell should do after a tick.
 pub enum Control {
@@ -39,18 +49,22 @@ pub enum Control {
 /// The demo's state, driven by the platform shell.
 pub struct App {
     scene: Scene,
-    demo: Demo,
+    content: Box<dyn DemoScene>,
     frame: u32,
     selftest: bool,
     /// Ticks at which the previous tick's changes were still uncommitted.
     unflushed: Vec<u32>,
+    /// With `--fps`: the start of the current measuring window and the
+    /// ticks counted in it.
+    fps: Option<(Instant, u32)>,
 }
 
 impl App {
-    fn new(selftest: bool) -> App {
-        let scene = Scene::new(scene::SIZE);
-        let demo = Demo::build(&scene);
-        App { scene, demo, frame: 0, selftest, unflushed: Vec::new() }
+    fn new(kind: SceneKind, selftest: bool, fps: bool) -> App {
+        let scene = Scene::new(kind.size());
+        let mut content = kind.build(&scene);
+        content.update(0.0);
+        App { scene, content, frame: 0, selftest, unflushed: Vec::new(), fps: fps.then(|| (Instant::now(), 0)) }
     }
 
     pub fn scene(&self) -> &Scene {
@@ -68,7 +82,17 @@ impl App {
         if self.frame > 1 && self.scene.needs_commit() {
             self.unflushed.push(self.frame);
         }
-        self.demo.update(self.frame as f64 / FPS);
+        self.content.update(self.frame as f64 / FPS);
+
+        if let Some((since, ticks)) = &mut self.fps {
+            *ticks += 1;
+            let elapsed = since.elapsed().as_secs_f64();
+            if elapsed >= FPS_REPORT_SECONDS {
+                println!("fps: {:.1}", *ticks as f64 / elapsed);
+                *since = Instant::now();
+                *ticks = 0;
+            }
+        }
 
         if self.selftest && self.frame == SELFTEST_FRAMES {
             println!(
@@ -99,42 +123,55 @@ fn write_png(path: &PathBuf, image: &Rgba) -> std::io::Result<()> {
     Ok(())
 }
 
-enum Command {
-    Window { selftest: bool },
-    Snapshot(PathBuf),
+struct Options {
+    scene: SceneKind,
+    selftest: bool,
+    fps: bool,
+    snapshot: Option<PathBuf>,
 }
 
-fn parse_args() -> Result<Command, String> {
+const USAGE: &str = "usage: demo [--scene showcase|ui] [--selftest | --fps | --snapshot <out.png>]";
+
+fn parse_args() -> Result<Options, String> {
+    let mut options = Options { scene: SceneKind::Showcase, selftest: false, fps: false, snapshot: None };
     let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        None => Ok(Command::Window { selftest: false }),
-        Some("--selftest") => Ok(Command::Window { selftest: true }),
-        Some("--snapshot") => args.next().map(|p| Command::Snapshot(p.into())).ok_or("--snapshot needs a path".into()),
-        Some(other) => Err(format!("unknown argument `{other}`")),
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--scene" => {
+                let name = args.next().ok_or("--scene needs a name")?;
+                options.scene = SceneKind::parse(&name).ok_or(format!("unknown scene `{name}`"))?;
+            }
+            "--selftest" => options.selftest = true,
+            "--fps" => options.fps = true,
+            "--snapshot" => options.snapshot = Some(args.next().ok_or("--snapshot needs a path")?.into()),
+            other => return Err(format!("unknown argument `{other}`")),
+        }
     }
+    Ok(options)
 }
 
 fn main() -> ExitCode {
-    match parse_args() {
+    let options = match parse_args() {
+        Ok(options) => options,
         Err(message) => {
-            eprintln!("{message}\nusage: demo [--selftest | --snapshot <out.png>]");
-            ExitCode::from(2)
+            eprintln!("{message}\n{USAGE}");
+            return ExitCode::from(2);
         }
-        Ok(Command::Window { selftest }) => platform::run(App::new(selftest)),
-        Ok(Command::Snapshot(path)) => {
-            let mut app = App::new(false);
-            app.demo.update(SNAPSHOT_TIME);
-            let Some(image) = platform::snapshot(&app.scene) else {
-                eprintln!("offscreen rendering is not available on this platform");
-                return ExitCode::FAILURE;
-            };
-            match write_png(&path, &image) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => {
-                    eprintln!("cannot write {}: {err}", path.display());
-                    ExitCode::FAILURE
-                }
-            }
+    };
+    let Some(path) = options.snapshot else {
+        return platform::run(App::new(options.scene, options.selftest, options.fps));
+    };
+    let mut app = App::new(options.scene, false, false);
+    app.content.update(SNAPSHOT_TIME);
+    let Some(image) = platform::snapshot(&app.scene) else {
+        eprintln!("offscreen rendering is not available on this platform");
+        return ExitCode::FAILURE;
+    };
+    match write_png(&path, &image) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("cannot write {}: {err}", path.display());
+            ExitCode::FAILURE
         }
     }
 }
