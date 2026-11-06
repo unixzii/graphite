@@ -34,7 +34,7 @@ Out of scope, by design:
 | `crates/graphite-gtk` | `graphite-gtk` | GTK 4 / GSK backend (Linux) |
 | `crates/graphite-windows` | `graphite-windows` | Windows.UI.Composition + Direct2D backend (Windows 11) |
 | `crates/graphite-conformance` | `graphite-conformance` | Backend-neutral conformance suite |
-| `examples/demo` | (root package `graphite-examples`) | Platform-neutral demo with a small per-platform shell |
+| `examples/demo-rs` | (root package `graphite-examples`) | Platform-neutral demo with a small per-platform shell |
 
 The workspace root is itself a package (`graphite-examples`, unpublished)
 only so that the project-level `examples/` directory can exist.

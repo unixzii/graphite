@@ -153,7 +153,7 @@ are bound to their thread):
 ```sh
 cargo test -p graphite-windows --test conformance   # the suite at 1×, 1.5×, 2×
 cargo test -p graphite-windows --test window        # attach_to_hwnd in a real window
-cargo run --example demo -- --selftest
+cargo run --example demo-rs -- --selftest
 ```
 
 - **Conformance**: all 26 semantic and 7 measured cases pass.

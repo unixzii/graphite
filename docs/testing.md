@@ -7,11 +7,23 @@ cargo test -p graphite-macos --test conformance                # conformance on 
 cargo test -p graphite-macos --test conformance -- --nocapture # …with measured values
 cargo test -p graphite-gtk --test conformance                  # conformance on GTK (Linux, needs a session)
 cargo test -p graphite-windows --test conformance              # conformance on Windows (needs a desktop session)
-cargo run --example demo -- --selftest                         # real window, 60 frames
-cargo run --example demo -- --snapshot out.png                 # offscreen render of the demo
-cargo run --release --example demo -- --scene ui --fps         # frame rate of the low-damage scene
+cargo run --example demo-rs -- --selftest                         # real window, 60 frames
+cargo run --example demo-rs -- --snapshot out.png                 # offscreen render of the demo
+cargo run --release --example demo-rs -- --scene ui --fps         # frame rate of the low-damage scene
 cargo clippy --workspace --all-targets
 ```
+
+## C demo
+
+```sh
+cmake -S . -B /tmp/graphite-c -DCMAKE_BUILD_TYPE=Debug -DGRAPHITE_SANITIZERS=ON
+cmake --build /tmp/graphite-c --target check
+/tmp/graphite-c/examples/demo/demo --scene ui --snapshot /tmp/ui.png
+```
+
+The C `check` target includes showcase/UI real-window selftests on macOS. The
+original Rust demo is retained under `examples/demo-rs`; its code is unchanged.
+See [C demo usage and comparison](../examples/demo/README.md).
 
 ## Layers of testing
 
@@ -90,7 +102,7 @@ filters by substring (`<harness>::<case>`), and reports like libtest.
 
 ### Demo self-test
 
-`cargo run --example demo -- --selftest` animates the demo for 60 frames
+`cargo run --example demo-rs -- --selftest` animates the demo for 60 frames
 from a timer or the frame clock. It fails unless every change made in a tick
 was committed by the platform's commit scheduling before the next tick. This
 is the only test that exercises scheduling in a real event loop. Run it for

@@ -118,8 +118,8 @@ blur radius relates to σ), then record the result in a code comment.
 
 ## 5. Demo
 
-Add `examples/demo/platform/<platform>.rs` with `run(app)` and
-`snapshot(scene)`, and wire it up in `examples/demo/platform/mod.rs`. The
+Add `examples/demo-rs/platform/<platform>.rs` with `run(app)` and
+`snapshot(scene)`, and wire it up in `examples/demo-rs/platform/mod.rs`. The
 scene and the self-test are shared.
 
 ## 6. Document

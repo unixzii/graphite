@@ -23,7 +23,7 @@ them. Headers are also compatible with C++ and Objective-C.
 ## Formatting and test harness
 
 Use **clang-format 18** for all first-party C-family sources/headers in `src/`,
-`include/`, `tests/`, and `conformance/` (including Objective-C).
+`include/`, `tests/`, `conformance/`, and `examples/demo/` (including Objective-C).
 The root `.clang-format` enforces multiline function/control-flow bodies and
 separation between definitions. Vendored files are excluded and stay unchanged.
 If needed, configure `-DCLANG_FORMAT=/path/to/clang-format-18`.
@@ -64,6 +64,7 @@ uses the harness so its checks remain active in Release.
 - `conformance/`: backend-neutral cases, measurements and comparison tools.
 - `tests/`: test harness, resource/Scene suites and lifecycle example.
 - `vendor/`: pinned third-party sources and license information.
+- `examples/demo/`: C scenes with a macOS shell; `examples/demo-rs/` preserves the Rust demo.
 
 Paths in this document are relative to the repository root unless stated otherwise.
 
@@ -122,7 +123,9 @@ Subsequent macOS validation passed Debug ASan/UBSan and Release `check`: format,
 core suites, six native host/offscreen cases, four conformance helper cases,
 Python comparison tests, and all 33 rendering cases. Both builds' 111 captures
 exactly match the unchanged Rust backend's decoded RGBA pixels. All 39
-measurement-log groups also match. See reproducible commands and scope in
+measurement-log groups also match. The C demo adds showcase/UI real-window
+selftests to `check` (nine CTest entries total on macOS); both demo snapshots
+match the preserved Rust demo. See [demo usage](../examples/demo/README.md). See reproducible commands and scope in
 [conformance validation](../conformance/README.md#macos-migration-validation).
 
 Linux and Windows runtime/compiler validation has not yet been performed. These

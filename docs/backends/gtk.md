@@ -160,7 +160,7 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0   # when run
 cargo test -p graphite-gtk --test conformance                        # GL and Vulkan renderers
 GRAPHITE_GSK_RENDERERS=vulkan cargo test -p graphite-gtk --test conformance
 cargo test -p graphite-gtk --test widget
-cargo run --example demo -- --selftest
+cargo run --example demo-rs -- --selftest
 ```
 
 - **Conformance** runs every case with each selected renderer (`gl`,
