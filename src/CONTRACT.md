@@ -3,7 +3,8 @@
 This contract accompanies the existing Rust implementation and the C migration.
 Stages 2 and 3 implement resources, Canvas, Scene/Layer and the core backend
 interface through CMake. The macOS native backend and rendering conformance are
-also implemented; GTK/Windows backends remain future work.
+also implemented. The GTK backend is available with `GRAPHITE_GTK=ON`; the
+Windows port remains future work.
 See [implementation status](README.md)
 for build instructions, coverage and validation limits. Text is a later feature.
 

@@ -98,3 +98,17 @@ The comparator rejects missing/extra captures, any pixel difference, or differin
 measurement groups with a nonzero exit status. It needs no third-party Python
 packages. Results describe this suite on this OS/GPU environment; they are not a
 claim about untested rendering features, other platforms, or performance.
+
+## GTK migration validation
+
+Enable `GRAPHITE_GTK=ON` for `graphite_gtk_conformance`; `GRAPHITE_GSK_RENDERERS`
+selects `gl,vulkan,cairo` (default `gl,vulkan`). On the supplied Ubuntu 26.04.1
+arm64/GTK 4.22.4 VM, Debug and Release pass all 99 renderer/case combinations.
+With software GL and Vulkan, all 333 captures and 117 measurement-log groups
+match the Rust GTK reference. The comparator keys metrics by renderer as well
+as case, scale and label, preventing cross-renderer results from being mixed.
+
+The default VM Vulkan driver's transient output was reproduced with Rust itself
+and is not used as a blocker. GL/Cairo sanitizer checks pass with narrow, explicit
+Fontconfig/EGL leak suppressions confirmed using a standalone GTK program. See
+[GTK validation and reproduction commands](../src/platforms/gtk/README.md).

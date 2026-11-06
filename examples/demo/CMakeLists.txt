@@ -15,6 +15,13 @@ if(APPLE)
     target_link_libraries(graphite_demo PRIVATE graphite_demo_scenes graphite_macos "-framework ImageIO")
     target_compile_options(graphite_demo PRIVATE -Wall -Wextra -Wpedantic -Werror
         "$<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>" "$<$<COMPILE_LANGUAGE:OBJC>:-fblocks>")
+elseif(TARGET graphite_gtk)
+    add_executable(graphite_demo main.c platform/gtk.c)
+    target_link_libraries(graphite_demo PRIVATE graphite_demo_scenes graphite_gtk)
+    target_compile_options(graphite_demo PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+if(TARGET graphite_demo)
     set_target_properties(graphite_demo PROPERTIES OUTPUT_NAME demo C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
     if(BUILD_TESTING)
         add_test(NAME graphite.demo.showcase COMMAND graphite_demo --selftest)

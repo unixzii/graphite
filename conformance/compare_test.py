@@ -64,7 +64,12 @@ class CaptureComparison(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "run.log"
             path.write_text("test example ... [macos] blur@1.5x sigma: 4.001 (expected 4.000 ± 0.500)\n")
-            self.assertEqual(compare.measurements(path), {"blur@1.5x sigma": [(4.001, 4.0, 0.5)]})
+            self.assertEqual(compare.measurements(path), {"macos::blur@1.5x sigma": [(4.001, 4.0, 0.5)]})
+            path.write_text(
+                "[gtk-gl] blur@1x sigma: 4.000 (expected 4.000 ± 0.500)\n"
+                "[gtk-cairo] blur@1x sigma: 3.900 (expected 4.000 ± 0.500)\n"
+            )
+            self.assertEqual(len(compare.measurements(path)), 2)
             path.write_text("no measurements\n")
             with self.assertRaises(ValueError):
                 compare.measurements(path)

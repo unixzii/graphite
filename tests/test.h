@@ -9,10 +9,7 @@ typedef struct
     void (*run)(void);
 } gr_test_case;
 
-#define GR_TEST_CASE(function)                                                                                         \
-    {                                                                                                                  \
-        #function, function                                                                                            \
-    }
+#define GR_TEST_CASE(function) ((gr_test_case){#function, function})
 #define CHECK(expression)                                                                                              \
     do                                                                                                                 \
     {                                                                                                                  \

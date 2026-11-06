@@ -80,15 +80,15 @@ def read_png(path):
 
 def measurements(path):
     pattern = re.compile(
-        r"\[[^\]]+\] (\S+@\S+x) (.+): "
+        r"\[([^\]]+)\] (\S+@\S+x) (.+): "
         r"([-+\d.eE]+) \(expected ([-+\d.eE]+) ± ([-+\d.eE]+)\)"
     )
     found = collections.defaultdict(list)
     for line in path.read_text().splitlines():
         match = pattern.search(line)
         if match:
-            key = f"{match[1]} {match[2]}"
-            found[key].append(tuple(float(match[i]) for i in (3, 4, 5)))
+            key = f"{match[1]}::{match[2]} {match[3]}"
+            found[key].append(tuple(float(match[i]) for i in (4, 5, 6)))
     if not found:
         raise ValueError(f"{path}: no measurements found")
     return dict(found)

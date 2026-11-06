@@ -2,14 +2,14 @@
 
 The C demo contains the same two scenes and animations as the Rust reference in
 `../demo-rs`. Scene code uses only the public Graphite C API; the native event loop
-and PNG snapshot writer live in `platform/macos.m`.
+and PNG snapshot writers live in `platform/macos.m` and `platform/gtk.c`.
 
 - `showcase` (960 × 640): six animated cards covering transforms, Canvas paths and
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
 - `ui` (1000 × 600): the original control/gallery layout with placeholder text
   bars, animated switch, slider, caret, spinner and progress bar.
 
-The windowed C executable requires macOS 14 or later and uses the available C backend.
+The windowed C executable supports macOS 14+ and Linux with GTK 4.22+.
 The scene library builds independently of the native shell. The old Rust demo
 retains its GTK/Windows/macOS shells, with its Cargo example now named `demo-rs`.
 
@@ -26,18 +26,20 @@ cmake --build /tmp/graphite-c --target graphite_demo
 ```
 
 `--snapshot` poses the scene at 2.4 seconds and renders at 1x, matching Rust.
-The window creates a `CADisplayLink` associated with its display and registers it
-on the main run loop in common modes. Animation time comes from display-link
-timestamps rather than an assumed 60 Hz, so refresh-rate changes do not change
-animation speed. Closing the window invalidates the link before releasing state.
+On macOS, the window registers a display-associated `CADisplayLink` on the main
+run loop in common modes. On GTK, a widget frame-clock tick updates the Scene
+before the backend commits in layout. Both shells use display/frame timestamps
+rather than an assumed 60 Hz, so slow rendering or refresh-rate changes do not
+change animation speed. Closing the window removes its update callback before
+releasing state.
 
 `--selftest` runs a real window for 60 display callbacks and verifies that
 previous-tick changes committed before the next tick; successful output includes
 `uncommitted=[]`. It does not force a commit each tick. `--fps` reports actual display-callback
 rate every two seconds. Closing the window exits and releases scene resources.
 
-CMake's `check` target includes both native selftests on macOS. A GUI/Metal-capable
-session is required. Format checks include all C/Objective-C files in this demo.
+CMake's `check` target includes both native selftests on macOS and GTK. A graphical
+session with the selected renderer available is required. Format checks include all C/Objective-C files in this demo.
 
 ## Ownership
 
@@ -70,3 +72,25 @@ ASan/UBSan (`uncommitted=[]`, 2x backing scale), the full nine-entry CTest check
 four invalid-argument cases, and a live `--fps` report. macOS `leaks --atExit`
 reported zero leaked bytes for the UI selftest. All 16 Rust source files were
 verified unchanged byte-for-byte after moving to `demo-rs`.
+
+## GTK
+
+```sh
+cmake -S . -B /tmp/graphite-gtk -DGRAPHITE_GTK=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/graphite-gtk --target graphite_demo
+GSK_RENDERER=gl /tmp/graphite-gtk/examples/demo/demo
+GSK_RENDERER=gl /tmp/graphite-gtk/examples/demo/demo --scene ui --fps
+GSK_RENDERER=cairo /tmp/graphite-gtk/examples/demo/demo --scene ui --snapshot ui.png
+```
+
+GTK snapshots honor `GSK_RENDERER=cairo`, `gl`/`ngl`/`opengl`; the default tries
+Vulkan then GL, matching the Rust reference. In the supplied VM, use `gl` with
+`LIBGL_ALWAYS_SOFTWARE=1` or `cairo` to avoid the known virtual Vulkan issue. SSH
+runs also need the graphical-session variables described in the
+[GTK backend guide](../../src/platforms/gtk/README.md).
+
+On that Ubuntu 26.04.1/GTK 4.22.4 VM, showcase and UI snapshots were both
+pixel-identical to Rust for GL and Cairo (4/4 captures). Both real-window
+60-callback selftests passed with `uncommitted=[]` at 2x in Release and Debug
+ASan/UBSan. The sanitizer run uses the explicit Fontconfig/EGL leak exclusions
+documented in the backend guide. FPS reporting was checked in a live window.

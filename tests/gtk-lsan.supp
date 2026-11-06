@@ -1,0 +1,5 @@
+# Optional suppression of process-lifetime allocations reproduced by a standalone
+# gtk_init/gtk_window_new/GskGLRenderer program without linking Graphite.
+# Verified on Ubuntu 26.04.1, GTK 4.22.4. Do not suppress Graphite or generic GLib.
+leak:libfontconfig.so
+leak:libEGL_mesa.so

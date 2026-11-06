@@ -3,8 +3,8 @@
 The C and Rust implementations coexist. CMake currently builds a static
 `graphite::graphite` target containing immutable resources, Canvas recording,
 Scene/Layer and the commit interface. On macOS, `graphite::macos` provides the
-native Core Animation backend. GTK/Windows backend migration and text remain
-future work.
+native Core Animation backend. Linux can enable the GTK 4.22 backend with
+`-DGRAPHITE_GTK=ON`; Windows backend migration and text remain future work.
 
 ## Build and test
 
@@ -61,10 +61,11 @@ uses the harness so its checks remain active in Release.
 - `include/graphite/`: public C headers.
 - `src/core/`: C implementation and private headers.
 - `src/platforms/macos/`: Objective-C Core Animation backend and hosting.
+- `src/platforms/gtk/`: C GTK/GSK backend and hosting (optional SDK dependency).
 - `conformance/`: backend-neutral cases, measurements and comparison tools.
 - `tests/`: test harness, resource/Scene suites and lifecycle example.
 - `vendor/`: pinned third-party sources and license information.
-- `examples/demo/`: C scenes with a macOS shell; `examples/demo-rs/` preserves the Rust demo.
+- `examples/demo/`: C scenes with macOS and GTK shells; `examples/demo-rs/` preserves the Rust demo.
 
 Paths in this document are relative to the repository root unless stated otherwise.
 
@@ -128,7 +129,10 @@ selftests to `check` (nine CTest entries total on macOS); both demo snapshots
 match the preserved Rust demo. See [demo usage](../examples/demo/README.md). See reproducible commands and scope in
 [conformance validation](../conformance/README.md#macos-migration-validation).
 
-Linux and Windows runtime/compiler validation has not yet been performed. These
+Linux GTK validation has subsequently passed on the supplied Ubuntu VM: Debug
+and Release, three GSK renderer variants with 333/333 captures matching Rust,
+and GL/Cairo sanitizer checks with documented external-library leak exclusions.
+See [GTK validation](platforms/gtk/README.md). Windows remains unvalidated. These
 checks do not establish performance parity or pixel equality on other OS versions.
 
 ## Scene implementation notes

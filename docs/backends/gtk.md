@@ -1,5 +1,9 @@
 # GTK backend (`graphite-gtk`)
 
+The C migration now has a corresponding backend in `src/platforms/gtk`. See
+[its API, build and VM validation notes](../../src/platforms/gtk/README.md).
+The descriptions below retain the Rust implementation as the reference.
+
 This backend renders a scene with GTK 4's scene graph (GSK) and uses the
 gtk4-rs bindings (`gtk4` / `gsk4` 0.11, feature `v4_22`). It is built on
 Linux only (`cfg(target_os = "linux")`), and everything in it is bound to
