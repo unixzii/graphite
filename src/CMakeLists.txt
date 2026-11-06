@@ -3,6 +3,9 @@ add_library(graphite STATIC
     core/resource.c
     core/path.c
     core/canvas.c
+    core/scene.c
+    core/layer.c
+    core/resolve.c
 )
 add_library(graphite::graphite ALIAS graphite)
 target_include_directories(graphite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -22,11 +25,23 @@ endif()
 
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
-    add_executable(graphite_resource_tests tests/resources.c)
-    target_include_directories(graphite_resource_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core)
-    target_link_libraries(graphite_resource_tests PRIVATE graphite Threads::Threads)
+    add_library(graphite_test_harness STATIC tests/test.c)
+    target_link_libraries(graphite_test_harness PUBLIC graphite)
+    target_include_directories(graphite_test_harness PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     if(NOT MSVC)
-        target_compile_options(graphite_resource_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        target_compile_options(graphite_test_harness PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
-    add_test(NAME graphite.resources COMMAND graphite_resource_tests)
+
+    function(graphite_add_suite target suite)
+        add_executable(${target} ${ARGN})
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core)
+        target_link_libraries(${target} PRIVATE graphite_test_harness Threads::Threads)
+        if(NOT MSVC)
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        endif()
+        add_test(NAME graphite.${suite} COMMAND ${target})
+    endfunction()
+
+    graphite_add_suite(graphite_resource_tests resources tests/resources.c)
+    graphite_add_suite(graphite_scene_tests scene tests/scene.c review/lifecycle.c)
 endif()

@@ -1,7 +1,8 @@
 # C migration: decisions and implementation plan
 
-Status: stage 1 interfaces committed; stage 2 resource/Canvas implementation and
-CMake tests are in `src/`. Scene/Layer migration has not started. See
+Status: stages 1 and 2 committed; stage 3 Scene/Layer implementation and its
+recording-backend tests are ready for review in `src/`. Native backend migration
+has not started. See
 [interface contracts](../src/CONTRACT.md) and [implementation status](../src/README.md).
 
 Planning baseline: `4e612d7135cf39a47fd3ad6e9b12dbfe7cd7887e` (2026-11-06).

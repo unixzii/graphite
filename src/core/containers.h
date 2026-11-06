@@ -9,5 +9,4 @@
 #define uthash_fatal(message) abort()
 #include "../vendor/uthash.h"
 
-
 #endif

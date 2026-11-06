@@ -1,8 +1,9 @@
 # Phase 1: C interface review
 
 This contract accompanies the existing Rust implementation and the C migration.
-Stage 2 now implements resources and Canvas through CMake; Scene/Layer and
-native backend APIs remain declarations. See [implementation status](README.md)
+Stages 2 and 3 implement resources, Canvas, Scene/Layer and the core backend
+interface through CMake; native backend implementations remain future work.
+See [implementation status](README.md)
 for build instructions, coverage and validation limits. Text is a later feature.
 
 Review entry points:
@@ -146,15 +147,15 @@ layer reference, resource capture by a recording, userdata transfer on success
 and failure, weak scheduling, and an external layer reference surviving Scene
 teardown. Its mock backend uses no platform SDK.
 
-Header syntax and fixture compilation do not prove runtime ownership. Stage 2/3
-must test release notifications without public-reference cycles, callback cleanup
-reentry, cross-Scene/cycle errors, stale deferred versions, mask reparenting,
-Scene teardown and thread-safe resource reference counting under sanitizers.
+Header syntax alone does not prove runtime ownership. Runtime tests now cover
+release notifications without public-reference cycles, callback cleanup reentry,
+cross-Scene/cycle errors, stale deferred versions, mask ownership, Scene teardown
+and thread-safe resource reference counting under sanitizers.
 
 Validation performed for this review: all seven headers compile independently
 as C11, C++17, and Objective-C with `-Wall -Wextra -Werror -pedantic`; the
 lifecycle fixture passes C11 syntax checking with the same warnings. Those were
-stage 1 checks; stage 2 resource runtime/link validation is recorded in README.md.
+stage 1 checks; subsequent resource/Scene runtime validation is recorded in README.md.
 
 Text, platform hosting constructors, geometry
 helpers and error-reporting callbacks are not implemented by this review. Hosting

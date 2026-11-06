@@ -1,0 +1,30 @@
+name: C checks
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  c:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - build_type: Debug
+            sanitizers: "ON"
+          - build_type: Release
+            sanitizers: "OFF"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18 ninja-build
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DGRAPHITE_SANITIZERS=${{ matrix.sanitizers }}
+          -DCLANG_FORMAT=/usr/bin/clang-format-18
+      - name: Format, build and test
+        run: cmake --build build --target check
