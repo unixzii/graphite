@@ -3,8 +3,8 @@
 Graphite is a cross-platform, retained-mode 2D layer library. Its public API
 is modelled on Core Animation's `CALayer`, plus a CGContext-style
 immediate-mode drawing API. Each platform renders through its **native
-compositor** (Core Animation and GSK today; Windows.UI.Composition and the DOM planned) rather
-than through a renderer of our own.
+compositor** (Core Animation, GSK and Windows.UI.Composition today; the DOM
+planned) rather than through a renderer of our own.
 
 ## Goals and non-goals
 
@@ -32,6 +32,7 @@ Out of scope, by design:
 | `crates/graphite` | `graphite` | Platform-independent core: model, commit pipeline, `Backend` trait, resources, `Canvas` |
 | `crates/graphite-macos` | `graphite-macos` | Core Animation backend |
 | `crates/graphite-gtk` | `graphite-gtk` | GTK 4 / GSK backend (Linux) |
+| `crates/graphite-windows` | `graphite-windows` | Windows.UI.Composition + Direct2D backend (Windows 11) |
 | `crates/graphite-conformance` | `graphite-conformance` | Backend-neutral conformance suite |
 | `examples/demo` | (root package `graphite-examples`) | Platform-neutral demo with a small per-platform shell |
 

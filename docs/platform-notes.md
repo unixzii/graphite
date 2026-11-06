@@ -78,7 +78,7 @@ and Homebrew ships 4.24.
   `BorderMode::Soft` enables anti-aliased edges.
 - `DropShadow` works on `SpriteVisual` and on `LayerVisual`, where it shadows
   the flattened subtree. Whether `BlurRadius` is σ is undocumented; calibrate
-  it with the conformance suite.
+  it with the conformance suite (measured: 3σ).
 - Shapes: `ShapeVisual` + `CompositionSpriteShape` + `CompositionPath`,
   built from D2D geometry through `IGeometrySource2DInterop`. They support
   `TrimStart`/`TrimEnd`. The fill rule comes from the D2D geometry.
@@ -96,6 +96,13 @@ and Homebrew ships 4.24.
   default.
 - Airspace: composition content sits either above or below a window's child
   `HWND`s as a whole. Host graphite in its own child `HWND`.
+- Measured while implementing the backend (Windows 11 build 26300, ARM64
+  VM): `DropShadow.BlurRadius` is 3σ; a `ContainerVisual`'s opacity is
+  group opacity; `ShapeVisual` clips to its size; a brushless
+  `SpriteVisual` casts its `DropShadow` in the shape of `DropShadow.Mask`;
+  Windows.Graphics.Capture returned empty frames on the VM while
+  `PrintWindow(PW_RENDERFULLCONTENT)` reads composed windows, even
+  off-screen. See [the Windows backend](backends/windows.md#lessons-learned).
 
 ## GTK
 

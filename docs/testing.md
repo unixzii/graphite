@@ -6,6 +6,7 @@ cargo test -p graphite                                         # core model only
 cargo test -p graphite-macos --test conformance                # conformance on macOS
 cargo test -p graphite-macos --test conformance -- --nocapture # …with measured values
 cargo test -p graphite-gtk --test conformance                  # conformance on GTK (Linux, needs a session)
+cargo test -p graphite-windows --test conformance              # conformance on Windows (needs a desktop session)
 cargo run --example demo -- --selftest                         # real window, 60 frames
 cargo run --example demo -- --snapshot out.png                 # offscreen render of the demo
 cargo run --release --example demo -- --scene ui --fps         # frame rate of the low-damage scene
@@ -66,7 +67,7 @@ Judge relations rather than absolute values when the platforms legitimately
 differ. For example, the group-opacity case checks that overlap equals a
 single square instead of checking a specific alpha.
 
-Backends whose objects are bound to the main thread (GTK) cannot use the
+Backends whose objects are bound to one thread (GTK, Windows) cannot use the
 `#[test]` functions that `conformance_tests!` generates. They call
 `graphite_conformance::run_main(&[&harness, …])` from a test target with
 `harness = false`. It runs every case for every harness sequentially,
@@ -82,6 +83,10 @@ filters by substring (`<harness>::<case>`), and reports like libtest.
 - `crates/graphite-macos/tests/view.rs`: `attach_to_view` in a real
   `NSWindow`. AppKit requires the main thread, so this target uses
   `harness = false` and provides its own `main`.
+- `crates/graphite-windows/tests/window.rs`: `attach_to_hwnd` in a real
+  window (DispatcherQueue commits, DPI tracking, what the window shows).
+  See the [Windows backend](backends/windows.md#testing) for running it
+  over SSH.
 
 ### Demo self-test
 

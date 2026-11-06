@@ -1,9 +1,9 @@
 # Writing a backend
 
-This is a checklist for adding a platform (Windows and Web are next). Read
-[architecture](../architecture.md) first. The macOS backend is the reference
-for a retained compositor; the GTK backend is the reference for a
-snapshot-style one.
+This is a checklist for adding a platform (Web is next). Read
+[architecture](../architecture.md) first. The macOS and Windows backends are
+the references for a retained compositor; the GTK backend is the reference
+for a snapshot-style one.
 
 ## 1. Crate layout
 
