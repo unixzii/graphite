@@ -1,5 +1,7 @@
 #include "conformance.h"
+
 #include <graphite/macos.h>
+
 #import <AppKit/AppKit.h>
 #include <stdlib.h>
 

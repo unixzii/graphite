@@ -16,6 +16,9 @@
 
 The API reference is in the documented headers under `include/graphite/`.
 Public functions need documentation comments. Use clang-format 18 and the
-`format-check` target; format only changed code. Add model tests under `tests/`
+`format-check` target; format only changed code. The `format` target also
+enforces the blank lines clang-format cannot express (after include guards and
+include blocks, around `extern "C"` wrappers). Includes are grouped as project
+headers, `<graphite/...>`, then system headers. Add model tests under `tests/`
 and rendering cases under `conformance/`. Use the shared test harness for
 progress output and checks that remain active in Release builds.

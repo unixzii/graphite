@@ -1,5 +1,7 @@
-#include <graphite/backend.h>
 #include "test.h"
+
+#include <graphite/backend.h>
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

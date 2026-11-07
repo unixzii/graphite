@@ -1,4 +1,5 @@
 #include "internal.h"
+
 #define GR_CONF_CASE(tier, name) void name(ctx *c);
 #include "cases.def"
 #undef GR_CONF_CASE

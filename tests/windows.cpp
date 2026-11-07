@@ -1,7 +1,10 @@
 #define NOMINMAX
-#include <windows.h>
-#include <graphite/windows.h>
+
 #include "test.h"
+
+#include <graphite/windows.h>
+
+#include <windows.h>
 #include <chrono>
 #include <thread>
 #include <winrt/Windows.Foundation.h>

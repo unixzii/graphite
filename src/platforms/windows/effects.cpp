@@ -1,4 +1,5 @@
 #include "internal.hpp"
+
 #include <mutex>
 
 namespace gr_win

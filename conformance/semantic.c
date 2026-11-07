@@ -1,4 +1,5 @@
 #include "internal.h"
+
 #define EXPECT(label, x, y, value) expect_color(c, f, label, POINT(x, y), value, 8)
 #define BACKGROUND(layer, value)                                                                                       \
     do                                                                                                                 \

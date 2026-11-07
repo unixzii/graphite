@@ -1,5 +1,6 @@
-#include <stdlib.h>
 #include <malloc/malloc.h>
+#include <stdlib.h>
+
 size_t bench_live, bench_count;
 
 void *bench_malloc(size_t size)

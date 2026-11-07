@@ -7,6 +7,7 @@
 #define uthash_malloc(size) gr_alloc(1, (size))
 #define uthash_free(ptr, size) free(ptr)
 #define uthash_fatal(message) abort()
+
 #include "../../vendor/uthash.h"
 
 #endif

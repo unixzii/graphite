@@ -2,6 +2,7 @@
 #define GRAPHITE_INTERNAL_H
 
 #include <graphite/backend.h>
+
 #include <math.h>
 #include <stdatomic.h>
 #include <stdlib.h>

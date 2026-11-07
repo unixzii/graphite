@@ -1,7 +1,9 @@
 #ifndef GRAPHITE_GTK_INTERNAL_H
 #define GRAPHITE_GTK_INTERNAL_H
-#include <graphite/gtk.h>
+
 #include <graphite/backend.h>
+#include <graphite/gtk.h>
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,4 +47,5 @@ bool gr_gtk_tree_size(gr_gtk_shared *shared, gr_size *out);
 GskRenderNode *gr_gtk_tree_root(gr_gtk_shared *shared);
 GtkWidget *gr_gtk_widget_new(gr_gtk_shared *shared);
 void gr_gtk_widget_request(GtkWidget *widget);
+
 #endif

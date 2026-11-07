@@ -1,5 +1,6 @@
 #ifndef GRAPHITE_MODEL_H
 #define GRAPHITE_MODEL_H
+
 #include "internal.h"
 
 #define GR_DIRTY_ALL ((gr_dirty_bits)63)

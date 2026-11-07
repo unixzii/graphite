@@ -1,17 +1,20 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+
 #include "demo.h"
+
 #include <graphite/windows.h>
+
 #include <windows.h>
-#include <dcomp.h>
-#include <wincodec.h>
-#include <wrl/client.h>
 #include <atomic>
 #include <chrono>
-#include <thread>
+#include <dcomp.h>
 #include <stdexcept>
+#include <thread>
 #include <vector>
+#include <wincodec.h>
+#include <wrl/client.h>
 
 namespace
 {

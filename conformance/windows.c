@@ -1,4 +1,5 @@
 #include "conformance.h"
+
 #include <graphite/windows.h>
 
 static void *attach(void *userdata, gr_scene *scene, double scale)

@@ -1,6 +1,8 @@
 #ifndef GRAPHITE_CONFORMANCE_INTERNAL_H
 #define GRAPHITE_CONFORMANCE_INTERNAL_H
+
 #include "conformance.h"
+
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -98,4 +100,5 @@ void set_stroke(gr_layer *layer, rgba8 value, double width);
 void canvas_fill(gr_canvas *canvas, gr_rect rect, rgba8 value);
 void set_gradient(gr_layer *layer, bool radial, gr_point start, gr_point end, double radius);
 void set_shadow(gr_layer *layer, double x, double y, double sigma, double spread);
+
 #endif

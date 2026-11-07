@@ -1,4 +1,5 @@
 #include "demo.h"
+
 #include <graphite/gtk.h>
 
 typedef struct

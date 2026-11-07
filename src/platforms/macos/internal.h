@@ -1,10 +1,12 @@
 #ifndef GRAPHITE_MACOS_INTERNAL_H
 #define GRAPHITE_MACOS_INTERNAL_H
-#import <AppKit/AppKit.h>
-#import <QuartzCore/QuartzCore.h>
-#import <Metal/Metal.h>
+
 #include <graphite/backend.h>
 #include <graphite/macos.h>
+
+#import <AppKit/AppKit.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/QuartzCore.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -38,4 +40,5 @@ struct gr_macos_host
     size_t refs;
     void *object;
 };
+
 #endif

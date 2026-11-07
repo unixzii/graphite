@@ -1,5 +1,7 @@
 #include "demo.h"
+
 #include <graphite/macos.h>
+
 #import <AppKit/AppKit.h>
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/QuartzCore.h>

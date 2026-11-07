@@ -1,4 +1,5 @@
 #include "internal.h"
+
 #include <errno.h>
 #include <sys/stat.h>
 #if defined(_WIN32)

@@ -1,5 +1,7 @@
 #include "test.h"
+
 #include <graphite/gtk.h>
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

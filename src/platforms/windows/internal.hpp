@@ -1,38 +1,41 @@
 #ifndef GRAPHITE_WINDOWS_INTERNAL_HPP
 #define GRAPHITE_WINDOWS_INTERNAL_HPP
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
-#include <d2d1_1.h>
-#include <d3d11.h>
-#include <dxgi.h>
-#include <dispatcherqueue.h>
-#include <windows.ui.composition.interop.h>
-#include <windows.graphics.interop.h>
-#include <windows.graphics.effects.interop.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Foundation.Numerics.h>
-#include <winrt/Windows.Graphics.h>
-#include <winrt/Windows.Graphics.DirectX.h>
-#include <winrt/Windows.Graphics.Effects.h>
-#include <winrt/Windows.System.h>
-#include <winrt/Windows.UI.h>
-#include <winrt/Windows.UI.Composition.h>
-#include <winrt/Windows.UI.Composition.Desktop.h>
+
 #include <graphite/backend.h>
 #include <graphite/windows.h>
+
+#include <windows.h>
 #include <algorithm>
-#include <cmath>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <dispatcherqueue.h>
+#include <dxgi.h>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include <windows.graphics.effects.interop.h>
+#include <windows.graphics.interop.h>
+#include <windows.ui.composition.interop.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.Numerics.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/Windows.Graphics.Effects.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.System.h>
+#include <winrt/Windows.UI.Composition.Desktop.h>
+#include <winrt/Windows.UI.Composition.h>
+#include <winrt/Windows.UI.h>
 
 namespace gr_win
 {
@@ -102,4 +105,5 @@ struct gr_windows_host
     uint32_t width = 0, height = 0;
     ~gr_windows_host();
 };
+
 #endif
