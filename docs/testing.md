@@ -20,15 +20,19 @@ mirror tree, commit ordering, reentry, masks, deferred drawers and teardown.
 `tests/text.c` checks attributed text validation, span copies and UTF-16
 mapping, and drives text layouts through a fake text system to check caret
 normalization, lifetimes and text recording.
+`tests/events.c` drives the host event API through a recording host: handler
+ownership and replacement, frame request coalescing, reentrant dispatch queues,
+release during delivery and event validation.
 `tests/lifecycle.c` demonstrates ownership through an entire Scene lifetime.
 The shared harness supports listing/filtering and reports each case; failures
 remain active in Release builds. See [coverage notes](core-test-audit.md).
 
 ```sh
-ctest --test-dir /tmp/graphite-test -R 'graphite.(resources|scene|text)$' --output-on-failure
+ctest --test-dir /tmp/graphite-test -R 'graphite.(resources|scene|text|events)$' --output-on-failure
 cmake -S . -B /tmp/graphite-asan -DGRAPHITE_SANITIZERS=ON
-cmake --build /tmp/graphite-asan --target graphite_resource_tests graphite_scene_tests graphite_text_tests
-ctest --test-dir /tmp/graphite-asan -R 'graphite.(resources|scene|text)$' --output-on-failure
+cmake --build /tmp/graphite-asan --target graphite_resource_tests graphite_scene_tests graphite_text_tests \
+    graphite_event_tests
+ctest --test-dir /tmp/graphite-asan -R 'graphite.(resources|scene|text|events)$' --output-on-failure
 ```
 
 Sanitizers require Clang/GCC. Windows MSVC builds use separate Debug/Release

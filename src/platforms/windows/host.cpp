@@ -30,7 +30,7 @@ static void destroy_host(void *data)
     delete static_cast<gr_windows_host *>(data);
 }
 
-static const gr_scene_host_vtable host_vtable = {destroy_host};
+static const gr_scene_host_vtable host_vtable = {.destroy = destroy_host};
 
 gr_windows_host *gr_windows_host_data(gr_scene_host const *host)
 {

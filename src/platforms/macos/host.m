@@ -55,7 +55,7 @@ static void destroy_host(void *data)
     (void)CFBridgingRelease(data);
 }
 
-static const gr_scene_host_vtable host_vtable = {destroy_host};
+static const gr_scene_host_vtable host_vtable = {.destroy = destroy_host};
 
 static gr_scene_host *wrap_host(gr_scene *scene, GRHost *object)
 {

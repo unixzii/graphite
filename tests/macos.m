@@ -47,7 +47,7 @@ static void invalid_arguments(void)
         gr_scene_host_unref(host);
 
         /* Hosts from other platforms are rejected. */
-        static const gr_scene_host_vtable foreign = {ignore_host};
+        static const gr_scene_host_vtable foreign = {.destroy = ignore_host};
         host = gr_scene_host_new(scene, &foreign, NULL);
         CHECK(!gr_macos_host_get_layer(host) && !gr_macos_host_get_view(host));
         CHECK(!gr_macos_host_render(host, (gr_size){10, 10}, 1, &pixels) && !pixels.data);

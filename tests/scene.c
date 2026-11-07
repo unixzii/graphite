@@ -816,7 +816,7 @@ static void count_host_destroy(void *data)
 
 static void scene_hosts(void)
 {
-    static const gr_scene_host_vtable vtable = {count_host_destroy};
+    static const gr_scene_host_vtable vtable = {.destroy = count_host_destroy};
     static const gr_scene_host_vtable incomplete = {0};
     int destroyed = 0;
     gr_scene *s = gr_scene_new((gr_size){10, 10});

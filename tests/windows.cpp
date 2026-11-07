@@ -155,7 +155,7 @@ static void invalid_arguments()
     CHECK(!gr_windows_attach_to_hwnd(scene, nullptr));
     CHECK(!gr_windows_offscreen_new(scene, 0));
     CHECK(!gr_windows_offscreen_new(scene, -1));
-    static const gr_scene_host_vtable foreign_vtable = {[](void *) {}};
+    static const gr_scene_host_vtable foreign_vtable = {.destroy = [](void *) {}};
     auto foreign = gr_scene_host_new(scene, &foreign_vtable, nullptr);
     CHECK(!gr_windows_host_get_hwnd(foreign) && !gr_windows_host_get_visual(foreign));
     CHECK(!gr_windows_host_capture(foreign, &p) && !p.data);

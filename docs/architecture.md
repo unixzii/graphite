@@ -38,6 +38,13 @@ reference-counted handle with a platform vtable behind it, like text systems. Th
 Scene. Platform headers add functions for their own hosts (native view, layer, widget or window, offscreen readback)
 that recognize them by vtable address and return NULL/false for other hosts.
 
+Hosts with a native input surface are interactive: they deliver input and frame events from
+[event.h](../include/graphite/event.h) to one handler. Graphite normalizes events into host coordinates and paces
+frames; hit testing, routing, gestures and focus chains stay with the application. Core owns the handler and the
+delivery rules (validation, frame request coalescing, queueing events dispatched from inside a handler, deferred
+handler destruction); platforms report native events through `gr_scene_host_dispatch_event` and implement the
+optional event callbacks of `gr_scene_host_vtable`.
+
 ## Pipeline
 
 Setters update model properties and mark dirty groups. The first pending change

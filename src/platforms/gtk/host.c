@@ -52,7 +52,7 @@ static void destroy_host(void *data)
     g_free(host);
 }
 
-static const gr_scene_host_vtable host_vtable = {destroy_host};
+static const gr_scene_host_vtable host_vtable = {.destroy = destroy_host};
 
 gr_gtk_host *gr_gtk_host_data(const gr_scene_host *host)
 {

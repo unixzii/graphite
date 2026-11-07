@@ -104,7 +104,8 @@ typedef enum
     GR_ERROR_SCENE,
     GR_ERROR_CYCLE,
     GR_ERROR_STATE,
-    GR_ERROR_REENTRANT
+    GR_ERROR_REENTRANT,
+    GR_ERROR_UNSUPPORTED /**< The object does not support the operation, e.g. events on a non-interactive host. */
 } gr_result;
 
 typedef struct

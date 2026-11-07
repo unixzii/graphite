@@ -241,7 +241,7 @@ static void offscreen_cache_and_lifetime(void)
     gr_gtk_pixels invalid = {0};
     CHECK(!gr_gtk_renderer_render(renderer, host, NAN, &invalid));
     CHECK(!invalid.data);
-    static const gr_scene_host_vtable foreign_vtable = {ignore_host};
+    static const gr_scene_host_vtable foreign_vtable = {.destroy = ignore_host};
     gr_scene_host *foreign = gr_scene_host_new(scene, &foreign_vtable, NULL);
     CHECK(!gr_gtk_host_get_widget(foreign) && !gr_gtk_host_get_root_node(foreign));
     CHECK(!gr_gtk_host_get_size(foreign, &size) && size.width == 0);

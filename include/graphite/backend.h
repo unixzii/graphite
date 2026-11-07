@@ -193,14 +193,27 @@ GR_API gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *
 
 /** A platform host behind the common gr_scene_host handle. Platform host functions recognize their hosts by the
  * vtable address passed to gr_scene_host_new, so pass a static vtable. destroy releases the platform host on final
- * release; it must not call Scene APIs or release the host again. */
+ * release, after the event handler; it must not call Scene APIs or use the host.
+ *
+ * An interactive host sets every event callback; a host without an input surface leaves them all NULL. Core
+ * validates arguments, coalesces frame requests and calls these on the Scene's owning thread:
+ * - request_frame schedules one GR_EVENT_FRAME for the next display refresh, delivered with
+ *   gr_scene_host_dispatch_event before that frame's commit point. Core calls it once per pending request.
+ * - now returns the frame clock's current time in seconds.
+ * - set_cursor, set_text_input (NULL disables) and request_focus apply to the native surface. */
 typedef struct
 {
     void (*destroy)(void *data);
+    void (*request_frame)(void *data);
+    double (*now)(void *data);
+    void (*set_cursor)(void *data, gr_cursor cursor);
+    void (*set_text_input)(void *data, const gr_text_input *input);
+    void (*request_focus)(void *data);
 } gr_scene_host_vtable;
 
-/** Creates an owned host of scene with all callbacks required. Copies the vtable and takes ownership of data on
- * success; returns NULL and leaves data with the caller for missing arguments. Holds a gr_scene_link, not the Scene. */
+/** Creates an owned host of scene. Copies the vtable and takes ownership of data on success; returns NULL and leaves
+ * data with the caller for missing arguments, a missing destroy or a partial set of event callbacks. Holds a
+ * gr_scene_link, not the Scene. */
 GR_API gr_scene_host *gr_scene_host_new(gr_scene *scene, const gr_scene_host_vtable *vtable, void *data);
 
 /** Returns the vtable address passed to gr_scene_host_new. */
@@ -208,6 +221,16 @@ GR_API const gr_scene_host_vtable *gr_scene_host_get_vtable(const gr_scene_host 
 
 /** Returns the borrowed platform data passed to gr_scene_host_new, valid while the host is alive. */
 GR_API void *gr_scene_host_get_data(const gr_scene_host *host);
+
+/** Delivers event to the handler and returns whether it consumed it; event storage is borrowed for the call.
+ * Returns false without delivery for non-interactive hosts, invalid events, a missing handler, and FRAME events
+ * that were not requested. FRAME clears the pending request before delivery, so the handler can request the next
+ * one. Events dispatched while a handler runs (for example focus changes the platform sends synchronously) are
+ * copied, delivered in order after it returns, and report false. Holds a host reference until delivery ends. */
+GR_API bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event);
+
+/** Returns whether a frame was requested and not yet delivered. */
+GR_API bool gr_scene_host_frame_requested(const gr_scene_host *host);
 
 /* Deferred drawing */
 
