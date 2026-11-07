@@ -1,7 +1,7 @@
-add_library(graphite_macos backend.m draw.m convert.m host.m offscreen.m)
+add_library(graphite_macos backend.m draw.m convert.m host.m offscreen.m text.m)
 add_library(graphite::macos ALIAS graphite_macos)
 target_link_libraries(graphite_macos PUBLIC graphite
-    "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" "-framework Metal")
+    "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" "-framework CoreText" "-framework Metal")
 target_compile_options(graphite_macos PRIVATE -fobjc-arc -fblocks -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(graphite_macos PRIVATE ${PROJECT_SOURCE_DIR}/src/core)
 
@@ -11,4 +11,10 @@ if(BUILD_TESTING)
     target_compile_options(graphite_macos_tests PRIVATE -fobjc-arc -fblocks -Wall -Wextra -Wpedantic -Werror)
     target_link_libraries(graphite_macos_tests PRIVATE graphite_macos graphite_test_harness)
     add_test(NAME graphite.macos COMMAND graphite_macos_tests)
+
+    add_executable(graphite_macos_text_tests ${PROJECT_SOURCE_DIR}/tests/macos_text.m)
+    target_include_directories(graphite_macos_text_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(graphite_macos_text_tests PRIVATE -fobjc-arc -fblocks -Wall -Wextra -Wpedantic -Werror)
+    target_link_libraries(graphite_macos_text_tests PRIVATE graphite_macos graphite_test_harness)
+    add_test(NAME graphite.macos.text COMMAND graphite_macos_text_tests)
 endif()

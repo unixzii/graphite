@@ -56,6 +56,11 @@ bool gr_macos_render_layer(void *layer, gr_size size, double scale, gr_macos_pix
 /** Releases the pixel allocation and zeros the result; NULL is accepted. */
 void gr_macos_pixels_clear(gr_macos_pixels *pixels);
 
+/** Creates an owned CoreText text system. Layouts it creates are drawn by the Core Animation backend and may be
+ * created, queried and released on any thread. Generic families map to the system designs: "system-ui" and
+ * "sans-serif" to SF, "serif" to New York and "monospace" to SF Mono. */
+gr_text_system *gr_macos_text_system_new(void);
+
 #ifdef __cplusplus
 }
 #endif

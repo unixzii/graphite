@@ -134,7 +134,9 @@ void gr_cg_replay(CGContextRef c, const gr_display_list *list)
                 break;
             }
             case GR_DRAW_TEXT_LAYOUT:
-                /* Native text drawing lands with the CoreText text system. */
+                if (gr_text_layout_get_vtable(op->value.text_layout.layout) == &gr_ct_layout_vtable)
+                    gr_ct_draw_layout(c, op->value.text_layout.layout, op->value.text_layout.origin,
+                                      op->value.text_layout.color);
                 break;
             case GR_DRAW_IMAGE:
             {

@@ -96,8 +96,9 @@ position of an animating layer would then live in the compositor (like
 
 The API is [text.h](../include/graphite/text.h). Core implements it (attributed
 text, the text system and layout wrappers, and Canvas recording), and a fake
-text system tests it. No platform provides a text system yet, and backends skip
-`GR_DRAW_TEXT_LAYOUT` ops until they do.
+text system tests it. macOS provides a CoreText text system
+(`gr_macos_text_system_new`) covering M1 and M2 below; GTK and Windows skip
+`GR_DRAW_TEXT_LAYOUT` ops until theirs land.
 
 ### Design
 
@@ -108,17 +109,19 @@ text system tests it. No platform provides a text system yet, and backends skip
   the core constructor `gr_text_system_new(vtable, userdata)`.
 - `gr_text_system_layout` takes an immutable `gr_attributed_text` and
   `gr_text_layout_options` and returns a `gr_text_layout`. The platform builds
-  that layout with `gr_text_layout_new(system, text, options, vtable, userdata)`. Core
-  handles reference counting, identities and argument validation, and forwards
-  queries to the vtable.
+  that layout with
+  `gr_text_layout_new(system, text, options, vtable, userdata)`. Core handles
+  reference counting, identities and argument validation, and forwards queries
+  to the vtable.
 - **Lazy queries**: metrics, lines, carets and hit testing all go through the
   vtable, and core caches nothing. A caller that only draws never pays for
   queries it does not make. Platforms may defer native layout until the first
   query or draw.
 - **Indices** are UTF-8 byte offsets. Core validates UTF-8 and code-point
   boundaries, keeps spans in order for platforms to apply natively (later spans
-  win), and offers UTF-16 conversion for CoreText and DirectWrite. Caret stops are grapheme cluster
-  boundaries; affinity picks which side of a line break a caret is on.
+  win), and offers UTF-16 conversion for CoreText and DirectWrite. Caret stops
+  are grapheme cluster boundaries; affinity picks which side of a line break a
+  caret is on.
 - **Paint-only color**: `gr_canvas_draw_text_layout` takes a default color for
   runs without their own, so a color change does not need a new layout. Only
   spans set colors (the base style's color is ignored), so the style has a
@@ -146,10 +149,7 @@ text system tests it. No platform provides a text system yet, and backends skip
 - Queries: metrics (size, line count, first/last baseline, visible range,
   truncated) and per-line range, bounds, baseline, ascent and descent.
 - Native work per platform:
-  - **macOS**: lay out with a CTTypesetter and break lines manually so
-    `max_lines` and the ellipsis line (`CTLineCreateTruncatedLine`) are under
-    control. Replay with a flipped text matrix, and turn off font smoothing in
-    transparent backing stores.
+  - **macOS** (done): see [the Core Animation backend notes](backends/macos.md#text).
   - **GTK**: lay out with Pango and draw with `gtk_snapshot_append_layout`.
     Turn off metric hinting and glyph position rounding so layouts do not
     depend on scale. Use `pango_layout_set_height(-max_lines)` with ellipsize.
@@ -158,12 +158,13 @@ text system tests it. No platform provides a text system yet, and backends skip
     derive `SetMaxHeight` from a first pass and trim with an ellipsis sign.
     Per-run colors need a custom `IDWriteTextRenderer`, because D2D drawing
     effects must be device-bound brushes. Enable color fonts.
-- Demo scene with wrapped, truncated, bidi and emoji text.
+- Demo scene with wrapped, truncated, bidi and emoji text. The demo needs a
+  platform hook to create its text system first.
 
 ### M2: carets and hit testing
 
 - Caret stops (next/previous), hit testing, caret rectangles with affinity, and
-  range rectangles for selections. Bidirectional text is the hard part: split
+  range rectangles for selections (done on macOS). Bidirectional text is the hard part: split
   carets and visual-order range rectangles need care on every platform.
 - Native APIs:
   - CoreText: `CTLineGetStringIndexForPosition` and

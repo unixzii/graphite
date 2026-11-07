@@ -20,10 +20,48 @@ Public declarations: [`macos.h`](../../include/graphite/macos.h).
   `shadowOffset` and `maskedCorners` all behave y-down. The conformance
   suite verifies each of them.
 
+## Text
+
+`gr_macos_text_system_new` (`src/platforms/macos/text.m`, tested by
+`tests/macos_text.m`) lays text out with CoreText:
+
+- Styles become private per-field attributes on a `CFAttributedString`, in span
+  order, so later spans win; each attribute run then gets the `CTFont` its
+  fields resolve to. Fonts are cached per text system. Generic families use
+  the system designs (SF, New York, SF Mono). The italic trait in a descriptor
+  is ignored for system fonts, so italics go through
+  `CTFontCreateCopyWithSymbolicTraits`.
+- Each paragraph gets an explicit base direction. `AUTO` uses the first
+  letter (marks, digits and punctuation are skipped) and a table of
+  right-to-left blocks, so alignment and CoreText's bidi agree.
+- Lines come from a `CTTypesetter`, one paragraph at a time, which keeps
+  `max_lines` and ellipses under our control. CoreText breaks between CR and
+  LF, so the pair is rejoined. A zero-length range passed to
+  `CTTypesetterCreateLine` means "to the end", so empty lines have no `CTLine`.
+- **Ellipses are built by hand**: the visible clusters plus a separate token
+  line. `CTLineCreateTruncatedLine` maps the token run onto the elided string
+  range and returns caret offset 0 for elided indices.
+- **Draw run by run.** After a run with its own color, `CTLineDraw` leaves
+  that color in the context, and later runs using
+  `kCTForegroundColorFromContextAttributeName` inherit it. Replay resets the
+  fill color before each context-colored run, flips the text matrix for the
+  y-down CTM and turns off font smoothing (backing stores are transparent).
+- Underline and strikethrough are drawn as rectangles from the run's font
+  metrics: CoreText draws no strikethrough, and drawing both the same way
+  keeps them consistent.
+- Selection rectangles come from `CTLineEnumerateCaretOffsets`, merged per
+  line, so a range across a direction change yields one rectangle per visual
+  piece.
+- Layout is built on first use under an `os_unfair_lock` and is immutable
+  afterwards, so queries are safe from any thread.
+
 ## Known gaps
 
 - Gradient paints on shape layers fills and strokes degrade to the first
   stop. Doing this properly needs a `CAGradientLayer` masked by the shape.
+- Text: no font loading from bytes, locale, font features or line height
+  yet. Text drawn into a layer is rasterized at the backing scale, so it blurs
+  under scale transforms (see the roadmap's rasterization scale gap).
 - No image magnification filter property yet (Core Animation defaults to
   linear filtering).
 - `CGImage`s are shared per resource identity through per-node reference counts.

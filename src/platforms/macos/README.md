@@ -28,8 +28,12 @@ and swizzled to top-down premultiplied RGBA8. The standalone layer renderer
 requires a root layer without a superlayer. The offscreen host API creates and
 owns that container for callers.
 
+`text.m` implements the CoreText text system (`gr_macos_text_system_new`), and
+`draw.m` replays its layouts; see the [backend notes](../../../docs/backends/macos.md#text).
+
 `graphite_macos_tests` covers raw readback orientation, scale, real NSView hosting
 and resizing, host/model lifetime, and repeated complete Graphite offscreen
-captures. These tests require a normal macOS GUI/Metal session; a sandbox may
+captures. `graphite_macos_text_tests` covers text metrics, wrapping, truncation,
+alignment, carets, selection, concurrent queries and rendering. These tests require a normal macOS GUI/Metal session; a sandbox may
 hide the Metal device or deny WindowServer access. Native conformance is provided
 by the repository-level `conformance/` target.
