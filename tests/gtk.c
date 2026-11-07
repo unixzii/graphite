@@ -170,6 +170,121 @@ static void frame_clock_commits(void)
 
 typedef struct
 {
+    gr_scene *scene;
+    gr_layer *layer;
+    unsigned frames, missed, viewports, focus_ins, focus_outs;
+    gr_event last_frame;
+} event_state;
+
+static bool on_event(void *userdata, const gr_event *event)
+{
+    event_state *state = userdata;
+    switch (event->type)
+    {
+        case GR_EVENT_FRAME:
+            ++state->frames;
+            state->last_frame = *event;
+            /* Changes from the previous frame were committed in its layout phase. */
+            if (state->frames > 1 && gr_scene_needs_commit(state->scene))
+                ++state->missed;
+            OK(gr_layer_set_position(state->layer, (gr_point){5 + state->frames, 5}));
+            return true;
+        case GR_EVENT_VIEWPORT:
+            ++state->viewports;
+            return true;
+        case GR_EVENT_FOCUS_IN:
+            ++state->focus_ins;
+            return true;
+        case GR_EVENT_FOCUS_OUT:
+            ++state->focus_outs;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void wait_frames(event_state *state, unsigned frames)
+{
+    gint64 deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+    while (state->frames < frames)
+    {
+        CHECK(g_get_monotonic_time() < deadline);
+        iterate();
+    }
+}
+
+static void widget_events(void)
+{
+    gr_scene *scene = gr_scene_new((gr_size){120, 80});
+    gr_scene_host *offscreen = gr_gtk_attach_offscreen(scene);
+    CHECK(offscreen && !gr_scene_host_is_interactive(offscreen));
+    gr_scene_host_unref(offscreen);
+    gr_scene_unref(scene);
+
+    scene = gr_scene_new((gr_size){120, 80});
+    event_state state = {.scene = scene, .layer = red_layer(scene)};
+    gr_scene_host *host = gr_gtk_attach(scene);
+    CHECK(host && gr_scene_host_is_interactive(host));
+    gr_viewport_event viewport;
+    CHECK(!gr_scene_host_get_viewport(host, &viewport)); /* Reported on first allocation. */
+    gr_event_handler handler = {&state, on_event, NULL};
+    OK(gr_scene_host_set_event_handler(host, &handler));
+    OK(gr_scene_host_request_frame(host)); /* Before realization: delivered once the widget has a frame clock. */
+    GtkWidget *widget = gr_gtk_host_get_widget(host), *window = gtk_window_new();
+    g_object_ref_sink(window);
+    gtk_window_set_child(GTK_WINDOW(window), widget);
+    gtk_window_present(GTK_WINDOW(window));
+    wait_frames(&state, 1);
+    wait_clean(scene, widget);
+    CHECK(state.viewports >= 1 && gr_scene_host_get_viewport(host, &viewport));
+    CHECK(viewport.size.width == gtk_widget_get_width(widget) && viewport.size.height == gtk_widget_get_height(widget));
+    GdkSurface *surface = gtk_native_get_surface(gtk_widget_get_native(widget));
+    CHECK(viewport.scale == gdk_surface_get_scale(surface));
+
+    /* A frame per request, each committed before the next, in the frame clock's time domain. */
+    for (unsigned i = 2; i <= 10; ++i)
+    {
+        OK(gr_scene_host_request_frame(host));
+        wait_frames(&state, i);
+    }
+    gr_frame_event frame = state.last_frame.value.frame;
+    CHECK(state.last_frame.time <= gr_scene_host_get_time(host));
+    CHECK(frame.interval > 0 && frame.interval < 0.5 && frame.target_time > state.last_frame.time);
+    gint64 settle = g_get_monotonic_time() + 200000;
+    while (g_get_monotonic_time() < settle)
+        iterate();
+    CHECK(state.frames == 10 && state.missed == 0);
+
+    /* Focus follows the focus widget of the active window. */
+    OK(gr_scene_host_request_focus(host));
+    iterate();
+    CHECK(gtk_widget_has_focus(widget));
+    bool active = gtk_window_is_active(GTK_WINDOW(window));
+    CHECK(gr_scene_host_has_focus(host) == active && state.focus_ins == (active ? 1u : 0u));
+    gtk_widget_set_focusable(widget, FALSE); /* Moves focus away. */
+    gtk_window_set_focus(GTK_WINDOW(window), NULL);
+    iterate();
+    CHECK(!gr_scene_host_has_focus(host) && state.focus_outs == state.focus_ins);
+    gtk_widget_set_focusable(widget, TRUE);
+
+    /* A request outstanding at release stops with the host; the widget keeps rendering. */
+    OK(gr_scene_host_request_frame(host));
+    gr_scene_host_unref(host);
+    settle = g_get_monotonic_time() + 200000;
+    while (g_get_monotonic_time() < settle)
+        iterate();
+    CHECK(state.frames == 10);
+    OK(gr_layer_set_position(state.layer, (gr_point){30, 30}));
+    wait_clean(scene, widget);
+    gtk_window_destroy(GTK_WINDOW(window));
+    g_object_unref(window);
+    gr_layer_unref(state.layer);
+    gr_scene_unref(scene);
+    iterate();
+}
+
+typedef struct
+{
     unsigned draws, destroyed;
 } draw_state;
 
@@ -285,6 +400,7 @@ int main(int argc, char **argv)
         return 1;
     }
     const gr_test_case cases[] = {GR_TEST_CASE(widget_hosting), GR_TEST_CASE(frame_clock_commits),
-                                  GR_TEST_CASE(offscreen_cache_and_lifetime), GR_TEST_CASE(empty_scene)};
+                                  GR_TEST_CASE(widget_events), GR_TEST_CASE(offscreen_cache_and_lifetime),
+                                  GR_TEST_CASE(empty_scene)};
     return gr_test_run("gtk", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
 }

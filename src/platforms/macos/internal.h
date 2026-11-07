@@ -29,7 +29,12 @@ bool gr_macos_install(gr_scene *scene, CALayer *host);
 @interface GRSceneView : NSView
 @property(nonatomic) gr_scene_link *sceneLink;
 @property(nonatomic, strong) CALayer *hostLayer;
+/** Borrowed; set after wrapping and cleared by detachHost when the host is destroyed. */
+@property(nonatomic) gr_scene_host *host;
 - (void)syncBackingScale;
+- (void)reportViewport;
+- (void)requestFrame;
+- (void)detachHost;
 @end
 
 @interface GRHost : NSObject

@@ -14,7 +14,7 @@ They share one layer in `shared/`:
 | Example | Size | Content |
 |---|---|---|
 | `showcase` | 960 × 640 | Six animated cards covering transforms, Canvas paths and gradients, shape layers, masks, clipping/scrolling, compositing and images. Its photo carousel pages in a loop; side photos shrink, tilt and blur (layer blur). |
-| `ui` | 1000 × 600 | A control/gallery layout with animated switch, slider, caret, spinner and progress bar. Its labels, calendar and editor paragraph are real text: English labels with emoji, and a wrapped paragraph with styled spans, a line of Chinese and an ellipsis. Without a platform text system it draws placeholder bars instead. |
+| `ui` | 1000 × 600 | A control/gallery layout with animated switch, slider, caret, spinner and progress bar; its accent color turns gray while the window has no keyboard focus. Its labels, calendar and editor paragraph are real text: English labels with emoji, and a wrapped paragraph with styled spans, a line of Chinese and an ellipsis. Without a platform text system it draws placeholder bars instead. |
 | `stress` | 800 × 800 | An 80 × 80 grid of independent square layers. Every three seconds, a ripple travels outward from the center, animating each cell's scale, radial displacement and color. |
 | `glyphs` | 960 × 600 | Per-glyph text transitions in four looping labels: a clock, a price counter that rolls up or down, swapping phrases (CJK and emoji included) and a wrapped paragraph that reflows as words are inserted and removed. Every glyph is its own content layer drawn with `gr_canvas_draw_text_glyphs`; glyphs that stay glide to their new place while the others scale, slide, fade and blur (layer blur) in or out, driven by springs. Needs a platform text system. |
 
@@ -37,22 +37,24 @@ Every example accepts the same options: `--selftest`, `--fps` or
 `--snapshot <out.png>`.
 
 `--snapshot` poses the scene at 2.4 seconds and renders at 1x.
-On macOS, the window registers a display-associated `CADisplayLink` on the main
-run loop in common modes. On GTK, a widget frame-clock tick updates the Scene
-before the backend commits in layout. The Windows shell posts compositor-clock events from a worker to the UI thread.
-All shells use elapsed time
-rather than an assumed 60 Hz, so slow rendering or refresh-rate changes do not
-change animation speed. Closing the window removes its update callback before
-releasing state.
+Every shell attaches an interactive host and drives the scene from its
+`GR_EVENT_FRAME` events (`shared/frames.c`), requesting the next frame from each
+one: the host's display link on macOS, its frame clock's update phase on GTK and
+its compositor clock on Windows. Animations use frame time rather than an
+assumed 60 Hz, so slow rendering or refresh-rate changes do not change animation
+speed. Closing the window releases the host, and with it the frame handler,
+before releasing state.
 
-`--selftest` runs a real window for 60 display callbacks and verifies that the
+`--selftest` runs a real window for 60 frames and verifies that the
 backend commits changes at its platform commit point without forcing a commit
-each tick; successful output includes `uncommitted=[]`. GTK and Windows check
+each frame; successful output includes `uncommitted=[]` and the viewport the
+host reported (a missing report fails). It also prints whether the host got
+keyboard focus, which depends on the session and does not fail the test. GTK and Windows check
 that previous-tick changes committed before the next tick. macOS commits when
 the main run loop is about to sleep, like Core Animation's implicit transactions,
 so it checks every such idle point instead (`idle_commits` must be nonzero). Ticks
 delivered back to back without an idle point in between legitimately share one
-commit; macOS reports them as `coalesced`. `--fps` reports actual display-callback
+commit; macOS reports them as `coalesced`. `--fps` reports the actual frame
 rate every two seconds. Closing the window exits and releases scene resources.
 
 Each example registers `graphite.examples.<name>` running its selftest, so CMake's
@@ -66,9 +68,13 @@ Create `examples/<name>/` with a source file that defines its state, build and
 update callbacks, and `main`:
 
 ```c
-static const example_desc desc = {"name", {800, 600}, build, update, free_state};
+static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL};
 return example_main(argc, argv, &desc);
 ```
+
+The last field is an optional focus callback: the shells pass keyboard focus
+changes to it (`ui` grays its accent color while the window is unfocused).
+Scenes start focused, which is how snapshots render.
 
 Add `graphite_add_example(<name> <sources>...)` in its `CMakeLists.txt` and
 `add_subdirectory(<name>)` in `examples/CMakeLists.txt`.

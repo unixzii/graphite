@@ -4,12 +4,8 @@
 
 typedef struct
 {
-    example *content;
+    example_frames frames;
     GMainLoop *loop;
-    guint tick_id;
-    unsigned frame, fps_ticks, unflushed[60], unflushed_count;
-    gint64 start_time, report_time;
-    bool selftest, fps;
     int status;
 } example_window;
 
@@ -29,51 +25,11 @@ static gboolean close_window(GtkWindow *window, gpointer userdata)
     return TRUE;
 }
 
-static void report_fps(example_window *state, gint64 time)
+static void finish_selftest(example_frames *frames)
 {
-    ++state->fps_ticks;
-    double elapsed = (double)(time - state->report_time) / G_TIME_SPAN_SECOND;
-    if (elapsed < 2)
-        return;
-    printf("fps: %.1f\n", state->fps_ticks / elapsed);
-    fflush(stdout);
-    state->report_time = time;
-    state->fps_ticks = 0;
-}
-
-static void finish_selftest(example_window *state)
-{
-    printf("selftest: frames=%u uncommitted=[", state->frame);
-    for (unsigned i = 0; i < state->unflushed_count; ++i)
-        printf("%s%u", i ? ", " : "", state->unflushed[i]);
-    printf("] backing_scale=%g\n", gr_scene_get_backing_scale(state->content->scene));
-    fflush(stdout);
-    state->status = state->unflushed_count ? 1 : 0;
+    example_window *state = frames->platform;
+    state->status = example_frames_report(frames, NULL, true);
     g_main_loop_quit(state->loop);
-}
-
-static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer userdata)
-{
-    (void)widget;
-    example_window *state = userdata;
-    gint64 time = gdk_frame_clock_get_frame_time(clock);
-    if (state->frame == 0)
-        state->start_time = state->report_time = time;
-    ++state->frame;
-    if (state->selftest && state->frame > 1 && gr_scene_needs_commit(state->content->scene))
-        state->unflushed[state->unflushed_count++] = state->frame;
-
-    /* The backend commits in layout after this update-phase tick. */
-    example_update(state->content, (double)(time - state->start_time) / G_TIME_SPAN_SECOND);
-    if (state->fps)
-        report_fps(state, time);
-    if (state->selftest && state->frame == 60)
-    {
-        state->tick_id = 0;
-        finish_selftest(state);
-        return G_SOURCE_REMOVE;
-    }
-    return G_SOURCE_CONTINUE;
 }
 
 gr_text_system *example_platform_text_system(void)
@@ -101,17 +57,26 @@ int example_platform_run(example *content, bool selftest, bool fps)
     gtk_window_set_default_size(window, (int)size.width, (int)size.height);
     gtk_window_set_child(window, widget);
 
-    example_window state = {.content = content, .loop = g_main_loop_new(NULL, FALSE), .selftest = selftest, .fps = fps};
+    example_window state = {.loop = g_main_loop_new(NULL, FALSE)};
+    state.frames = (example_frames){.content = content,
+                                    .host = host,
+                                    .selftest = selftest,
+                                    .fps = fps,
+                                    /* The backend commits in the layout phase, after the update phase of frames. */
+                                    .strict = true,
+                                    .finished = finish_selftest,
+                                    .platform = &state};
     gulong close_handler = g_signal_connect(window, "close-request", G_CALLBACK(close_window), &state);
-    state.tick_id = gtk_widget_add_tick_callback(widget, tick, &state, NULL);
     gtk_window_present(window);
-    g_main_loop_run(state.loop);
+    if (example_frames_start(&state.frames))
+        g_main_loop_run(state.loop);
+    else
+        state.status = 1;
 
-    if (state.tick_id)
-        gtk_widget_remove_tick_callback(widget, state.tick_id);
     g_signal_handler_disconnect(window, close_handler);
     gtk_window_destroy(window);
     g_object_unref(window);
+    /* Releasing the host destroys the frame handler, which borrows state. */
     gr_scene_host_unref(host);
     g_main_loop_unref(state.loop);
     return state.status;

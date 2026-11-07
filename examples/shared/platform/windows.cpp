@@ -7,62 +7,26 @@
 #include <graphite/windows.h>
 
 #include <windows.h>
-#include <atomic>
-#include <chrono>
-#include <dcomp.h>
-#include <stdexcept>
+#include <cmath>
 #include <string>
-#include <thread>
 #include <vector>
 #include <wincodec.h>
 #include <wrl/client.h>
 
 namespace
 {
-constexpr UINT frame_message = WM_APP + 1;
-
 struct WindowState
 {
-    example *content = nullptr;
+    example_frames frames{};
     gr_scene_host *host = nullptr;
-    std::atomic<bool> frame_pending{false};
-    unsigned frames = 0, fps_ticks = 0, unflushed[60]{}, missed = 0;
-    bool selftest = false, fps = false;
     int status = 0;
-    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now(), report = start;
 };
 
-void update_frame(WindowState &s)
+void finish_selftest(example_frames *frames)
 {
-    if (s.selftest && s.frames >= 60)
-        return;
-    ++s.frames;
-    if (s.selftest && s.frames > 1 && gr_scene_needs_commit(s.content->scene))
-        s.unflushed[s.missed++] = s.frames;
-    auto now = std::chrono::steady_clock::now();
-    example_update(s.content, std::chrono::duration<double>(now - s.start).count());
-    if (s.fps)
-    {
-        ++s.fps_ticks;
-        double elapsed = std::chrono::duration<double>(now - s.report).count();
-        if (elapsed >= 2)
-        {
-            printf("fps: %.1f\n", s.fps_ticks / elapsed);
-            fflush(stdout);
-            s.report = now;
-            s.fps_ticks = 0;
-        }
-    }
-    if (s.selftest && s.frames == 60)
-    {
-        printf("selftest: frames=%u uncommitted=[", s.frames);
-        for (unsigned i = 0; i < s.missed; ++i)
-            printf("%s%u", i ? ", " : "", s.unflushed[i]);
-        printf("] backing_scale=%g\n", gr_scene_get_backing_scale(s.content->scene));
-        fflush(stdout);
-        s.status = s.missed ? 1 : 0;
-        PostQuitMessage(s.status);
-    }
+    auto state = static_cast<WindowState *>(frames->platform);
+    state->status = example_frames_report(frames, nullptr, true);
+    PostQuitMessage(state->status);
 }
 
 LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
@@ -75,13 +39,6 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
     }
     switch (message)
     {
-        case frame_message:
-            if (state)
-            {
-                update_frame(*state);
-                state->frame_pending = false;
-            }
-            return 0;
         case WM_SIZE:
             if (state && state->host)
                 MoveWindow(static_cast<HWND>(gr_windows_host_get_hwnd(state->host)), 0, 0, LOWORD(lp), HIWORD(lp),
@@ -100,52 +57,6 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
     }
     return DefWindowProcW(hwnd, message, wp, lp);
 }
-
-class DisplayClock
-{
-    HANDLE stop_event;
-    std::thread worker;
-
-    void run(HWND window, WindowState &state) noexcept
-    {
-        for (;;)
-        {
-            DWORD result = DCompositionWaitForCompositorClock(1, &stop_event, 100);
-            if (WaitForSingleObject(stop_event, 0) == WAIT_OBJECT_0)
-                break;
-            if (result == WAIT_OBJECT_0 + 1 || result == WAIT_OBJECT_0)
-            {
-                if (!state.frame_pending.exchange(true) && !PostMessageW(window, frame_message, 0, 0))
-                    state.frame_pending = false;
-            }
-            else if (WaitForSingleObject(stop_event, 50) == WAIT_OBJECT_0)
-                break;
-        }
-    }
-
-  public:
-    DisplayClock(HWND window, WindowState &state) : stop_event(CreateEventW(nullptr, TRUE, FALSE, nullptr))
-    {
-        if (!stop_event)
-            throw std::runtime_error("cannot create display clock stop event");
-        try
-        {
-            worker = std::thread([this, window, &state] { run(window, state); });
-        }
-        catch (...)
-        {
-            CloseHandle(stop_event);
-            throw;
-        }
-    }
-
-    ~DisplayClock()
-    {
-        SetEvent(stop_event);
-        worker.join();
-        CloseHandle(stop_event);
-    }
-};
 
 bool save_png(const char *path, gr_windows_pixels const &pixels)
 {
@@ -196,9 +107,6 @@ int example_platform_run(example *content, bool selftest, bool fps)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WindowState state;
-    state.content = content;
-    state.selftest = selftest;
-    state.fps = fps;
     WNDCLASSW wc{};
     wc.lpfnWndProc = window_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -226,10 +134,16 @@ int example_platform_run(example *content, bool selftest, bool fps)
         DestroyWindow(window);
         return 1;
     }
-    state.start = state.report = std::chrono::steady_clock::now();
-    try
+    /* The host commits right after delivering each frame. */
+    state.frames.content = content;
+    state.frames.host = state.host;
+    state.frames.selftest = selftest;
+    state.frames.fps = fps;
+    state.frames.strict = true;
+    state.frames.finished = finish_selftest;
+    state.frames.platform = &state;
+    if (example_frames_start(&state.frames))
     {
-        DisplayClock clock(window, state);
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0)
@@ -240,11 +154,9 @@ int example_platform_run(example *content, bool selftest, bool fps)
         if (result < 0)
             state.status = 1;
     }
-    catch (std::exception const &error)
-    {
-        fprintf(stderr, "display clock: %s\n", error.what());
+    else
         state.status = 1;
-    }
+    /* Releasing the host destroys the frame handler, which borrows state. */
     gr_scene_host_unref(state.host);
     state.host = nullptr;
     if (IsWindow(window))

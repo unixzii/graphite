@@ -32,16 +32,66 @@ static void destroy_host(void *data)
 
 static const gr_scene_host_vtable host_vtable = {.destroy = destroy_host};
 
+/* HWND hosts are interactive. */
+
+static void destroy_window_host(void *data)
+{
+    auto host = static_cast<gr_windows_host *>(data);
+    set_window_host(host->hwnd, nullptr);
+    host->clock.reset();
+    delete host;
+}
+
+static void request_frame(void *data)
+{
+    auto host = static_cast<gr_windows_host *>(data);
+    try
+    {
+        if (!host->clock)
+            host->clock = std::make_unique<FrameClock>(host->hwnd);
+        host->clock->request();
+    }
+    catch (...)
+    {
+        report("starting frame clock");
+    }
+}
+
+static double now(void *)
+{
+    return seconds_now();
+}
+
+/* Cursor and text input are accepted but not applied yet. */
+static void set_cursor(void *, gr_cursor)
+{
+}
+
+static void set_text_input(void *, gr_text_input const *)
+{
+}
+
+static void request_focus(void *data)
+{
+    SetFocus(static_cast<gr_windows_host *>(data)->hwnd);
+}
+
+static const gr_scene_host_vtable window_host_vtable = {
+    destroy_window_host, request_frame, now, set_cursor, set_text_input, request_focus,
+};
+
 gr_windows_host *gr_windows_host_data(gr_scene_host const *host)
 {
-    if (!host || gr_scene_host_get_vtable(host) != &host_vtable)
+    if (!host ||
+        (gr_scene_host_get_vtable(host) != &host_vtable && gr_scene_host_get_vtable(host) != &window_host_vtable))
         return nullptr;
     return static_cast<gr_windows_host *>(gr_scene_host_get_data(host));
 }
 
-static gr_scene_host *wrap_host(gr_scene *scene, std::unique_ptr<gr_windows_host> host)
+static gr_scene_host *wrap_host(gr_scene *scene, std::unique_ptr<gr_windows_host> host,
+                                gr_scene_host_vtable const *vtable = &host_vtable)
 {
-    gr_scene_host *result = gr_scene_host_new(scene, &host_vtable, host.get());
+    gr_scene_host *result = gr_scene_host_new(scene, vtable, host.get());
     if (result)
         host.release();
     return result;
@@ -99,7 +149,14 @@ gr_scene_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent)
         attach_visual(*host, scene, false);
         host->target.Root(host->visual);
         gr_scene_set_backing_scale(scene, window_scale(host->hwnd));
-        return wrap_host(scene, std::move(host));
+        HWND hwnd = host->hwnd;
+        gr_scene_host *result = wrap_host(scene, std::move(host), &window_host_vtable);
+        if (result)
+        {
+            set_window_host(hwnd, result);
+            report_viewport(hwnd);
+        }
+        return result;
     }
     catch (...)
     {

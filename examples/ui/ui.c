@@ -3,12 +3,38 @@
 #define LINE 0xD1D1D6
 #define FAINT 0xF2F2F4
 #define SELECT 0x007AFF
+/* The accent without keyboard focus, like controls in an inactive window. */
+#define SELECT_INACTIVE 0xA1A1A6
 
 typedef struct
 {
     example *ex;
     gr_layer *switch_track, *switch_knob, *slider_fill, *slider_knob, *caret, *spinner, *progress;
+    gr_layer *search, *today; /* Other accent-colored layers. */
+    bool focused;
+    double switch_on; /* Switch position in [0, 1], kept to recolor the track. */
 } ui_scene;
+
+static gr_color mix(gr_color a, gr_color b, double t)
+{
+    float v = (float)t;
+    return (gr_color){a.r + (b.r - a.r) * v, a.g + (b.g - a.g) * v, a.b + (b.b - a.b) * v, a.a + (b.a - a.a) * v};
+}
+
+static gr_color accent(const ui_scene *d)
+{
+    return hex(d->focused ? SELECT : SELECT_INACTIVE);
+}
+
+static void color_accents(ui_scene *d)
+{
+    gr_color color = accent(d);
+    background(d->switch_track, mix(hex(0xE0E0E4), color, d->switch_on));
+    background(d->slider_fill, color);
+    background(d->progress, color);
+    background(d->today, color);
+    border(d->search, 2, alpha(color, 0.8f));
+}
 
 typedef enum
 {
@@ -373,18 +399,13 @@ static gr_layer *glyphs(ui_scene *d, gr_layer *parent, gr_rect rect, gr_color co
     return l;
 }
 
-static gr_color mix(gr_color a, gr_color b, double t)
-{
-    float v = (float)t;
-    return (gr_color){a.r + (b.r - a.r) * v, a.g + (b.g - a.g) * v, a.b + (b.b - a.b) * v, a.a + (b.a - a.a) * v};
-}
-
 static void *build(example *ex)
 {
     ui_scene *d = calloc(1, sizeof(*d));
     if (!d)
         abort();
     d->ex = ex;
+    d->focused = true;
     gr_layer *root = gr_scene_get_root(d->ex->scene);
     background(root, hex(0xFAFAFA));
     gr_color ink = alpha(hex(EX_INK), 0.85f);
@@ -465,8 +486,7 @@ static void *build(example *ex)
     hairline(d, editor, EX_RECT(86, 46, 1, 20));
     pill(d->ex, editor, EX_RECT(180, 45, 40, 22), hex(0x9B30B5), 3);
     background(layer(d->ex, editor, EX_RECT(0, 80, 464, 46)), hex(FAINT));
-    gr_layer *search = pill(d->ex, editor, EX_RECT(150, 88, 164, 30), EX_WHITE, 7);
-    border(search, 2, alpha(hex(SELECT), 0.8f));
+    gr_layer *search = d->search = pill(d->ex, editor, EX_RECT(150, 88, 164, 30), EX_WHITE, 7);
     ICONS(d, search, EX_RECT(0, 0, 30, 30), ink, {SEARCH, {15, 15}, 0});
     gr_layer *query = label(d, search, 30, 15, "Graphite text", LABEL());
     gr_rect typed = gr_layer_get_frame(query);
@@ -511,7 +531,7 @@ static void *build(example *ex)
             label_style style = LABEL(.size = 12, .width = 32, .align = GR_TEXT_ALIGN_CENTER);
             if (n == 13)
             {
-                pill(d->ex, calendar, EX_RECT(x + 2, y - 4, 28, 18), hex(SELECT), 4);
+                d->today = pill(d->ex, calendar, EX_RECT(x + 2, y - 4, 28, 18), hex(SELECT), 4);
                 style.tone = TONE_WHITE;
                 style.weight = 600;
             }
@@ -543,6 +563,7 @@ static void *build(example *ex)
         gr_layer *b = button(d, root, EX_RECT(724, 454 + (double)i * 34, 264, 28));
         label(d, b, 0, 14, actions[i], LABEL(.width = 264, .align = GR_TEXT_ALIGN_CENTER));
     }
+    color_accents(d);
     return d;
 }
 
@@ -554,7 +575,8 @@ static void update(void *state, double t)
     if (t < 3)
         p = 0;
     EX_OK(gr_layer_set_position(d->switch_knob, EX_POINT(176 + p * 20, 21)));
-    background(d->switch_track, mix(hex(0xE0E0E4), hex(SELECT), p));
+    d->switch_on = p;
+    background(d->switch_track, mix(hex(0xE0E0E4), accent(d), p));
     double value = 0.2 + 0.6 * smooth(wave(t, 9, 0)), x = 96 + value * 112;
     EX_OK(gr_layer_set_bounds(d->slider_fill, EX_RECT(0, 0, x - 96, 3)));
     EX_OK(gr_layer_set_position(d->slider_fill, EX_POINT(96 + (x - 96) / 2, 57.5)));
@@ -566,8 +588,15 @@ static void update(void *state, double t)
     EX_OK(gr_layer_set_position(d->progress, EX_POINT(300 + progress / 2, 313)));
 }
 
+static void focus(void *state, bool focused)
+{
+    ui_scene *d = state;
+    d->focused = focused;
+    color_accents(d);
+}
+
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"ui", {1000, 600}, build, update, free};
+    static const example_desc desc = {"ui", {1000, 600}, build, update, free, focus};
     return example_main(argc, argv, &desc);
 }

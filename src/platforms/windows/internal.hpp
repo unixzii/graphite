@@ -10,6 +10,7 @@
 
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -97,12 +99,41 @@ void draw_text_glyphs(ID2D1DeviceContext *dc, gr_text_layout *layout, size_t lin
                       gr_point origin, gr_color color, float alpha);
 bool install(gr_scene *scene, ContainerVisual const &scaled);
 HWND create_window(gr_scene *scene, bool track_dpi, DWORD ex, DWORD style, int x, int y, int w, int h, HWND parent);
+/* Points a host window's events at host (borrowed), or detaches them with nullptr. */
+void set_window_host(HWND hwnd, gr_scene_host *host);
+/* Reports the host window's client size and scale as GR_EVENT_VIEWPORT. */
+void report_viewport(HWND hwnd);
+double seconds_now();
+
+/* Waits for compositor clock ticks on a worker thread while a frame is requested and posts each tick to the host
+ * window, which delivers GR_EVENT_FRAME on the UI thread. */
+class FrameClock
+{
+  public:
+    explicit FrameClock(HWND hwnd);
+    ~FrameClock();
+    FrameClock(FrameClock const &) = delete;
+    FrameClock &operator=(FrameClock const &) = delete;
+    void request();
+    /* Returns the time of the posted tick in seconds and allows the next post. */
+    double take_tick();
+
+  private:
+    void run() noexcept;
+    HWND hwnd;
+    HANDLE stop = nullptr, requested = nullptr;
+    std::atomic<bool> pending{false};
+    std::atomic<int64_t> tick{0};
+    std::thread worker;
+};
+
 double window_scale(HWND hwnd);
 std::vector<uint8_t> read_window(HWND hwnd, uint32_t width, uint32_t height);
 } // namespace gr_win
 
 struct gr_windows_host
 {
+    std::unique_ptr<gr_win::FrameClock> clock; /* Created on the first frame request of an HWND host. */
     gr_win::ContainerVisual visual{nullptr};
     gr_win::SpriteVisual backdrop{nullptr};
     winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget target{nullptr};

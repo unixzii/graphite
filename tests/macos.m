@@ -179,13 +179,162 @@ static void expired_scene(void)
     }
 }
 
+typedef struct
+{
+    gr_event events[64];
+    size_t count;
+} event_log;
+
+static bool log_event(void *userdata, const gr_event *event)
+{
+    event_log *log = userdata;
+    if (log->count < 64)
+        log->events[log->count] = *event;
+    ++log->count;
+    return true;
+}
+
+static size_t count_events(const event_log *log, gr_event_type type)
+{
+    size_t n = 0;
+    for (size_t i = 0; i < log->count && i < 64; ++i)
+        n += log->events[i].type == type;
+    return n;
+}
+
+static const gr_event *last_event(const event_log *log, gr_event_type type)
+{
+    for (size_t i = log->count < 64 ? log->count : 64; i-- > 0;)
+        if (log->events[i].type == type)
+            return &log->events[i];
+    return NULL;
+}
+
+static void spin_until(const event_log *log, gr_event_type type, size_t count)
+{
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (count_events(log, type) < count && [deadline timeIntervalSinceNow] > 0)
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+/* A window whose key status the test controls, since a test process is usually not the active application. */
+@interface GRTestWindow : NSWindow
+@property(nonatomic) bool forceKey;
+@end
+
+@implementation GRTestWindow
+
+- (BOOL)isKeyWindow
+{
+    return self.forceKey || [super isKeyWindow];
+}
+
+@end
+
+static void set_key(GRTestWindow *window, bool key)
+{
+    window.forceKey = key;
+    [NSNotificationCenter.defaultCenter
+        postNotificationName:key ? NSWindowDidBecomeKeyNotification : NSWindowDidResignKeyNotification
+                      object:window];
+}
+
+static void view_events(void)
+{
+    @autoreleasepool
+    {
+        [NSApplication sharedApplication];
+        GRTestWindow *window =
+            [[GRTestWindow alloc] initWithContentRect:NSMakeRect(100, 100, 200, 100)
+                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable
+                                              backing:NSBackingStoreBuffered
+                                                defer:NO];
+        window.releasedWhenClosed = NO;
+        gr_scene *scene = gr_scene_new((gr_size){200, 100});
+
+        /* Layer and offscreen hosts have no input surface. */
+        gr_scene_host *offscreen = gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1);
+        CHECK(offscreen && !gr_scene_host_is_interactive(offscreen));
+        CHECK(gr_scene_host_request_frame(offscreen) == GR_ERROR_UNSUPPORTED);
+        gr_scene_host_unref(offscreen);
+        gr_scene_unref(scene);
+        scene = gr_scene_new((gr_size){200, 100});
+
+        gr_scene_host *host = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+        CHECK(host && gr_scene_host_is_interactive(host));
+        GRSceneView *view = (__bridge GRSceneView *)gr_macos_host_get_view(host);
+        CHECK(view.acceptsFirstResponder);
+
+        /* The size at attachment is recorded before any handler exists. */
+        gr_viewport_event viewport;
+        CHECK(gr_scene_host_get_viewport(host, &viewport));
+        CHECK_NEAR(viewport.size.width, 200);
+        CHECK_NEAR(viewport.size.height, 100);
+
+        event_log log = {0};
+        gr_event_handler handler = {&log, log_event, NULL};
+        OK(gr_scene_host_set_event_handler(host, &handler));
+        [window orderFrontRegardless];
+        spin();
+        CHECK_NEAR(gr_scene_get_backing_scale(scene), window.backingScaleFactor);
+        CHECK(gr_scene_host_get_viewport(host, &viewport) && viewport.scale == window.backingScaleFactor);
+
+        [window setContentSize:NSMakeSize(300, 160)];
+        const gr_event *resized = last_event(&log, GR_EVENT_VIEWPORT);
+        CHECK(resized);
+        CHECK_NEAR(resized->value.viewport.size.width, 300);
+        CHECK_NEAR(resized->value.viewport.size.height, 160);
+
+        /* One request gives exactly one frame, before the next commit point, in the frame clock's domain. */
+        double before = gr_scene_host_get_time(host);
+        OK(gr_scene_host_request_frame(host));
+        spin_until(&log, GR_EVENT_FRAME, 1);
+        CHECK(count_events(&log, GR_EVENT_FRAME) == 1);
+        const gr_event *frame = last_event(&log, GR_EVENT_FRAME);
+        CHECK(frame->time >= before - 0.1 && frame->time <= gr_scene_host_get_time(host));
+        CHECK(frame->value.frame.interval > 0 && frame->value.frame.target_time > frame->time);
+        spin();
+        CHECK(count_events(&log, GR_EVENT_FRAME) == 1);
+        OK(gr_scene_host_request_frame(host));
+        spin_until(&log, GR_EVENT_FRAME, 2);
+        CHECK(count_events(&log, GR_EVENT_FRAME) == 2);
+
+        /* Focus follows first responder status in the key window. */
+        CHECK(!window.isKeyWindow);
+        OK(gr_scene_host_request_focus(host));
+        CHECK(window.firstResponder == view && !gr_scene_host_has_focus(host));
+        set_key(window, true);
+        CHECK(gr_scene_host_has_focus(host) && last_event(&log, GR_EVENT_FOCUS_IN));
+        set_key(window, false);
+        CHECK(!gr_scene_host_has_focus(host) && last_event(&log, GR_EVENT_FOCUS_OUT));
+        set_key(window, true);
+        CHECK(gr_scene_host_has_focus(host));
+        [window makeFirstResponder:nil];
+        CHECK(!gr_scene_host_has_focus(host));
+        OK(gr_scene_host_request_focus(host));
+        CHECK(gr_scene_host_has_focus(host));
+        set_key(window, false);
+
+        /* A request outstanding at release stops with the host. */
+        OK(gr_scene_host_request_frame(host));
+        size_t frames = count_events(&log, GR_EVENT_FRAME);
+        gr_scene_host_unref(host);
+        CHECK(!view.acceptsFirstResponder);
+        spin();
+        CHECK(count_events(&log, GR_EVENT_FRAME) == frames);
+        gr_scene_unref(scene);
+        [window close];
+    }
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool
     {
         const gr_test_case cases[] = {GR_TEST_CASE(invalid_arguments),  GR_TEST_CASE(rows_are_top_down),
                                       GR_TEST_CASE(scaled_rendering),   GR_TEST_CASE(view_hosting),
-                                      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene)};
+                                      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
+                                      GR_TEST_CASE(view_events)};
         return gr_test_run("macos", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
     }
 }

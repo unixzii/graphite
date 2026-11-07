@@ -16,7 +16,8 @@ struct gr_scene_host
     void *data;
 
     gr_event_handler handler;
-    bool has_handler, frame_requested, dispatching;
+    bool has_handler, frame_requested, dispatching, focused, has_viewport;
+    gr_viewport_event viewport;
     queued_event *queue;
     size_t queue_count, queue_capacity;
     gr_event_handler *retired; /* Handlers replaced during delivery, destroyed when it ends. */
@@ -134,6 +135,17 @@ bool gr_scene_host_frame_requested(const gr_scene_host *host)
     return host->frame_requested;
 }
 
+bool gr_scene_host_get_viewport(const gr_scene_host *host, gr_viewport_event *out)
+{
+    *out = host->has_viewport ? host->viewport : (gr_viewport_event){{0, 0}, 0};
+    return host->has_viewport;
+}
+
+bool gr_scene_host_has_focus(const gr_scene_host *host)
+{
+    return host->focused;
+}
+
 double gr_scene_host_get_time(const gr_scene_host *host)
 {
     return gr_scene_host_is_interactive(host) ? host->vtable.now(host->data) : NAN;
@@ -178,6 +190,35 @@ gr_result gr_scene_host_set_text_input(gr_scene_host *host, const gr_text_input 
 }
 
 /* Delivery */
+
+/* Records VIEWPORT and FOCUS state; returns false for an event that repeats it. */
+static bool update_state(gr_scene_host *host, const gr_event *e)
+{
+    switch (e->type)
+    {
+        case GR_EVENT_VIEWPORT:
+        {
+            const gr_viewport_event *v = &e->value.viewport;
+            if (host->has_viewport && host->viewport.size.width == v->size.width &&
+                host->viewport.size.height == v->size.height && host->viewport.scale == v->scale)
+                return false;
+            host->has_viewport = true;
+            host->viewport = *v;
+            return true;
+        }
+        case GR_EVENT_FOCUS_IN:
+        case GR_EVENT_FOCUS_OUT:
+        {
+            bool focused = e->type == GR_EVENT_FOCUS_IN;
+            if (host->focused == focused)
+                return false;
+            host->focused = focused;
+            return true;
+        }
+        default:
+            return true;
+    }
+}
 
 static bool valid_pointer(gr_event_type type, const gr_pointer_event *p)
 {
@@ -267,7 +308,7 @@ static bool deliver(gr_scene_host *host, const gr_event *event)
 
 bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event)
 {
-    if (!gr_scene_host_is_interactive(host) || !event || !valid_event(event))
+    if (!gr_scene_host_is_interactive(host) || !event || !valid_event(event) || !update_state(host, event))
         return false;
     if (host->dispatching)
     {

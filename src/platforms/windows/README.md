@@ -38,6 +38,15 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
 - HWND hosts are input-transparent child windows; their DPI tracks the parent.
   Visual hosts use a ContainerVisual from the thread's compositor. Final host
   unref detaches its visual/destroys its window, as documented by the hosting API.
+- HWND hosts are interactive. The first frame request starts a worker thread that
+  waits on `DCompositionWaitForCompositorClock` while a frame is requested and
+  posts each tick to the host window; the UI thread delivers `GR_EVENT_FRAME`
+  (QPC time, compositor frame period) and then commits at once, so the frame's
+  changes reach the next compositor frame instead of waiting for the
+  DispatcherQueue. `WM_SIZE`/DPI changes report `GR_EVENT_VIEWPORT` and
+  `WM_SETFOCUS`/`WM_KILLFOCUS` report focus. Mouse input still passes through to
+  the parent (`HTTRANSPARENT`). Cursor and text input requests are accepted but
+  not applied yet.
 - A per-thread context shares compositor/devices and remains alive for process
   teardown. dcomp.dll is pinned to avoid releases jumping into an unloaded DLL,
   to protect shutdown releases. This is an intentional

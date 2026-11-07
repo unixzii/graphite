@@ -43,6 +43,14 @@ GR_API gr_result gr_scene_host_set_event_handler(gr_scene_host *host, const gr_e
  * not wake for frames. */
 GR_API gr_result gr_scene_host_request_frame(gr_scene_host *host);
 
+/** Copies the host size and scale last reported by GR_EVENT_VIEWPORT, which the host sends whenever they change.
+ * Returns false and zeros out before the first report (some platforms report on first layout) and for
+ * non-interactive hosts. */
+GR_API bool gr_scene_host_get_viewport(const gr_scene_host *host, gr_viewport_event *out);
+
+/** Returns whether the host has keyboard focus, as last reported by FOCUS_IN/FOCUS_OUT. */
+GR_API bool gr_scene_host_has_focus(const gr_scene_host *host);
+
 /** Returns the current time on the frame clock in seconds, or NAN for non-interactive hosts. */
 GR_API double gr_scene_host_get_time(const gr_scene_host *host);
 

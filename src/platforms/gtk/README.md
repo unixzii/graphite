@@ -22,6 +22,12 @@ No additional container dependency is introduced: GTK already supplies GLib.
   Commits run in frame-clock **layout**, after tick callbacks and before paint.
   Surface `notify::scale` follows fractional scale. Realize/unrealize connects and
   disconnects clock/surface handlers; callbacks use a weak Scene link.
+  Widget hosts are interactive: requested frames run in the frame clock's
+  **update** phase, before the layout-phase commit, with times from the frame
+  clock and its refresh info. Allocation and scale changes report
+  `GR_EVENT_VIEWPORT` (first on allocation). The widget is focusable and reports
+  focus while it is the focus widget of the active window. Cursor and text input
+  requests are accepted but not applied yet.
 - `text.c`: the Pango text system (`gr_gtk_text_system_new`); `draw.c` replays
   its layouts with `gtk_snapshot_append_layout`. See the
   [backend notes](../../../docs/backends/gtk.md#text).

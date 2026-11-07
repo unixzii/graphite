@@ -23,6 +23,15 @@ links; dropping a host does not detach views/layers retained by their native
 parent. NSView hosting requires the AppKit main thread and tracks window backing
 scale automatically. Layer/offscreen hosting uses the Scene's owning thread.
 
+View hosts are interactive. Frames come from the view's `CADisplayLink`
+(macOS 14), created on the first request, added to the main run loop in common
+modes and paused after a frame without a new request; it fires before the
+backend's commit observer, so changes made for a frame commit with it. The view
+reports its size and backing scale as `GR_EVENT_VIEWPORT`, and keyboard focus
+while it is the first responder of the key window. Releasing the host
+invalidates the display link and leaves the view inert. Cursor and text input
+requests are accepted but not applied yet.
+
 Offscreen rendering uses CARenderer with a shared BGRA8 Metal texture, an
 sRGB color space and a command-queue fence. Readback is flipped
 and swizzled to top-down premultiplied RGBA8. The standalone layer renderer
@@ -33,7 +42,7 @@ owns that container for callers.
 `draw.m` replays its layouts; see the [backend notes](../../../docs/backends/macos.md#text).
 
 `graphite_macos_tests` covers raw readback orientation, scale, real NSView hosting
-and resizing, host/model lifetime, and repeated complete Graphite offscreen
+and resizing, frames, viewport and focus events, host/model lifetime, and repeated complete Graphite offscreen
 captures; text is covered by the conformance suite's text cases. These tests
 require a normal macOS GUI/Metal session; a sandbox may
 hide the Metal device or deny WindowServer access. Native conformance is provided

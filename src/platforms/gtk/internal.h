@@ -53,5 +53,8 @@ bool gr_gtk_tree_size(gr_gtk_shared *shared, gr_size *out);
 GskRenderNode *gr_gtk_tree_root(gr_gtk_shared *shared);
 GtkWidget *gr_gtk_widget_new(gr_gtk_shared *shared);
 void gr_gtk_widget_request(GtkWidget *widget);
+/* Points the widget's events at host (borrowed), or detaches it with NULL. */
+void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host);
+void gr_gtk_widget_request_frame(GtkWidget *widget);
 
 #endif

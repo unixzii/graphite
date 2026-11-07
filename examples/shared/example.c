@@ -290,6 +290,12 @@ void example_update(example *ex, double time)
     ex->desc->update(ex->state, time);
 }
 
+void example_focus(example *ex, bool focused)
+{
+    if (ex->desc->focus)
+        ex->desc->focus(ex->state, focused);
+}
+
 void example_free(example *ex)
 {
     gr_scene_unref(ex->scene);

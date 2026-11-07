@@ -47,6 +47,8 @@ static void destroy(void *userdata)
 static void destroy_host(void *data)
 {
     gr_gtk_host *host = data;
+    if (host->widget)
+        gr_gtk_widget_set_host(host->widget, NULL);
     g_clear_object(&host->widget);
     gr_gtk_shared_unref(host->shared);
     g_free(host);
@@ -54,9 +56,45 @@ static void destroy_host(void *data)
 
 static const gr_scene_host_vtable host_vtable = {.destroy = destroy_host};
 
+/* Widget hosts are interactive. */
+
+static void request_frame(void *data)
+{
+    gr_gtk_widget_request_frame(((gr_gtk_host *)data)->widget);
+}
+
+static double now(void *data)
+{
+    (void)data;
+    return (double)g_get_monotonic_time() / G_TIME_SPAN_SECOND;
+}
+
+/* Cursor and text input are accepted but not applied yet. */
+static void set_cursor(void *data, gr_cursor cursor)
+{
+    (void)data;
+    (void)cursor;
+}
+
+static void set_text_input(void *data, const gr_text_input *input)
+{
+    (void)data;
+    (void)input;
+}
+
+static void request_focus(void *data)
+{
+    gtk_widget_grab_focus(((gr_gtk_host *)data)->widget);
+}
+
+static const gr_scene_host_vtable widget_host_vtable = {
+    destroy_host, request_frame, now, set_cursor, set_text_input, request_focus,
+};
+
 gr_gtk_host *gr_gtk_host_data(const gr_scene_host *host)
 {
-    if (!host || gr_scene_host_get_vtable(host) != &host_vtable)
+    if (!host ||
+        (gr_scene_host_get_vtable(host) != &host_vtable && gr_scene_host_get_vtable(host) != &widget_host_vtable))
         return NULL;
     return gr_scene_host_get_data(host);
 }
@@ -80,7 +118,10 @@ static gr_scene_host *install(gr_scene *scene, bool widget)
         destroy_host(host);
         return NULL;
     }
-    return gr_scene_host_new(scene, &host_vtable, host);
+    gr_scene_host *result = gr_scene_host_new(scene, widget ? &widget_host_vtable : &host_vtable, host);
+    if (widget)
+        gr_gtk_widget_set_host(host->widget, result);
+    return result;
 }
 
 gr_scene_host *gr_gtk_attach(gr_scene *scene)

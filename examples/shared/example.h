@@ -46,6 +46,9 @@ typedef struct
     void (*update)(void *state, double time);
     /** Releases scene state after the Scene and every tracked layer have been released. May be NULL. */
     void (*free)(void *state);
+    /** Reflects whether the window has keyboard focus; called on the Scene thread. Scenes start focused, which is
+     * also how snapshots render. May be NULL. */
+    void (*focus)(void *state, bool focused);
 } example_desc;
 
 struct example
@@ -70,6 +73,8 @@ int example_main(int argc, char **argv, const example_desc *desc);
 example *example_new(const example_desc *desc, gr_text_system *text);
 /** Updates the scene to time in seconds; called on the Scene thread. */
 void example_update(example *ex, double time);
+/** Tells the scene whether the window has keyboard focus; called on the Scene thread. */
+void example_focus(example *ex, bool focused);
 /** Destroys the Scene before releasing tracked layers and scene state. */
 void example_free(example *ex);
 

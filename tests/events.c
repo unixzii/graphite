@@ -110,9 +110,11 @@ static gr_event_handler handler(recorder *r)
     return (gr_event_handler){r, record, record_destroy};
 }
 
-static gr_event focus(void)
+static gr_event press(void)
 {
-    return (gr_event){.type = GR_EVENT_FOCUS_IN, .time = 1};
+    return (gr_event){.type = GR_EVENT_KEY_DOWN,
+                      .time = 1,
+                      .value.key = {.code = GR_KEY_CODE_A, .key = GR_KEY_CHARACTER, .character = 0x61}};
 }
 
 static gr_event frame(void)
@@ -152,7 +154,7 @@ static void passive_hosts(void)
     CHECK(gr_scene_host_set_cursor(host, GR_CURSOR_TEXT) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_request_focus(host) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_set_text_input(host, NULL) == GR_ERROR_UNSUPPORTED);
-    gr_event e = focus();
+    gr_event e = press();
     CHECK(!gr_scene_host_dispatch_event(host, &e));
     gr_scene_host_unref(host);
     CHECK(r.destroyed == 0 && strcmp(p.log, "P") == 0);
@@ -192,7 +194,7 @@ static void handler_ownership(void)
     platform p = {0};
     gr_scene *scene = gr_scene_new((gr_size){10, 10});
     gr_scene_host *host = gr_scene_host_new(scene, &interactive, &p);
-    gr_event e = focus();
+    gr_event e = press();
     CHECK(!gr_scene_host_dispatch_event(host, &e)); /* No handler. */
 
     recorder a = {.name = 'a', .log = p.log, .result = true}, b = {.name = 'b', .log = p.log};
@@ -273,13 +275,13 @@ static void frame_requests(void)
 
 static void dispatch_nested(recorder *r, const gr_event *event)
 {
-    if (event->type != GR_EVENT_FOCUS_IN)
+    if (event->type != GR_EVENT_KEY_DOWN)
         return;
     char text[] = "ab";
     gr_event nested = commit_text(text);
     CHECK(!gr_scene_host_dispatch_event(r->host, &nested));
     memcpy(text, "xy", 2); /* The queued copy must not alias caller storage. */
-    gr_event out = {.type = GR_EVENT_FOCUS_OUT, .time = 4};
+    gr_event out = {.type = GR_EVENT_KEY_UP, .time = 4};
     CHECK(!gr_scene_host_dispatch_event(r->host, &out));
     CHECK(r->count == 1); /* Nothing delivered yet. */
 }
@@ -302,9 +304,9 @@ static void reentrant_dispatch(void)
     recorder r = {.name = 'a', .log = p.log, .host = host, .result = true, .react = dispatch_nested};
     gr_event_handler h = handler(&r);
     OK(gr_scene_host_set_event_handler(host, &h));
-    gr_event e = focus();
+    gr_event e = press();
     CHECK(gr_scene_host_dispatch_event(host, &e));
-    CHECK(r.count == 3 && r.types[1] == GR_EVENT_TEXT_COMMIT && r.types[2] == GR_EVENT_FOCUS_OUT);
+    CHECK(r.count == 3 && r.types[1] == GR_EVENT_TEXT_COMMIT && r.types[2] == GR_EVENT_KEY_UP);
     CHECK(strcmp(r.texts[1], "ab") == 0);
 
     /* Events queued while draining the queue are delivered too, in order. */
@@ -321,7 +323,7 @@ static recorder *replacement;
 static void replace_self(recorder *r, const gr_event *event)
 {
     (void)event;
-    gr_event out = {.type = GR_EVENT_FOCUS_OUT, .time = 5};
+    gr_event out = {.type = GR_EVENT_KEY_UP, .time = 5};
     CHECK(!gr_scene_host_dispatch_event(r->host, &out));
     gr_event_handler h = handler(replacement);
     OK(gr_scene_host_set_event_handler(r->host, &h));
@@ -339,7 +341,7 @@ static void replacement_during_delivery(void)
     replacement = &b;
     gr_event_handler h = handler(&a);
     OK(gr_scene_host_set_event_handler(host, &h));
-    gr_event e = focus();
+    gr_event e = press();
     CHECK(gr_scene_host_dispatch_event(host, &e)); /* a's result, not b's. */
     CHECK(strcmp(p.log, "abA") == 0);              /* The queued event reaches b before a is destroyed. */
     CHECK(a.destroyed == 1 && b.destroyed == 0);
@@ -364,7 +366,7 @@ static void release_during_delivery(void)
     recorder r = {.name = 'a', .log = p.log, .host = host, .result = true, .react = release_host};
     gr_event_handler h = handler(&r);
     OK(gr_scene_host_set_event_handler(host, &h));
-    gr_event e = focus();
+    gr_event e = press();
     CHECK(gr_scene_host_dispatch_event(host, &e));
     CHECK(strcmp(p.log, "aAP") == 0 && p.focus_requests == 1);
     gr_scene_unref(scene);
@@ -402,9 +404,9 @@ static void event_validation(void)
 
     gr_event bad[18];
     size_t n = 0;
-    bad[n] = focus(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_PREEDIT + 1);
-    bad[n] = focus(), bad[n++].time = NAN;
-    bad[n] = focus(), bad[n++].modifiers = 32;
+    bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_PREEDIT + 1);
+    bad[n] = press(), bad[n++].time = NAN;
+    bad[n] = press(), bad[n++].modifiers = 32;
     bad[n] = down, bad[n++].value.pointer.button = GR_BUTTON_NONE;
     bad[n] = down, bad[n++].value.pointer.pressure = 1.5f;
     bad[n] = down, bad[n++].value.pointer.buttons = 1u; /* Bit of GR_BUTTON_NONE. */
@@ -430,13 +432,61 @@ static void event_validation(void)
     gr_scene_unref(scene);
 }
 
+static void state_events(void)
+{
+    platform p = {0};
+    gr_scene *scene = gr_scene_new((gr_size){10, 10});
+    gr_scene_host *passive_host = gr_scene_host_new(scene, &passive, &p);
+    gr_viewport_event v = {{1, 1}, 1};
+    CHECK(!gr_scene_host_get_viewport(passive_host, &v) && v.scale == 0 && v.size.width == 0);
+    CHECK(!gr_scene_host_has_focus(passive_host));
+    gr_scene_host_unref(passive_host);
+
+    gr_scene_host *host = gr_scene_host_new(scene, &interactive, &p);
+    CHECK(!gr_scene_host_get_viewport(host, &v));
+
+    /* State is tracked without a handler, so the first report can arrive before one is installed. */
+    gr_event viewport = {.type = GR_EVENT_VIEWPORT, .time = 1, .value.viewport = {{800, 600}, 2}};
+    CHECK(!gr_scene_host_dispatch_event(host, &viewport));
+    CHECK(gr_scene_host_get_viewport(host, &v) && v.size.width == 800 && v.size.height == 600 && v.scale == 2);
+    gr_event in = {.type = GR_EVENT_FOCUS_IN, .time = 1}, out = {.type = GR_EVENT_FOCUS_OUT, .time = 2};
+    CHECK(!gr_scene_host_dispatch_event(host, &in));
+    CHECK(gr_scene_host_has_focus(host));
+
+    recorder r = {.name = 'a', .log = p.log, .result = true};
+    gr_event_handler h = handler(&r);
+    OK(gr_scene_host_set_event_handler(host, &h));
+    CHECK(!gr_scene_host_dispatch_event(host, &viewport)); /* Repeats are dropped. */
+    CHECK(!gr_scene_host_dispatch_event(host, &in));
+    CHECK(r.count == 0);
+    viewport.value.viewport.scale = 1.5;
+    CHECK(gr_scene_host_dispatch_event(host, &viewport));
+    CHECK(gr_scene_host_dispatch_event(host, &out));
+    CHECK(!gr_scene_host_dispatch_event(host, &out));
+    CHECK(!gr_scene_host_has_focus(host));
+    CHECK(gr_scene_host_get_viewport(host, &v) && v.scale == 1.5);
+    CHECK(r.count == 2 && r.types[0] == GR_EVENT_VIEWPORT && r.types[1] == GR_EVENT_FOCUS_OUT);
+
+    /* An invalid VIEWPORT leaves the state alone. */
+    viewport.value.viewport.size.width = -1;
+    CHECK(!gr_scene_host_dispatch_event(host, &viewport));
+    CHECK(gr_scene_host_get_viewport(host, &v) && v.size.width == 800);
+    gr_scene_host_unref(host);
+    gr_scene_unref(scene);
+}
+
 int main(int argc, char **argv)
 {
     const gr_test_case cases[] = {
-        GR_TEST_CASE(passive_hosts),           GR_TEST_CASE(host_commands),
-        GR_TEST_CASE(handler_ownership),       GR_TEST_CASE(frame_requests),
-        GR_TEST_CASE(reentrant_dispatch),      GR_TEST_CASE(replacement_during_delivery),
-        GR_TEST_CASE(release_during_delivery), GR_TEST_CASE(event_validation),
+        GR_TEST_CASE(passive_hosts),
+        GR_TEST_CASE(host_commands),
+        GR_TEST_CASE(handler_ownership),
+        GR_TEST_CASE(frame_requests),
+        GR_TEST_CASE(reentrant_dispatch),
+        GR_TEST_CASE(replacement_during_delivery),
+        GR_TEST_CASE(release_during_delivery),
+        GR_TEST_CASE(event_validation),
+        GR_TEST_CASE(state_events),
     };
     return gr_test_run("events", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
 }
