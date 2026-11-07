@@ -13,6 +13,10 @@ target_include_directories(graphite PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(graphite PUBLIC c_std_11)
+target_compile_definitions(graphite PRIVATE GRAPHITE_BUILDING)
+if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(graphite PUBLIC GRAPHITE_STATIC)
+endif()
 set_target_properties(graphite PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 if(MSVC)
     target_compile_options(graphite PUBLIC /utf-8 "$<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>")

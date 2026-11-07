@@ -13,12 +13,35 @@ are documented in `src/platforms/{macos,gtk,windows}/README.md`.
 | `GRAPHITE_BUILD_CONFORMANCE` | `ON` | Build conformance helpers and native runners. |
 | `GRAPHITE_GTK` | `OFF` | Enable the GTK 4.22+ backend. |
 | `GRAPHITE_SANITIZERS` | `OFF` | Enable ASan/UBSan with Clang/GCC. |
+| `GRAPHITE_LTO` | `OFF` | Link-time optimization in `Release`, `RelWithDebInfo` and `MinSizeRel`. Configuration fails if the toolchain lacks it. |
 
 The examples and conformance switches are independent of `BUILD_TESTING`.
 With testing enabled, only enabled examples/conformance tools register tests.
 macOS and Windows backends are selected automatically on their platforms.
 Formatting targets remain available; clang-format is required when running them,
 not for building or installing the libraries.
+
+## Optimization
+
+`CMAKE_BUILD_TYPE` selects the compiler's optimization level; nothing is set when
+it is empty, so pass `Release` (or use `--config Release` with multi-configuration
+generators) for optimized builds.
+
+- **Symbol visibility.** Everything is compiled with hidden visibility. Only
+  functions marked `GR_API` (core) or `GR_MACOS_API` / `GR_GTK_API` /
+  `GR_WINDOWS_API` in `include/graphite` are exported from shared libraries;
+  on Windows these become `__declspec(dllexport)`/`dllimport`. Each library
+  defines its `GRAPHITE_*_BUILDING` macro while compiling itself, and static
+  builds define `GRAPHITE_STATIC` publicly, so installed static packages pass it
+  on to consumers.
+- **Dead-code stripping.** Optimized configurations link with `-dead_strip`
+  (macOS), `-ffunction-sections -fdata-sections` plus `--gc-sections` (ELF), or
+  `/Gy /Gw` plus `/OPT:REF /OPT:ICF` (MSVC).
+- **LTO.** `GRAPHITE_LTO=ON` enables CMake's interprocedural optimization (ThinLTO
+  with Clang, `-flto=auto` with GCC, `/GL` + `/LTCG` with MSVC); Objective-C
+  sources use the C compiler's flag. Static libraries then contain compiler IR
+  instead of machine code, so an installed static LTO package only links with a
+  compatible compiler and linker. Shared packages are unaffected.
 
 ## Install into a private prefix
 
@@ -68,9 +91,9 @@ use sibling-relative runtime paths on macOS/Linux. On Windows, place installed
 DLLs beside your executable or add the prefix's `bin` to that process's `PATH`.
 Do not change the system PATH. Windows shared build-tree executables and DLLs
 are colocated under `build/bin` (with a configuration subdirectory for multi-config
-generators). Windows uses CMake's automatic function export support; exported
-internal symbols are not a supported public API. This does not promise stable
-binary compatibility across future releases.
+generators). Shared libraries export only the declared public API (see
+Optimization). This does not promise stable binary compatibility across future
+releases.
 
 ## Independent consumer verification
 

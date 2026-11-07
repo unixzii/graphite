@@ -4,6 +4,7 @@ target_link_libraries(graphite_macos PUBLIC graphite
     "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" "-framework CoreText" "-framework Metal")
 target_compile_options(graphite_macos PRIVATE -fobjc-arc -fblocks -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(graphite_macos PRIVATE ${PROJECT_SOURCE_DIR}/src/core)
+target_compile_definitions(graphite_macos PRIVATE GRAPHITE_MACOS_BUILDING)
 
 if(BUILD_TESTING)
     add_executable(graphite_macos_tests ${PROJECT_SOURCE_DIR}/tests/macos.m)

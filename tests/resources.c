@@ -8,6 +8,10 @@
 #include <pthread.h>
 #endif
 
+/* gr_alloc is internal and not exported from shared builds; uthash allocates through the C library here. */
+#undef uthash_malloc
+#define uthash_malloc(size) calloc(1, (size))
+
 static gr_paint *solid(void)
 {
     gr_paint_desc d = {.kind = GR_PAINT_SOLID, .value.solid = {1, 0, 0, 1}};
@@ -209,7 +213,9 @@ static void containers(void)
 
     for (unsigned i = 0; i < 1000; ++i)
     {
-        e = gr_alloc(1, sizeof(*e));
+        e = calloc(1, sizeof(*e));
+        if (!e)
+            abort();
         e->key = i;
         HASH_ADD(hh, map, key, sizeof(e->key), e);
     }

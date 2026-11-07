@@ -10,10 +10,45 @@ option(GRAPHITE_BUILD_EXAMPLES "Build examples" ON)
 option(GRAPHITE_BUILD_CONFORMANCE "Build conformance tools" ON)
 option(GRAPHITE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
 option(GRAPHITE_GTK "Build the GTK 4.22 backend" OFF)
+option(GRAPHITE_LTO "Enable link-time optimization outside Debug builds" OFF)
 
 if(WIN32 AND BUILD_SHARED_LIBS)
     # Keep build-tree executables beside their DLL dependencies.
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+endif()
+
+# Only GR_API functions are exported from shared libraries (see include/graphite/types.h).
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_OBJC_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+# Optimized builds drop unreferenced functions and data at link time. Mach-O
+# strips per symbol already; ELF and MSVC need one section per function/datum.
+set(graphite_optimized "$<CONFIG:Release,RelWithDebInfo,MinSizeRel>")
+if(MSVC)
+    add_compile_options("$<${graphite_optimized}:/Gy;/Gw>")
+    add_link_options("$<${graphite_optimized}:/OPT:REF;/OPT:ICF>")
+elseif(APPLE)
+    add_link_options("$<${graphite_optimized}:LINKER:-dead_strip>")
+else()
+    add_compile_options("$<${graphite_optimized}:-ffunction-sections;-fdata-sections>")
+    add_link_options("$<${graphite_optimized}:LINKER:--gc-sections>")
+endif()
+
+if(GRAPHITE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT graphite_lto_supported OUTPUT graphite_lto_output LANGUAGES C)
+    if(NOT graphite_lto_supported)
+        message(FATAL_ERROR "GRAPHITE_LTO is not supported by this toolchain:\n${graphite_lto_output}")
+    endif()
+    foreach(config RELEASE RELWITHDEBINFO MINSIZEREL)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_${config} ON)
+    endforeach()
+    if(APPLE)
+        # CMake has no IPO flags for Objective-C; the macOS backend reuses the C compiler's.
+        add_compile_options("$<$<AND:$<COMPILE_LANGUAGE:OBJC>,${graphite_optimized}>:${CMAKE_C_COMPILE_OPTIONS_IPO}>")
+    endif()
 endif()
 
 add_subdirectory(src)

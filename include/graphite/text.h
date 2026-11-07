@@ -92,7 +92,7 @@ typedef struct
 GR_DECLARE_LIST(gr_text_span_list, gr_text_span);
 
 /** Returns "system-ui", 14 pt, weight 400, normal slant, opaque black, no decorations and no letter spacing. */
-gr_text_style gr_text_style_default(void);
+GR_API gr_text_style gr_text_style_default(void);
 
 /* Attributed text */
 
@@ -100,28 +100,28 @@ gr_text_style gr_text_style_default(void);
  * except color, which it ignores. Returns NULL for invalid UTF-8 (NUL bytes are allowed), an invalid used style
  * value, unknown field bits, or a span range that is reversed, exceeds the text or does not start and end on code
  * point boundaries. Empty span ranges are ignored. */
-gr_attributed_text *gr_attributed_text_new(gr_string utf8, const gr_text_style *base, gr_text_span_list spans);
+GR_API gr_attributed_text *gr_attributed_text_new(gr_string utf8, const gr_text_style *base, gr_text_span_list spans);
 
 /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
-gr_attributed_text *gr_attributed_text_ref(gr_attributed_text *text);
+GR_API gr_attributed_text *gr_attributed_text_ref(gr_attributed_text *text);
 
 /** Releases an owned reference; NULL is accepted. Final release destroys the object at a safe boundary. */
-void gr_attributed_text_unref(gr_attributed_text *text);
+GR_API void gr_attributed_text_unref(gr_attributed_text *text);
 
 /** Returns the borrowed UTF-8 contents, valid while the text remains alive. */
-gr_string gr_attributed_text_get_utf8(const gr_attributed_text *text);
+GR_API gr_string gr_attributed_text_get_utf8(const gr_attributed_text *text);
 
 /** Returns the base style. family borrows storage from the text and is never empty ("system-ui" replaces an empty
  * name); color is opaque black and unused. */
-gr_text_style gr_attributed_text_get_base(const gr_attributed_text *text);
+GR_API gr_text_style gr_attributed_text_get_base(const gr_attributed_text *text);
 
 /** Returns the borrowed spans, valid while the text remains alive, in their original order without empty ranges or
  * spans selecting no fields. Families follow the base rules, and unselected fields hold the base style's values.
  * Applying the base style and then each span's selected fields in order resolves the style of any index. */
-gr_text_span_list gr_attributed_text_get_spans(const gr_attributed_text *text);
+GR_API gr_text_span_list gr_attributed_text_get_spans(const gr_attributed_text *text);
 
 /** Returns the immutable resource identity, unique for the process lifetime and never reused. */
-uint64_t gr_attributed_text_get_id(const gr_attributed_text *text);
+GR_API uint64_t gr_attributed_text_get_id(const gr_attributed_text *text);
 
 /* Layout options */
 
@@ -168,20 +168,20 @@ typedef struct
 } gr_text_layout_options;
 
 /** Returns no width limit, word wrapping, unlimited lines, no truncation, start alignment and auto direction. */
-gr_text_layout_options gr_text_layout_options_default(void);
+GR_API gr_text_layout_options gr_text_layout_options_default(void);
 
 /* Text systems */
 
 /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
-gr_text_system *gr_text_system_ref(gr_text_system *system);
+GR_API gr_text_system *gr_text_system_ref(gr_text_system *system);
 
 /** Releases an owned reference; NULL is accepted. Layouts keep their text system alive. */
-void gr_text_system_unref(gr_text_system *system);
+GR_API void gr_text_system_unref(gr_text_system *system);
 
 /** Lays out text and returns an owned layout, which retains text. Returns NULL for a missing text, invalid options
  * or a native failure. Native work may be deferred until a query or draw needs it. */
-gr_text_layout *gr_text_system_layout(gr_text_system *system, gr_attributed_text *text,
-                                      const gr_text_layout_options *options);
+GR_API gr_text_layout *gr_text_system_layout(gr_text_system *system, gr_attributed_text *text,
+                                             const gr_text_layout_options *options);
 
 /* Text layouts */
 
@@ -204,28 +204,28 @@ typedef struct
 } gr_text_line;
 
 /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
-gr_text_layout *gr_text_layout_ref(gr_text_layout *layout);
+GR_API gr_text_layout *gr_text_layout_ref(gr_text_layout *layout);
 
 /** Releases an owned reference; NULL is accepted. Final release destroys the object at a safe boundary. */
-void gr_text_layout_unref(gr_text_layout *layout);
+GR_API void gr_text_layout_unref(gr_text_layout *layout);
 
 /** Returns the borrowed text, valid while the layout remains alive. */
-gr_attributed_text *gr_text_layout_get_text(const gr_text_layout *layout);
+GR_API gr_attributed_text *gr_text_layout_get_text(const gr_text_layout *layout);
 
 /** Returns the borrowed text system, valid while the layout remains alive. */
-gr_text_system *gr_text_layout_get_system(const gr_text_layout *layout);
+GR_API gr_text_system *gr_text_layout_get_system(const gr_text_layout *layout);
 
 /** Returns the options the layout was created with. */
-gr_text_layout_options gr_text_layout_get_options(const gr_text_layout *layout);
+GR_API gr_text_layout_options gr_text_layout_get_options(const gr_text_layout *layout);
 
 /** Returns the immutable resource identity, unique for the process lifetime and never reused. */
-uint64_t gr_text_layout_get_id(const gr_text_layout *layout);
+GR_API uint64_t gr_text_layout_get_id(const gr_text_layout *layout);
 
 /** Returns layout-wide metrics; the first call may perform native layout. */
-gr_text_layout_metrics gr_text_layout_get_metrics(const gr_text_layout *layout);
+GR_API gr_text_layout_metrics gr_text_layout_get_metrics(const gr_text_layout *layout);
 
 /** Stores visible line index in *out; out is required. Index >= line_count returns ARGUMENT and zeroes *out. */
-gr_result gr_text_layout_get_line(const gr_text_layout *layout, size_t index, gr_text_line *out);
+GR_API gr_result gr_text_layout_get_line(const gr_text_layout *layout, size_t index, gr_text_line *out);
 
 /* Carets and hit testing */
 
@@ -248,27 +248,27 @@ typedef struct
  * visible range clamp to its end. */
 
 /** Returns the caret stop after index, or the end of the visible range. */
-size_t gr_text_layout_next_caret_stop(const gr_text_layout *layout, size_t index);
+GR_API size_t gr_text_layout_next_caret_stop(const gr_text_layout *layout, size_t index);
 
 /** Returns the caret stop before index, or 0. */
-size_t gr_text_layout_previous_caret_stop(const gr_text_layout *layout, size_t index);
+GR_API size_t gr_text_layout_previous_caret_stop(const gr_text_layout *layout, size_t index);
 
 /** Returns the caret position nearest to point in layout coordinates; points outside the box clamp to the nearest
  * line and its nearest end. Points on an ellipsis return the position where the elided text starts, and elided
  * positions share its caret. A nonfinite point returns {0, downstream}. */
-gr_text_position gr_text_layout_hit_test(const gr_text_layout *layout, gr_point point);
+GR_API gr_text_position gr_text_layout_hit_test(const gr_text_layout *layout, gr_point point);
 
 /** Stores a zero-width caret rectangle spanning the line height in *out; out is required. In bidirectional text an
  * index can have two visual carets: downstream is the leading edge of the grapheme at the index, upstream the
  * trailing edge of the grapheme before it (in each grapheme's own direction). Where there is no such grapheme, the
  * other one is used. An unknown affinity returns ARGUMENT and zeroes *out. */
-gr_result gr_text_layout_get_caret_rect(const gr_text_layout *layout, gr_text_position position, gr_rect *out);
+GR_API gr_result gr_text_layout_get_caret_rect(const gr_text_layout *layout, gr_text_position position, gr_rect *out);
 
 /** Writes up to capacity rectangles covering range, at most one per line and direction run, in visual order;
  * rects may be NULL when capacity is 0. Returns the total number available, so a second call can size the buffer.
  * The range end is moved forward to a caret stop; an empty or truncated range has no rectangles. */
-size_t gr_text_layout_get_range_rects(const gr_text_layout *layout, gr_text_range range, gr_rect *rects,
-                                      size_t capacity);
+GR_API size_t gr_text_layout_get_range_rects(const gr_text_layout *layout, gr_text_range range, gr_rect *rects,
+                                             size_t capacity);
 
 /* Glyphs */
 
@@ -307,21 +307,22 @@ typedef struct
  * capacity is 0. Returns the line's glyph count, or 0 for an invalid line, so a second call can size the buffer.
  * Paragraph separators have no glyphs; elided text has none either, while its ellipsis is listed where it is drawn.
  * The list is fixed for the layout, so glyph indices are stable. */
-size_t gr_text_layout_get_glyphs(const gr_text_layout *layout, size_t line, gr_text_glyph *glyphs, size_t capacity);
+GR_API size_t gr_text_layout_get_glyphs(const gr_text_layout *layout, size_t line, gr_text_glyph *glyphs,
+                                        size_t capacity);
 
 /* Drawing */
 
 /** Records drawing layout with its box origin at origin and refs layout. color (straight alpha) paints text outside
  * color spans; global alpha applies on top. Rejects nonfinite origin or invalid color. */
-gr_result gr_canvas_draw_text_layout(gr_canvas *canvas, gr_text_layout *layout, gr_point origin, gr_color color);
+GR_API gr_result gr_canvas_draw_text_layout(gr_canvas *canvas, gr_text_layout *layout, gr_point origin, gr_color color);
 
 /** Records drawing glyphs [glyphs.start, glyphs.end) of one line of layout, with the layout box origin at origin, so
  * each glyph lands at origin + its position; place a glyph elsewhere by adjusting origin or the canvas transform.
  * Draws glyphs only, without underline or strikethrough, so for text without decorations drawing every glyph range
  * of every line at one origin matches gr_canvas_draw_text_layout. color and alpha work as there. Refs layout;
  * rejects a line or range outside the layout, nonfinite origin or invalid color. */
-gr_result gr_canvas_draw_text_glyphs(gr_canvas *canvas, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
-                                     gr_point origin, gr_color color);
+GR_API gr_result gr_canvas_draw_text_glyphs(gr_canvas *canvas, gr_text_layout *layout, size_t line,
+                                            gr_glyph_range glyphs, gr_point origin, gr_color color);
 
 /* Text system implementation */
 
@@ -349,7 +350,7 @@ typedef struct
 
 /** All callbacks required. Copies vtable and returns an owned system; takes ownership of system userdata only on
  * success. */
-gr_text_system *gr_text_system_new(const gr_text_system_vtable *vtable, void *system);
+GR_API gr_text_system *gr_text_system_new(const gr_text_system_vtable *vtable, void *system);
 
 /** Core does not cache results, and validates and normalizes every call through get_metrics first, so memoize
  * metrics after native layout. Callbacks receive: line indices below line_count; for next_caret_stop, any index
@@ -374,27 +375,27 @@ typedef struct
 /** All callbacks required. Copies vtable and options, refs system and text, and returns an owned layout; takes
  * ownership of layout userdata only on success. Returns NULL for missing arguments or invalid options. The vtable
  * address identifies the implementation for replay, so pass a static vtable. */
-gr_text_layout *gr_text_layout_new(gr_text_system *system, gr_attributed_text *text,
-                                   const gr_text_layout_options *options, const gr_text_layout_vtable *vtable,
-                                   void *layout);
+GR_API gr_text_layout *gr_text_layout_new(gr_text_system *system, gr_attributed_text *text,
+                                          const gr_text_layout_options *options, const gr_text_layout_vtable *vtable,
+                                          void *layout);
 
 /** Returns the vtable address passed to gr_text_layout_new. */
-const gr_text_layout_vtable *gr_text_layout_get_vtable(const gr_text_layout *layout);
+GR_API const gr_text_layout_vtable *gr_text_layout_get_vtable(const gr_text_layout *layout);
 
 /** Returns the borrowed layout userdata passed to gr_text_layout_new. */
-void *gr_text_layout_get_data(const gr_text_layout *layout);
+GR_API void *gr_text_layout_get_data(const gr_text_layout *layout);
 
 /** UTF-16 code units for CoreText and DirectWrite. */
 GR_DECLARE_LIST(gr_utf16, uint16_t);
 
 /** Returns the borrowed UTF-16 contents, built on first use and valid while the text remains alive. */
-gr_utf16 gr_attributed_text_get_utf16(const gr_attributed_text *text);
+GR_API gr_utf16 gr_attributed_text_get_utf16(const gr_attributed_text *text);
 
 /** Converts a code point boundary UTF-8 offset to a UTF-16 offset; other offsets round down to a boundary first. */
-size_t gr_attributed_text_utf16_index(const gr_attributed_text *text, size_t utf8_index);
+GR_API size_t gr_attributed_text_utf16_index(const gr_attributed_text *text, size_t utf8_index);
 
 /** Converts a UTF-16 offset to a UTF-8 offset; an offset inside a surrogate pair rounds down. */
-size_t gr_attributed_text_utf8_index(const gr_attributed_text *text, size_t utf16_index);
+GR_API size_t gr_attributed_text_utf8_index(const gr_attributed_text *text, size_t utf16_index);
 
 #ifdef __cplusplus
 }

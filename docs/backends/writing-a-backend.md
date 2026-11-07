@@ -2,7 +2,10 @@
 
 Implement a platform under `src/platforms/<name>` with its own CMake target and
 public hosting header. Keep platform SDK types private unless the hosting API
-requires them. Use the existing native backends as examples.
+requires them. Use the existing native backends as examples. Mark the header's
+functions with a `GR_<NAME>_API` macro defined like `GR_MACOS_API`, and define
+`GRAPHITE_<NAME>_BUILDING` privately on the target; everything else stays hidden
+in shared builds.
 
 ## Backend interface
 

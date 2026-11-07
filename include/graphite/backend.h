@@ -187,16 +187,16 @@ typedef struct
  * vtable; transfers userdata only on success. Scene invokes destroy exactly
  * once on teardown, including if no commit occurred. Does not call apply here.
  * Backend schedules via a gr_scene_link, never a permanent strong Scene ref. */
-gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *vtable, void *backend);
+GR_API gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *vtable, void *backend);
 
 /* Deferred drawing */
 
 /** Owned provider references do not keep Scene/layers/drawers alive. Calls stay
  * on Scene's owning thread. Scene teardown invalidates all providers first. */
-gr_drawer_provider *gr_drawer_provider_ref(gr_drawer_provider *provider);
+GR_API gr_drawer_provider *gr_drawer_provider_ref(gr_drawer_provider *provider);
 
 /** Releases an owned reference; NULL is accepted. Final release destroys the object at a safe boundary. */
-void gr_drawer_provider_unref(gr_drawer_provider *provider);
+GR_API void gr_drawer_provider_unref(gr_drawer_provider *provider);
 
 /** layer must have a valid backend identity lease or an owned live reference.
  * expected_version must equal the CURRENT drawer version; stale/missing/inert
@@ -207,14 +207,14 @@ void gr_drawer_provider_unref(gr_drawer_provider *provider);
  * Nested draw/commit/mutations while a drawer runs return GR_ERROR_REENTRANT.
  * Property reads and resource recording are permitted during draw.
  * All failure paths set *out=NULL; out is required. */
-gr_result gr_drawer_provider_draw(gr_drawer_provider *provider, gr_layer *layer, uint64_t expected_version,
-                                  const gr_draw_info *info, gr_display_list **out);
+GR_API gr_result gr_drawer_provider_draw(gr_drawer_provider *provider, gr_layer *layer, uint64_t expected_version,
+                                         const gr_draw_info *info, gr_display_list **out);
 
 /** Returns the resolved box in local coordinates and the supplied positive raster scale. */
-gr_draw_info gr_resolved_get_draw_info(const gr_resolved *resolved, double scale);
+GR_API gr_draw_info gr_resolved_get_draw_info(const gr_resolved *resolved, double scale);
 
 /** Owned path, grown rounded rect or translated custom path, in box space. */
-gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point bounds_offset);
+GR_API gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point bounds_offset);
 
 /* DisplayList replay */
 
@@ -289,7 +289,7 @@ typedef struct
 GR_DECLARE_LIST(gr_draw_op_list, gr_draw_op);
 
 /** Borrowed ops/resources, valid until list's final unref. */
-gr_draw_op_list gr_display_list_get_ops(const gr_display_list *list);
+GR_API gr_draw_op_list gr_display_list_get_ops(const gr_display_list *list);
 
 #ifdef __cplusplus
 }

@@ -37,6 +37,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * Exported symbols. Shared libraries hide everything else; GRAPHITE_STATIC is
+ * defined for static builds (and their consumers through the CMake package).
+ * Each library defines its GRAPHITE_*_BUILDING macro while compiling itself.
+ */
+#if defined(_WIN32)
+#define GR_EXPORT __declspec(dllexport)
+#define GR_IMPORT __declspec(dllimport)
+#elif defined(__GNUC__)
+#define GR_EXPORT __attribute__((visibility("default")))
+#define GR_IMPORT __attribute__((visibility("default")))
+#else
+#define GR_EXPORT
+#define GR_IMPORT
+#endif
+
+#if defined(GRAPHITE_STATIC)
+#define GR_API
+#elif defined(GRAPHITE_BUILDING)
+#define GR_API GR_EXPORT
+#else
+#define GR_API GR_IMPORT
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

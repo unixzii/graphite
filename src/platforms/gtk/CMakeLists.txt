@@ -4,6 +4,7 @@ add_library(graphite_gtk convert.c draw.c tree.c host.c widget.c offscreen.c tex
 add_library(graphite::gtk ALIAS graphite_gtk)
 target_link_libraries(graphite_gtk PUBLIC graphite PkgConfig::GTK4)
 target_compile_features(graphite_gtk PRIVATE c_std_11)
+target_compile_definitions(graphite_gtk PRIVATE GRAPHITE_GTK_BUILDING)
 target_compile_options(graphite_gtk PRIVATE -Wall -Wextra -Wpedantic -Werror)
 set_target_properties(graphite_gtk PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 if(BUILD_TESTING)

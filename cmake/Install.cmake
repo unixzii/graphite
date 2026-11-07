@@ -17,9 +17,7 @@ foreach(target IN LISTS graphite_install_targets)
     elseif(UNIX)
         set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN")
     endif()
-    set_target_properties(${target} PROPERTIES
-        VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}
-        WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 endforeach()
 
 install(TARGETS ${graphite_install_targets} EXPORT graphiteTargets
