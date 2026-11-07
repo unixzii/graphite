@@ -28,8 +28,12 @@ API_AVAILABLE(macos(14.0))
     CADisplayLink *_displayLink;
     unsigned _frame;
     unsigned _fpsTicks;
-    unsigned _unflushed[60];
-    unsigned _unflushedCount;
+    unsigned _uncommitted[60];
+    unsigned _uncommittedCount;
+    unsigned _coalesced;
+    unsigned _committedIdles;
+    bool _changedSinceIdle;
+    CFRunLoopObserverRef _idleObserver;
     double _startTime;
     double _reportTime;
     bool _selftest;
@@ -60,6 +64,8 @@ API_AVAILABLE(macos(14.0))
 {
     _displayLink = [self.window displayLinkWithTarget:self selector:@selector(displayFrame:)];
     [_displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    if (_selftest)
+        [self installIdleObserver];
 }
 
 - (void)stop
@@ -67,7 +73,41 @@ API_AVAILABLE(macos(14.0))
     // Invalidation removes the run-loop registration and releases its target.
     [_displayLink invalidate];
     _displayLink = nil;
+    if (_idleObserver)
+    {
+        CFRunLoopObserverInvalidate(_idleObserver);
+        CFRelease(_idleObserver);
+        _idleObserver = NULL;
+    }
     stop_application();
+}
+
+/* The macOS backend commits when the main run loop is about to sleep (observer
+ * order 1999000), just before Core Animation's own commit (2000000). Check that
+ * contract after the backend's observer: every idle point must leave the Scene
+ * clean. Ticks the run loop delivers back to back, without sleeping in between,
+ * are only counted, because their changes legitimately merge into one commit. */
+- (void)installIdleObserver
+{
+    __weak GRDemoController *weakSelf = self;
+    _idleObserver = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopBeforeWaiting, true, 1999500,
+                                                       ^(CFRunLoopObserverRef observer, CFRunLoopActivity activity) {
+                                                         (void)observer;
+                                                         (void)activity;
+                                                         [weakSelf checkIdleCommit];
+                                                       });
+    CFRunLoopAddObserver(CFRunLoopGetMain(), _idleObserver, kCFRunLoopCommonModes);
+}
+
+- (void)checkIdleCommit
+{
+    if (!_changedSinceIdle)
+        return;
+    _changedSinceIdle = false;
+    if (!gr_scene_needs_commit(_demo->scene))
+        ++_committedIdles;
+    else if (_uncommittedCount < 60)
+        _uncommitted[_uncommittedCount++] = _frame;
 }
 
 - (void)windowWillClose:(NSNotification *)notification
@@ -91,11 +131,12 @@ API_AVAILABLE(macos(14.0))
 - (void)finishSelftest
 {
     printf("selftest: frames=%u uncommitted=[", _frame);
-    for (unsigned i = 0; i < _unflushedCount && i < 60; ++i)
-        printf("%s%u", i ? ", " : "", _unflushed[i]);
-    printf("] backing_scale=%g\n", gr_scene_get_backing_scale(_demo->scene));
+    for (unsigned i = 0; i < _uncommittedCount; ++i)
+        printf("%s%u", i ? ", " : "", _uncommitted[i]);
+    printf("] idle_commits=%u coalesced=%u backing_scale=%g\n", _committedIdles, _coalesced,
+           gr_scene_get_backing_scale(_demo->scene));
     fflush(stdout);
-    _status = _unflushedCount ? 1 : 0;
+    _status = _uncommittedCount || !_committedIdles ? 1 : 0;
     [self stop];
 }
 
@@ -112,11 +153,13 @@ API_AVAILABLE(macos(14.0))
         _reportTime = link.timestamp;
     }
     ++_frame;
+    // The run loop did not go idle since the previous tick, so both ticks share one commit.
     if (_selftest && _frame > 1 && gr_scene_needs_commit(_demo->scene))
-        _unflushed[_unflushedCount++] = _frame;
+        ++_coalesced;
 
     // Advance by display time, so animation speed is independent of refresh rate.
     demo_update(_demo, link.targetTimestamp - _startTime);
+    _changedSinceIdle = true;
     if (_reportFPS)
         [self reportFrameRateAtTime:link.timestamp];
     if (_selftest && _frame == 60)

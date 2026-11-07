@@ -38,9 +38,14 @@ rather than an assumed 60 Hz, so slow rendering or refresh-rate changes do not
 change animation speed. Closing the window removes its update callback before
 releasing state.
 
-`--selftest` runs a real window for 60 display callbacks and verifies that
-previous-tick changes committed before the next tick; successful output includes
-`uncommitted=[]`. It does not force a commit each tick. `--fps` reports actual display-callback
+`--selftest` runs a real window for 60 display callbacks and verifies that the
+backend commits changes at its platform commit point without forcing a commit
+each tick; successful output includes `uncommitted=[]`. GTK and Windows check
+that previous-tick changes committed before the next tick. macOS commits when
+the main run loop is about to sleep, like Core Animation's implicit transactions,
+so it checks every such idle point instead (`idle_commits` must be nonzero). Ticks
+delivered back to back without an idle point in between legitimately share one
+commit; macOS reports them as `coalesced`. `--fps` reports actual display-callback
 rate every two seconds. Closing the window exits and releases scene resources.
 
 CMake's `check` target includes all three native selftests on macOS, GTK and Windows. A graphical
@@ -62,7 +67,4 @@ On Windows build from a Visual Studio developer prompt. Shared builds place the
 executable and DLLs under `build/bin`. Compositor-clock updates require an awake
 interactive display. See the [CMake guide](../../docs/cmake.md).
 
-The macOS showcase selftest has intermittently reported an uncommitted second
-frame during repeated runs. This scheduling issue remains under investigation;
-see [roadmap](../../docs/roadmap.md). Selftest callback rate is not a renderer
-throughput benchmark.
+Selftest callback rate is not a renderer throughput benchmark.

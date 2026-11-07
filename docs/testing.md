@@ -43,9 +43,9 @@ edge/blur/coverage probes at three scales. Compare captures from the same backen
 and renderer with `conformance/compare.py`; cross-platform output is not required
 to be pixel-identical. Keep visual review separate from numerical acceptance.
 
-Demo selftests run 60 callbacks and detect uncommitted previous-frame changes.
-They test scheduling, not throughput. The macOS showcase has an observed
-intermittent early-frame commit failure; see [roadmap](roadmap.md).
+Demo selftests run 60 callbacks and detect changes left uncommitted at the
+backend's commit point: before the next tick on GTK and Windows, and at every
+main run-loop idle point on macOS. They test scheduling, not throughput.
 
 ## Package consumers and benchmarks
 

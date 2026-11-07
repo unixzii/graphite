@@ -30,12 +30,6 @@
 
 ## Next
 
-Investigate intermittent early-frame commit ordering in the macOS showcase
-selftest (`uncommitted=[2]` was observed during repeated runs). Keep display-link
-updates and backend commits ordered before relying on this as a stable timing
-harness.
-
-
 1. **Resource release notifications**: let backends evict native caches
    keyed by resource identity. All backends currently share image textures
    through per-layer reference counts. Caching paths or drawings across
