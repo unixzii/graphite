@@ -19,11 +19,11 @@ static bool on_frame(example_frames *f, const gr_event *event)
     if (f->frame == 0)
         f->start = f->report = event->time;
     ++f->frame;
-    /* The host commits at its platform commit point, which comes before the next frame. A focus change between
-     * frames may land in the same frame-clock cycle ahead of its commit, so skip the check after one. */
-    bool focus_changed = f->focus_changed;
-    f->focus_changed = false;
-    if (f->selftest && f->frame > 1 && !focus_changed && gr_scene_needs_commit(f->content->scene))
+    /* The host commits at its platform commit point, which comes before the next frame. Changes made for focus or
+     * input between frames may land in the same frame-clock cycle ahead of their commit, so skip the check then. */
+    bool changed = f->changed_between_frames;
+    f->changed_between_frames = false;
+    if (f->selftest && f->frame > 1 && !changed && gr_scene_needs_commit(f->content->scene))
     {
         if (f->strict)
             example_frames_fail(f);
@@ -53,16 +53,20 @@ static bool handle(void *userdata, const gr_event *event)
             return on_frame(f, event);
         case GR_EVENT_FOCUS_IN:
         case GR_EVENT_FOCUS_OUT:
-            f->focus_changed = true;
+            f->changed_between_frames = true;
             example_focus(f->content, event->type == GR_EVENT_FOCUS_IN);
             return true;
-        default:
+        case GR_EVENT_VIEWPORT:
             return false;
+        default:
+            f->changed_between_frames = true;
+            return example_input(f->content, event);
     }
 }
 
 bool example_frames_start(example_frames *f)
 {
+    f->content->host = f->host;
     gr_event_handler handler = {f, handle, NULL};
     if (gr_scene_host_set_event_handler(f->host, &handler) != GR_OK || gr_scene_host_request_frame(f->host) != GR_OK)
     {

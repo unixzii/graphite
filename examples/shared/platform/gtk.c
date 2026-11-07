@@ -77,6 +77,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
     gtk_window_destroy(window);
     g_object_unref(window);
     /* Releasing the host destroys the frame handler, which borrows state. */
+    content->host = NULL;
     gr_scene_host_unref(host);
     g_main_loop_unref(state.loop);
     return state.status;

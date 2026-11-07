@@ -49,6 +49,9 @@ typedef struct
     /** Reflects whether the window has keyboard focus; called on the Scene thread. Scenes start focused, which is
      * also how snapshots render. May be NULL. */
     void (*focus)(void *state, bool focused);
+    /** Handles pointer, scroll and key input; returns whether it was consumed (false lets the platform have it).
+     * Called on the Scene thread; ex->host can set the cursor. May be NULL. */
+    bool (*input)(void *state, const gr_event *event);
 } example_desc;
 
 struct example
@@ -56,6 +59,7 @@ struct example
     const example_desc *desc;
     gr_scene *scene;
     gr_text_system *text; /**< NULL where the platform has no text system yet. */
+    gr_scene_host *host;  /**< Borrowed interactive host while a window runs; NULL for snapshots. */
     void *state;
     gr_layer **layers;
     size_t layer_count, layer_capacity;
@@ -75,6 +79,8 @@ example *example_new(const example_desc *desc, gr_text_system *text);
 void example_update(example *ex, double time);
 /** Tells the scene whether the window has keyboard focus; called on the Scene thread. */
 void example_focus(example *ex, bool focused);
+/** Passes an input event to the scene; returns whether it was consumed. */
+bool example_input(example *ex, const gr_event *event);
 /** Destroys the Scene before releasing tracked layers and scene state. */
 void example_free(example *ex);
 

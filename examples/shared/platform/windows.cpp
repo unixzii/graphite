@@ -157,6 +157,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
     else
         state.status = 1;
     /* Releasing the host destroys the frame handler, which borrows state. */
+    content->host = nullptr;
     gr_scene_host_unref(state.host);
     state.host = nullptr;
     if (IsWindow(window))

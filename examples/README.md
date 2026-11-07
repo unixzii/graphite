@@ -17,6 +17,7 @@ They share one layer in `shared/`:
 | `ui` | 1000 × 600 | A control/gallery layout with animated switch, slider, caret, spinner and progress bar; its accent color turns gray while the window has no keyboard focus. Its labels, calendar and editor paragraph are real text: English labels with emoji, and a wrapped paragraph with styled spans, a line of Chinese and an ellipsis. Without a platform text system it draws placeholder bars instead. |
 | `stress` | 800 × 800 | An 80 × 80 grid of independent square layers. Every three seconds, a ripple travels outward from the center, animating each cell's scale, radial displacement and color. |
 | `glyphs` | 960 × 600 | Per-glyph text transitions in four looping labels: a clock, a price counter that rolls up or down, swapping phrases (CJK and emoji included) and a wrapped paragraph that reflows as words are inserted and removed. Every glyph is its own content layer drawn with `gr_canvas_draw_text_glyphs`; glyphs that stay glide to their new place while the others scale, slide, fade and blur (layer blur) in or out, driven by springs. Needs a platform text system. |
+| `input` | 900 × 560 | Shows what the interactive host reports: a pointer pad with a crosshair, a dot colored by the pressed button and click ripples; cursor tiles that change the cursor on hover; a list that scrolls by wheel lines or touchpad points; and the last key's name, physical code and modifiers. Shortcuts with Alt or Super are left to the platform. |
 
 The executables support macOS 14+, Linux with GTK 4.22+, and Windows 11. Where
 no native shell is available, the scene sources still compile but no executable
@@ -68,13 +69,15 @@ Create `examples/<name>/` with a source file that defines its state, build and
 update callbacks, and `main`:
 
 ```c
-static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL};
+static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL, NULL};
 return example_main(argc, argv, &desc);
 ```
 
-The last field is an optional focus callback: the shells pass keyboard focus
-changes to it (`ui` grays its accent color while the window is unfocused).
-Scenes start focused, which is how snapshots render.
+The last two fields are optional focus and input callbacks: the shells pass
+keyboard focus changes and pointer, scroll and key events to them (`ui` grays
+its accent color while the window is unfocused; `input` visualizes input).
+Scenes start focused, which is how snapshots render. While a window runs,
+`ex->host` is its interactive host, for setting cursors.
 
 Add `graphite_add_example(<name> <sources>...)` in its `CMakeLists.txt` and
 `add_subdirectory(<name>)` in `examples/CMakeLists.txt`.

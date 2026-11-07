@@ -26,8 +26,12 @@
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
-- **Examples**: one executable per scene (`showcase`, `ui`, `stress`, `glyphs`) on a
+- **Examples**: one executable per scene (`showcase`, `ui`, `stress`, `glyphs`, `input`) on a
   shared native shell with `--selftest`, `--fps` and `--snapshot`.
+- **Events**: every attachment returns a `gr_scene_host`. View, widget and HWND
+  hosts deliver frames paced by the display, viewport, focus, pointer (mouse and
+  pen), scroll and key events through one handler, and apply cursors. Text
+  input (IME), touchscreens and gestures are next.
 
 ## Next
 

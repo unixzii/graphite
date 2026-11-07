@@ -35,11 +35,12 @@ struct example_frames
 
     unsigned frame, fps_ticks, uncommitted[60], uncommitted_count, coalesced;
     double start, report;
-    bool done, focus_changed;
+    bool done, changed_between_frames;
 };
 
 /** Installs the event handler, asks for keyboard focus and requests the first frame. The handler poses the scene
- * on frames and passes focus changes to example_focus. */
+ * on frames and passes focus changes to example_focus and input to example_input. Sets content->host; clear it
+ * before releasing the host. */
 bool example_frames_start(example_frames *frames);
 /** Records a selftest failure at the current frame. */
 void example_frames_fail(example_frames *frames);

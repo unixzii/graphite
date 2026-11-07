@@ -168,6 +168,7 @@ int example_platform_run(example *ex, bool selftest, bool fps)
         window.delegate = nil;
         [window close];
         /* Releasing the host destroys the frame handler, which borrows the controller's state. */
+        ex->host = NULL;
         gr_scene_host_unref(host);
         return status;
     }

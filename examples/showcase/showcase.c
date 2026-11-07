@@ -52,6 +52,6 @@ static void free_state(void *state)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"showcase", {960, 640}, build, update, free_state, NULL};
+    static const example_desc desc = {"showcase", {960, 640}, build, update, free_state, NULL, NULL};
     return example_main(argc, argv, &desc);
 }
