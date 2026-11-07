@@ -31,6 +31,13 @@ lists use atomic reference counts and may be shared after synchronized
 publication. Builders and canvases require exclusive access. Full rules are in
 [API conventions](../include/graphite/types.h) and [lifetime internals](core-lifetime.md).
 
+## Hosts
+
+Every platform attachment returns a `gr_scene_host` ([host.h](../include/graphite/host.h)): a core-owned,
+reference-counted handle with a platform vtable behind it, like text systems. The host holds a Scene link, not the
+Scene. Platform headers add functions for their own hosts (native view, layer, widget or window, offscreen readback)
+that recognize them by vtable address and return NULL/false for other hosts.
+
 ## Pipeline
 
 Setters update model properties and mark dirty groups. The first pending change

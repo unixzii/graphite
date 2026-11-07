@@ -809,6 +809,44 @@ static void mask_replacement_lifetime(void)
     gr_scene_unref(s);
 }
 
+static void count_host_destroy(void *data)
+{
+    ++*(int *)data;
+}
+
+static void scene_hosts(void)
+{
+    static const gr_scene_host_vtable vtable = {count_host_destroy};
+    static const gr_scene_host_vtable incomplete = {0};
+    int destroyed = 0;
+    gr_scene *s = gr_scene_new((gr_size){10, 10});
+    CHECK(!gr_scene_host_new(NULL, &vtable, &destroyed));
+    CHECK(!gr_scene_host_new(s, NULL, &destroyed));
+    CHECK(!gr_scene_host_new(s, &incomplete, &destroyed));
+    CHECK(destroyed == 0);
+
+    gr_scene_host *host = gr_scene_host_new(s, &vtable, &destroyed);
+    CHECK(host);
+    CHECK(gr_scene_host_get_vtable(host) == &vtable);
+    CHECK(gr_scene_host_get_data(host) == &destroyed);
+    gr_scene *locked = gr_scene_host_get_scene(host);
+    CHECK(locked == s);
+    gr_scene_unref(locked);
+
+    CHECK(gr_scene_host_ref(host) == host);
+    CHECK(!gr_scene_host_ref(NULL));
+    gr_scene_host_unref(host);
+    gr_scene_host_unref(NULL);
+    CHECK(destroyed == 0);
+
+    /* The host does not keep the Scene alive and outlives it. */
+    gr_scene_unref(s);
+    CHECK(!gr_scene_host_get_scene(host));
+    CHECK(destroyed == 0);
+    gr_scene_host_unref(host);
+    CHECK(destroyed == 1);
+}
+
 void graphite_lifecycle_example(void);
 
 int main(int argc, char **argv)
@@ -828,6 +866,7 @@ int main(int argc, char **argv)
         GR_TEST_CASE(teardown_reentry),
         GR_TEST_CASE(unavailable_backend),
         GR_TEST_CASE(deep_tree),
+        GR_TEST_CASE(scene_hosts),
         GR_TEST_CASE(graphite_lifecycle_example),
     };
     return gr_test_run("scene", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);

@@ -19,7 +19,7 @@ static bool capture(void *host, gr_conf_pixels *out)
 
 static void destroy(void *host)
 {
-    gr_windows_host_unref(host);
+    gr_scene_host_unref(host);
 }
 
 static gr_text_system *text_system(void *userdata)

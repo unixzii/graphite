@@ -4,6 +4,7 @@ add_library(graphite
     core/path.c
     core/canvas.c
     core/scene.c
+    core/host.c
     core/layer.c
     core/resolve.c
     core/text.c

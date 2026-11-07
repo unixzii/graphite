@@ -62,11 +62,12 @@ static bool copy_pixels(std::vector<uint8_t> const &data, uint32_t width, uint32
     return true;
 }
 
-bool gr_windows_host_capture(gr_windows_host *host, gr_windows_pixels *out)
+bool gr_windows_host_capture(gr_scene_host *scene_host, gr_windows_pixels *out)
 {
     if (!out)
         return false;
     *out = {};
+    gr_windows_host *host = gr_windows_host_data(scene_host);
     if (!host || !host->hwnd || !host->backdrop)
         return false;
     try

@@ -47,7 +47,9 @@ Retained compositors update native properties and backing stores incrementally.
 ## Hosting and validation
 
 Provide host attachment, backing-scale tracking, commit scheduling and offscreen
-readback. Capture top-down premultiplied RGBA8 at the requested scale; verify
+readback. Attachment functions return a `gr_scene_host` made with `gr_scene_host_new`
+and a static `gr_scene_host_vtable`; functions for your hosts compare
+`gr_scene_host_get_vtable` with it and return NULL/false for other hosts. Capture top-down premultiplied RGBA8 at the requested scale; verify
 orientation using an asymmetric native scene first. Use `gr_conf_harness` from
 `conformance/conformance.h` for rendering cases and the shared unit test harness
 for hosting/lifetime tests. Test idle wakeup, resizing, teardown, masks and

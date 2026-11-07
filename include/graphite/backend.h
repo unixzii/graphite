@@ -189,6 +189,26 @@ typedef struct
  * Backend schedules via a gr_scene_link, never a permanent strong Scene ref. */
 GR_API gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *vtable, void *backend);
 
+/* Scene hosts */
+
+/** A platform host behind the common gr_scene_host handle. Platform host functions recognize their hosts by the
+ * vtable address passed to gr_scene_host_new, so pass a static vtable. destroy releases the platform host on final
+ * release; it must not call Scene APIs or release the host again. */
+typedef struct
+{
+    void (*destroy)(void *data);
+} gr_scene_host_vtable;
+
+/** Creates an owned host of scene with all callbacks required. Copies the vtable and takes ownership of data on
+ * success; returns NULL and leaves data with the caller for missing arguments. Holds a gr_scene_link, not the Scene. */
+GR_API gr_scene_host *gr_scene_host_new(gr_scene *scene, const gr_scene_host_vtable *vtable, void *data);
+
+/** Returns the vtable address passed to gr_scene_host_new. */
+GR_API const gr_scene_host_vtable *gr_scene_host_get_vtable(const gr_scene_host *host);
+
+/** Returns the borrowed platform data passed to gr_scene_host_new, valid while the host is alive. */
+GR_API void *gr_scene_host_get_data(const gr_scene_host *host);
+
 /* Deferred drawing */
 
 /** Owned provider references do not keep Scene/layers/drawers alive. Calls stay

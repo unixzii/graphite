@@ -36,13 +36,6 @@ bool gr_macos_install(gr_scene *scene, CALayer *host);
 @property(nonatomic, strong) CALayer *layer;
 @property(nonatomic, strong) CALayer *container;
 @property(nonatomic, strong) NSView *view;
-@property(nonatomic) gr_scene_link *sceneLink;
 @end
-
-struct gr_macos_host
-{
-    size_t refs;
-    void *object;
-};
 
 #endif

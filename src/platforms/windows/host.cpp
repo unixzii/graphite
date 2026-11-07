@@ -25,6 +25,28 @@ gr_windows_host::~gr_windows_host()
     }
 }
 
+static void destroy_host(void *data)
+{
+    delete static_cast<gr_windows_host *>(data);
+}
+
+static const gr_scene_host_vtable host_vtable = {destroy_host};
+
+gr_windows_host *gr_windows_host_data(gr_scene_host const *host)
+{
+    if (!host || gr_scene_host_get_vtable(host) != &host_vtable)
+        return nullptr;
+    return static_cast<gr_windows_host *>(gr_scene_host_get_data(host));
+}
+
+static gr_scene_host *wrap_host(gr_scene *scene, std::unique_ptr<gr_windows_host> host)
+{
+    gr_scene_host *result = gr_scene_host_new(scene, &host_vtable, host.get());
+    if (result)
+        host.release();
+    return result;
+}
+
 static void attach_visual(gr_windows_host &host, gr_scene *scene, bool backdrop)
 {
     auto &ctx = context();
@@ -59,7 +81,7 @@ void *gr_windows_get_compositor(void)
     }
 }
 
-gr_windows_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent)
+gr_scene_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent)
 {
     if (!scene || !IsWindow(static_cast<HWND>(parent)))
         return nullptr;
@@ -77,7 +99,7 @@ gr_windows_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent)
         attach_visual(*host, scene, false);
         host->target.Root(host->visual);
         gr_scene_set_backing_scale(scene, window_scale(host->hwnd));
-        return host.release();
+        return wrap_host(scene, std::move(host));
     }
     catch (...)
     {
@@ -86,7 +108,7 @@ gr_windows_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent)
     }
 }
 
-gr_windows_host *gr_windows_attach_to_visual(gr_scene *scene, void *pointer)
+gr_scene_host *gr_windows_attach_to_visual(gr_scene *scene, void *pointer)
 {
     if (!scene || !pointer)
         return nullptr;
@@ -97,7 +119,7 @@ gr_windows_host *gr_windows_attach_to_visual(gr_scene *scene, void *pointer)
         auto host = std::make_unique<gr_windows_host>();
         attach_visual(*host, scene, false);
         container.Children().InsertAtTop(host->visual);
-        return host.release();
+        return wrap_host(scene, std::move(host));
     }
     catch (...)
     {
@@ -106,7 +128,7 @@ gr_windows_host *gr_windows_attach_to_visual(gr_scene *scene, void *pointer)
     }
 }
 
-gr_windows_host *gr_windows_offscreen_new(gr_scene *scene, double scale)
+gr_scene_host *gr_windows_offscreen_new(gr_scene *scene, double scale)
 {
     if (!scene || !std::isfinite(scale) || scale <= 0)
         return nullptr;
@@ -139,7 +161,7 @@ gr_windows_host *gr_windows_offscreen_new(gr_scene *scene, double scale)
         attach_visual(*host, scene, true);
         host->target.Root(host->visual);
         gr_scene_set_backing_scale(scene, scale);
-        return host.release();
+        return wrap_host(scene, std::move(host));
     }
     catch (...)
     {
@@ -148,29 +170,14 @@ gr_windows_host *gr_windows_offscreen_new(gr_scene *scene, double scale)
     }
 }
 
-gr_windows_host *gr_windows_host_ref(gr_windows_host *host)
+void *gr_windows_host_get_hwnd(gr_scene_host const *host)
 {
-    if (host)
-    {
-        if (host->refs == SIZE_MAX)
-            std::abort();
-        ++host->refs;
-    }
-    return host;
+    auto data = gr_windows_host_data(host);
+    return data ? data->hwnd : nullptr;
 }
 
-void gr_windows_host_unref(gr_windows_host *host)
+void *gr_windows_host_get_visual(gr_scene_host const *host)
 {
-    if (host && !--host->refs)
-        delete host;
-}
-
-void *gr_windows_host_get_hwnd(gr_windows_host const *host)
-{
-    return host->hwnd;
-}
-
-void *gr_windows_host_get_visual(gr_windows_host const *host)
-{
-    return get_abi(host->visual);
+    auto data = gr_windows_host_data(host);
+    return data ? get_abi(data->visual) : nullptr;
 }

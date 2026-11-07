@@ -194,7 +194,7 @@ int example_platform_run(example *ex, bool selftest, bool fps)
                                                                                        fps:fps];
             controller.window = window;
             window.delegate = controller;
-            gr_macos_host *host = gr_macos_attach_to_view(ex->scene, (__bridge void *)window.contentView);
+            gr_scene_host *host = gr_macos_attach_to_view(ex->scene, (__bridge void *)window.contentView);
             if (!host)
             {
                 fprintf(stderr, "cannot attach macOS backend\n");
@@ -208,7 +208,7 @@ int example_platform_run(example *ex, bool selftest, bool fps)
             [controller stop];
             window.delegate = nil;
             [window close];
-            gr_macos_host_unref(host);
+            gr_scene_host_unref(host);
             return controller.status;
         }
         fprintf(stderr, "the display-linked example requires macOS 14 or later\n");
@@ -221,7 +221,7 @@ bool example_platform_snapshot(example *ex, const char *path)
     @autoreleasepool
     {
         gr_size size = ex->desc->size;
-        gr_macos_host *host = gr_macos_offscreen_new(ex->scene, size, 1);
+        gr_scene_host *host = gr_macos_offscreen_new(ex->scene, size, 1);
         if (!host)
         {
             fprintf(stderr, "cannot attach offscreen backend\n");
@@ -229,7 +229,7 @@ bool example_platform_snapshot(example *ex, const char *path)
         }
         gr_macos_pixels pixels = {0};
         bool rendered = gr_macos_host_render(host, size, 1, &pixels);
-        gr_macos_host_unref(host);
+        gr_scene_host_unref(host);
         if (!rendered)
         {
             fprintf(stderr, "offscreen rendering is not available\n");

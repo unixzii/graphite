@@ -2,6 +2,7 @@
 
 #include "test.h"
 
+#include <graphite/backend.h>
 #include <graphite/windows.h>
 
 #include <windows.h>
@@ -93,7 +94,7 @@ static void window_hosting()
     CHECK(MoveWindow(child, 0, 0, 160, 100, TRUE));
     CHECK(GetClientRect(child, &client));
     CHECK(client.right == 160 && client.bottom == 100);
-    gr_windows_host_unref(host);
+    gr_scene_host_unref(host);
     CHECK(!IsWindow(child));
     gr_layer_unref(l);
     gr_scene_unref(scene);
@@ -123,7 +124,7 @@ static void offscreen_alpha_and_lifetime()
     CHECK(image.data[(5 * 150 + 5) * 4 + 3] == 0);
     gr_windows_pixels_clear(&image);
     gr_layer_unref(l);
-    gr_windows_host_unref(host);
+    gr_scene_host_unref(host);
     pump();
 }
 
@@ -137,7 +138,7 @@ static void visual_hosting()
     CHECK(host && !gr_windows_host_get_hwnd(host));
     CHECK(container.Children().Count() == 1);
     OK(gr_scene_commit(scene));
-    gr_windows_host_unref(host);
+    gr_scene_host_unref(host);
     CHECK(container.Children().Count() == 0);
     gr_scene_unref(scene);
     pump();
@@ -154,6 +155,11 @@ static void invalid_arguments()
     CHECK(!gr_windows_attach_to_hwnd(scene, nullptr));
     CHECK(!gr_windows_offscreen_new(scene, 0));
     CHECK(!gr_windows_offscreen_new(scene, -1));
+    static const gr_scene_host_vtable foreign_vtable = {[](void *) {}};
+    auto foreign = gr_scene_host_new(scene, &foreign_vtable, nullptr);
+    CHECK(!gr_windows_host_get_hwnd(foreign) && !gr_windows_host_get_visual(foreign));
+    CHECK(!gr_windows_host_capture(foreign, &p) && !p.data);
+    gr_scene_host_unref(foreign);
     gr_scene_unref(scene);
 }
 

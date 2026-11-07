@@ -3,6 +3,7 @@
 #define GRAPHITE_GRAPHITE_H
 
 #include "canvas.h"
+#include "host.h"
 #include "layer.h"
 #include "resource.h"
 #include "scene.h"

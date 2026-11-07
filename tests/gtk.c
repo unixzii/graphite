@@ -1,5 +1,6 @@
 #include "test.h"
 
+#include <graphite/backend.h>
 #include <graphite/gtk.h>
 
 #include <math.h>
@@ -77,7 +78,7 @@ static void widget_hosting(void)
 {
     gr_scene *scene = gr_scene_new((gr_size){120, 80});
     gr_layer *layer = red_layer(scene);
-    gr_gtk_host *host = gr_gtk_attach(scene);
+    gr_scene_host *host = gr_gtk_attach(scene);
     CHECK(host);
     GtkWidget *widget = gr_gtk_host_get_widget(host);
     CHECK(gtk_widget_get_overflow(widget) == GTK_OVERFLOW_HIDDEN);
@@ -111,7 +112,7 @@ static void widget_hosting(void)
     OK(gr_layer_set_position(layer, (gr_point){5, 5}));
     wait_clean(scene, widget);
     /* Native parent ownership keeps widget/shared state alive after host release. */
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
     OK(gr_layer_set_opacity(layer, 0.5f));
     wait_clean(scene, widget);
     gr_scene_unref(scene);
@@ -144,7 +145,7 @@ static void frame_clock_commits(void)
 {
     gr_scene *scene = gr_scene_new((gr_size){120, 80});
     gr_layer *layer = red_layer(scene);
-    gr_gtk_host *host = gr_gtk_attach(scene);
+    gr_scene_host *host = gr_gtk_attach(scene);
     CHECK(host);
     GtkWidget *widget = gr_gtk_host_get_widget(host), *window = gtk_window_new();
     g_object_ref_sink(window);
@@ -161,7 +162,7 @@ static void frame_clock_commits(void)
     CHECK(state.missed == 0);
     gtk_window_destroy(GTK_WINDOW(window));
     g_object_unref(window);
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
     gr_layer_unref(layer);
     gr_scene_unref(scene);
     iterate();
@@ -187,6 +188,11 @@ static void destroy_draw(void *userdata)
     ++((draw_state *)userdata)->destroyed;
 }
 
+static void ignore_host(void *data)
+{
+    (void)data;
+}
+
 static void offscreen_cache_and_lifetime(void)
 {
     gr_scene *scene = gr_scene_new((gr_size){100, 100});
@@ -196,7 +202,7 @@ static void offscreen_cache_and_lifetime(void)
     draw_state state = {0};
     gr_drawer drawer = {&state, draw, destroy_draw};
     OK(gr_content_layer_set_drawer(layer, &drawer));
-    gr_gtk_host *host = gr_gtk_attach_offscreen(scene);
+    gr_scene_host *host = gr_gtk_attach_offscreen(scene);
     CHECK(host && !gr_gtk_host_get_widget(host));
     CHECK(!gr_gtk_attach_offscreen(scene));
     gr_size size;
@@ -235,6 +241,12 @@ static void offscreen_cache_and_lifetime(void)
     gr_gtk_pixels invalid = {0};
     CHECK(!gr_gtk_renderer_render(renderer, host, NAN, &invalid));
     CHECK(!invalid.data);
+    static const gr_scene_host_vtable foreign_vtable = {ignore_host};
+    gr_scene_host *foreign = gr_scene_host_new(scene, &foreign_vtable, NULL);
+    CHECK(!gr_gtk_host_get_widget(foreign) && !gr_gtk_host_get_root_node(foreign));
+    CHECK(!gr_gtk_host_get_size(foreign, &size) && size.width == 0);
+    CHECK(!gr_gtk_renderer_render(renderer, foreign, 1, &invalid) && !invalid.data);
+    gr_scene_host_unref(foreign);
     gr_scene_unref(scene);
     CHECK(state.destroyed == 1);
     CHECK(!gr_gtk_host_get_size(host, &size));
@@ -242,13 +254,13 @@ static void offscreen_cache_and_lifetime(void)
     CHECK(!gr_gtk_renderer_render(renderer, host, 1, &invalid));
     gr_layer_unref(layer);
     gr_gtk_renderer_unref(renderer);
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
 }
 
 static void empty_scene(void)
 {
     gr_scene *scene = gr_scene_new((gr_size){12, 8});
-    gr_gtk_host *host = gr_gtk_attach_offscreen(scene);
+    gr_scene_host *host = gr_gtk_attach_offscreen(scene);
     CHECK(host);
     OK(gr_scene_commit(scene));
     GError *error = NULL;
@@ -261,7 +273,7 @@ static void empty_scene(void)
         CHECK(p.data[i] == 0);
     gr_gtk_pixels_clear(&p);
     gr_gtk_renderer_unref(r);
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
     gr_scene_unref(scene);
 }
 

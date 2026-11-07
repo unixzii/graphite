@@ -16,8 +16,6 @@
 extern "C" {
 #endif
 
-typedef struct gr_windows_host gr_windows_host;
-
 typedef struct
 {
     uint32_t width, height;
@@ -26,23 +24,22 @@ typedef struct
 
 /** Returns a borrowed IInspectable compositor for this thread, or NULL on initialization failure. */
 GR_WINDOWS_API void *gr_windows_get_compositor(void);
+/* Hosts are gr_scene_host handles (see host.h). Releasing the last host reference detaches its visuals and destroys
+ * its host window. Functions taking a host return NULL/false for hosts of other platforms. */
+
 /** Creates an owned child-window host filling parent HWND; tracks its DPI. NULL on failure. */
-GR_WINDOWS_API gr_windows_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent);
+GR_WINDOWS_API gr_scene_host *gr_windows_attach_to_hwnd(gr_scene *scene, void *parent);
 /** Attaches to a borrowed ContainerVisual ABI pointer from this thread's compositor. Returns owned host or NULL. */
-GR_WINDOWS_API gr_windows_host *gr_windows_attach_to_visual(gr_scene *scene, void *container);
+GR_WINDOWS_API gr_scene_host *gr_windows_attach_to_visual(gr_scene *scene, void *container);
 /** Creates an owned off-desktop window sized to root bounds at scale; caller commits before capturing. */
-GR_WINDOWS_API gr_windows_host *gr_windows_offscreen_new(gr_scene *scene, double scale);
-/** Acquires an owned reference; NULL returns NULL. */
-GR_WINDOWS_API gr_windows_host *gr_windows_host_ref(gr_windows_host *host);
-/** Detaches visuals/destroys host window on final unref; NULL is accepted. */
-GR_WINDOWS_API void gr_windows_host_unref(gr_windows_host *host);
+GR_WINDOWS_API gr_scene_host *gr_windows_offscreen_new(gr_scene *scene, double scale);
 /** Returns borrowed HWND or NULL for visual-only hosting. */
-GR_WINDOWS_API void *gr_windows_host_get_hwnd(const gr_windows_host *host);
+GR_WINDOWS_API void *gr_windows_host_get_hwnd(const gr_scene_host *host);
 /** Returns borrowed ContainerVisual ABI pointer, valid for the host lifetime. */
-GR_WINDOWS_API void *gr_windows_host_get_visual(const gr_windows_host *host);
+GR_WINDOWS_API void *gr_windows_host_get_visual(const gr_scene_host *host);
 /** Captures an offscreen host using black/white DWM readbacks to recover premultiplied RGBA.
  * Does not commit Scene. Output must be empty; it is cleared on failure. */
-GR_WINDOWS_API bool gr_windows_host_capture(gr_windows_host *host, gr_windows_pixels *out);
+GR_WINDOWS_API bool gr_windows_host_capture(gr_scene_host *host, gr_windows_pixels *out);
 /** Captures a process-owned visible/covered window as opaque RGBA after composition commits. */
 GR_WINDOWS_API bool gr_windows_capture_window(void *hwnd, gr_windows_pixels *out);
 /** Frees pixel storage and zeros the result; NULL is accepted. */

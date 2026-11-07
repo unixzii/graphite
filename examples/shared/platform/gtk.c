@@ -85,7 +85,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
 {
     if (!init())
         return 1;
-    gr_gtk_host *host = gr_gtk_attach(content->scene);
+    gr_scene_host *host = gr_gtk_attach(content->scene);
     if (!host)
     {
         fprintf(stderr, "cannot attach GTK backend\n");
@@ -112,7 +112,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
     g_signal_handler_disconnect(window, close_handler);
     gtk_window_destroy(window);
     g_object_unref(window);
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
     g_main_loop_unref(state.loop);
     return state.status;
 }
@@ -150,7 +150,7 @@ bool example_platform_snapshot(example *content, const char *path)
 {
     if (!init())
         return false;
-    gr_gtk_host *host = gr_gtk_attach_offscreen(content->scene);
+    gr_scene_host *host = gr_gtk_attach_offscreen(content->scene);
     if (!host)
         return false;
     gr_gtk_renderer *renderer = snapshot_renderer();
@@ -169,7 +169,7 @@ bool example_platform_snapshot(example *content, const char *path)
     }
     gr_gtk_pixels_clear(&pixels);
     gr_gtk_renderer_unref(renderer);
-    gr_gtk_host_unref(host);
+    gr_scene_host_unref(host);
     if (!ok)
         fprintf(stderr, "cannot render or write %s\n", path);
     return ok;

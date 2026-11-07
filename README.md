@@ -91,8 +91,9 @@ from your display callback:
 ```c
 gr_scene *scene = make_scene();
 
-/* macOS: an NSView filling the window (GTK: gr_gtk_attach, Windows: gr_windows_attach_to_hwnd). */
-gr_macos_host *host = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+/* macOS: an NSView filling the window (GTK: gr_gtk_attach, Windows: gr_windows_attach_to_hwnd).
+ * Every platform returns the same gr_scene_host handle. */
+gr_scene_host *host = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
 
 /* Now you can update the layers anytime. The backend commits the changes for you. */
 gr_layer_set_position(...);

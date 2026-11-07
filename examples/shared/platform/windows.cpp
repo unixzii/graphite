@@ -24,7 +24,7 @@ constexpr UINT frame_message = WM_APP + 1;
 struct WindowState
 {
     example *content = nullptr;
-    gr_windows_host *host = nullptr;
+    gr_scene_host *host = nullptr;
     std::atomic<bool> frame_pending{false};
     unsigned frames = 0, fps_ticks = 0, unflushed[60]{}, missed = 0;
     bool selftest = false, fps = false;
@@ -245,7 +245,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
         fprintf(stderr, "display clock: %s\n", error.what());
         state.status = 1;
     }
-    gr_windows_host_unref(state.host);
+    gr_scene_host_unref(state.host);
     state.host = nullptr;
     if (IsWindow(window))
         DestroyWindow(window);
@@ -255,7 +255,7 @@ int example_platform_run(example *content, bool selftest, bool fps)
 bool example_platform_snapshot(example *content, const char *path)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    gr_windows_host *host = gr_windows_offscreen_new(content->scene, 1);
+    gr_scene_host *host = gr_windows_offscreen_new(content->scene, 1);
     if (!host)
         return false;
     gr_windows_pixels pixels{};
@@ -272,7 +272,7 @@ bool example_platform_snapshot(example *content, const char *path)
         }
     }
     gr_windows_pixels_clear(&pixels);
-    gr_windows_host_unref(host);
+    gr_scene_host_unref(host);
     if (!ok)
         fprintf(stderr, "cannot render or write %s\n", path);
     return ok;

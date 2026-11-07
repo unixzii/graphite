@@ -103,7 +103,6 @@ std::vector<uint8_t> read_window(HWND hwnd, uint32_t width, uint32_t height);
 
 struct gr_windows_host
 {
-    size_t refs = 1;
     gr_win::ContainerVisual visual{nullptr};
     gr_win::SpriteVisual backdrop{nullptr};
     winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget target{nullptr};
@@ -111,5 +110,8 @@ struct gr_windows_host
     uint32_t width = 0, height = 0;
     ~gr_windows_host();
 };
+
+/** Returns the Windows host behind host, or nullptr for nullptr and hosts of other platforms. */
+gr_windows_host *gr_windows_host_data(gr_scene_host const *host);
 
 #endif

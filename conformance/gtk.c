@@ -8,7 +8,7 @@
 
 typedef struct
 {
-    gr_gtk_host *host;
+    gr_scene_host *host;
     gr_gtk_renderer *renderer;
     double scale;
 } gtk_capture;
@@ -42,7 +42,7 @@ static bool capture(void *userdata, gr_conf_pixels *out)
 static void destroy(void *userdata)
 {
     gtk_capture *c = userdata;
-    gr_gtk_host_unref(c->host);
+    gr_scene_host_unref(c->host);
     gr_gtk_renderer_unref(c->renderer);
     g_free(c);
 }

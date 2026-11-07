@@ -18,12 +18,14 @@ typedef struct gr_gtk_shared
     bool pending, closed;
 } gr_gtk_shared;
 
-struct gr_gtk_host
+typedef struct
 {
-    size_t refs;
     gr_gtk_shared *shared;
     GtkWidget *widget;
-};
+} gr_gtk_host;
+
+/** Returns the GTK host behind host, or NULL for NULL and hosts of other platforms. */
+gr_gtk_host *gr_gtk_host_data(const gr_scene_host *host);
 
 GdkRGBA gr_gdk_color(gr_color color);
 graphene_rect_t gr_graphene_rect(gr_rect rect);

@@ -44,12 +44,28 @@ static void destroy(void *userdata)
     gr_gtk_shared_unref(s);
 }
 
-static gr_gtk_host *install(gr_scene *scene, bool widget)
+static void destroy_host(void *data)
+{
+    gr_gtk_host *host = data;
+    g_clear_object(&host->widget);
+    gr_gtk_shared_unref(host->shared);
+    g_free(host);
+}
+
+static const gr_scene_host_vtable host_vtable = {destroy_host};
+
+gr_gtk_host *gr_gtk_host_data(const gr_scene_host *host)
+{
+    if (!host || gr_scene_host_get_vtable(host) != &host_vtable)
+        return NULL;
+    return gr_scene_host_get_data(host);
+}
+
+static gr_scene_host *install(gr_scene *scene, bool widget)
 {
     if (!scene || !gtk_is_initialized())
         return NULL;
     gr_gtk_host *host = g_new0(gr_gtk_host, 1);
-    host->refs = 1;
     host->shared = gr_gtk_shared_new(scene);
     if (widget)
     {
@@ -61,53 +77,41 @@ static gr_gtk_host *install(gr_scene *scene, bool widget)
     if (gr_scene_set_backend(scene, &vtable, backend) != GR_OK)
     {
         gr_gtk_shared_unref(backend);
-        gr_gtk_host_unref(host);
+        destroy_host(host);
         return NULL;
     }
-    return host;
+    return gr_scene_host_new(scene, &host_vtable, host);
 }
 
-gr_gtk_host *gr_gtk_attach(gr_scene *scene)
+gr_scene_host *gr_gtk_attach(gr_scene *scene)
 {
     return install(scene, true);
 }
 
-gr_gtk_host *gr_gtk_attach_offscreen(gr_scene *scene)
+gr_scene_host *gr_gtk_attach_offscreen(gr_scene *scene)
 {
     return install(scene, false);
 }
 
-gr_gtk_host *gr_gtk_host_ref(gr_gtk_host *host)
+GtkWidget *gr_gtk_host_get_widget(const gr_scene_host *host)
 {
-    if (host)
+    gr_gtk_host *data = gr_gtk_host_data(host);
+    return data ? data->widget : NULL;
+}
+
+GskRenderNode *gr_gtk_host_get_root_node(const gr_scene_host *host)
+{
+    gr_gtk_host *data = gr_gtk_host_data(host);
+    return data ? gr_gtk_tree_root(data->shared) : NULL;
+}
+
+bool gr_gtk_host_get_size(const gr_scene_host *host, gr_size *out)
+{
+    gr_gtk_host *data = gr_gtk_host_data(host);
+    if (!data)
     {
-        if (host->refs == SIZE_MAX)
-            abort();
-        ++host->refs;
+        *out = (gr_size){0};
+        return false;
     }
-    return host;
-}
-
-void gr_gtk_host_unref(gr_gtk_host *host)
-{
-    if (!host || --host->refs)
-        return;
-    g_clear_object(&host->widget);
-    gr_gtk_shared_unref(host->shared);
-    g_free(host);
-}
-
-GtkWidget *gr_gtk_host_get_widget(const gr_gtk_host *host)
-{
-    return host->widget;
-}
-
-GskRenderNode *gr_gtk_host_get_root_node(gr_gtk_host *host)
-{
-    return gr_gtk_tree_root(host->shared);
-}
-
-bool gr_gtk_host_get_size(const gr_gtk_host *host, gr_size *out)
-{
-    return gr_gtk_tree_size(host->shared, out);
+    return gr_gtk_tree_size(data->shared, out);
 }

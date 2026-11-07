@@ -1,12 +1,6 @@
 #include "internal.h"
 
 @implementation GRHost
-
-- (void)dealloc
-{
-    gr_scene_link_unref(_sceneLink);
-}
-
 @end
 
 @implementation GRSceneView
@@ -56,17 +50,26 @@ static CALayer *new_host_layer(void)
     return layer;
 }
 
-static gr_macos_host *wrap_host(GRHost *object)
+static void destroy_host(void *data)
 {
-    gr_macos_host *host = calloc(1, sizeof(*host));
-    if (!host)
-        abort();
-    host->refs = 1;
-    host->object = (__bridge_retained void *)object;
-    return host;
+    (void)CFBridgingRelease(data);
 }
 
-gr_macos_host *gr_macos_attach_to_layer(gr_scene *scene, void *container_pointer)
+static const gr_scene_host_vtable host_vtable = {destroy_host};
+
+static gr_scene_host *wrap_host(gr_scene *scene, GRHost *object)
+{
+    return gr_scene_host_new(scene, &host_vtable, (__bridge_retained void *)object);
+}
+
+static GRHost *host_object(const gr_scene_host *host)
+{
+    if (!host || gr_scene_host_get_vtable(host) != &host_vtable)
+        return nil;
+    return (__bridge GRHost *)gr_scene_host_get_data(host);
+}
+
+gr_scene_host *gr_macos_attach_to_layer(gr_scene *scene, void *container_pointer)
 {
     if (!scene || !container_pointer)
         return NULL;
@@ -82,11 +85,10 @@ gr_macos_host *gr_macos_attach_to_layer(gr_scene *scene, void *container_pointer
     gr_scene_set_backing_scale(scene, container.contentsScale);
     GRHost *host = [GRHost new];
     host.layer = layer;
-    host.sceneLink = gr_scene_get_link(scene);
-    return wrap_host(host);
+    return wrap_host(scene, host);
 }
 
-gr_macos_host *gr_macos_attach_to_view(gr_scene *scene, void *parent_pointer)
+gr_scene_host *gr_macos_attach_to_view(gr_scene *scene, void *parent_pointer)
 {
     if (!scene || !parent_pointer)
         return NULL;
@@ -108,11 +110,10 @@ gr_macos_host *gr_macos_attach_to_view(gr_scene *scene, void *parent_pointer)
     GRHost *host = [GRHost new];
     host.layer = layer;
     host.view = view;
-    host.sceneLink = gr_scene_get_link(scene);
-    return wrap_host(host);
+    return wrap_host(scene, host);
 }
 
-gr_macos_host *gr_macos_offscreen_new(gr_scene *scene, gr_size size, double scale)
+gr_scene_host *gr_macos_offscreen_new(gr_scene *scene, gr_size size, double scale)
 {
     if (!scene || !isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0 ||
         !isfinite(scale) || scale <= 0)
@@ -121,42 +122,23 @@ gr_macos_host *gr_macos_offscreen_new(gr_scene *scene, gr_size size, double scal
     container.anchorPoint = CGPointZero;
     container.frame = CGRectMake(0, 0, size.width, size.height);
     container.contentsScale = scale;
-    gr_macos_host *host = gr_macos_attach_to_layer(scene, (__bridge void *)container);
+    gr_scene_host *host = gr_macos_attach_to_layer(scene, (__bridge void *)container);
     if (host)
-        ((__bridge GRHost *)host->object).container = container;
+        host_object(host).container = container;
     return host;
 }
 
-gr_macos_host *gr_macos_host_ref(gr_macos_host *host)
+void *gr_macos_host_get_layer(const gr_scene_host *host)
 {
-    if (host)
-    {
-        if (host->refs == SIZE_MAX)
-            abort();
-        ++host->refs;
-    }
-    return host;
+    return (__bridge void *)host_object(host).layer;
 }
 
-void gr_macos_host_unref(gr_macos_host *host)
+void *gr_macos_host_get_view(const gr_scene_host *host)
 {
-    if (!host || --host->refs)
-        return;
-    (void)CFBridgingRelease(host->object);
-    free(host);
+    return (__bridge void *)host_object(host).view;
 }
 
-void *gr_macos_host_get_layer(const gr_macos_host *host)
-{
-    return (__bridge void *)((__bridge GRHost *)host->object).layer;
-}
-
-void *gr_macos_host_get_view(const gr_macos_host *host)
-{
-    return (__bridge void *)((__bridge GRHost *)host->object).view;
-}
-
-bool gr_macos_host_render(gr_macos_host *host, gr_size size, double scale, gr_macos_pixels *out)
+bool gr_macos_host_render(gr_scene_host *host, gr_size size, double scale, gr_macos_pixels *out)
 {
     if (!out)
         return false;
@@ -164,10 +146,10 @@ bool gr_macos_host_render(gr_macos_host *host, gr_size size, double scale, gr_ma
     if (!host || !isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0 ||
         !isfinite(scale) || scale <= 0)
         return false;
-    GRHost *object = (__bridge GRHost *)host->object;
+    GRHost *object = host_object(host);
     if (!object.container)
         return false;
-    gr_scene *scene = gr_scene_link_lock(object.sceneLink);
+    gr_scene *scene = gr_scene_host_get_scene(host);
     if (!scene)
         return false;
     if (gr_scene_set_backing_scale(scene, scale) != GR_OK)

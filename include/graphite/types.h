@@ -84,6 +84,7 @@ GR_DECLARE_LIST(gr_double_list, double);
 
 typedef struct gr_scene gr_scene;
 typedef struct gr_scene_link gr_scene_link;
+typedef struct gr_scene_host gr_scene_host;
 typedef struct gr_layer gr_layer;
 typedef struct gr_path gr_path;
 typedef struct gr_path_builder gr_path_builder;

@@ -7,7 +7,7 @@
 
 typedef struct
 {
-    gr_macos_host *host;
+    gr_scene_host *host;
     double scale;
 } mac_capture;
 
@@ -40,7 +40,7 @@ static bool capture(void *userdata, gr_conf_pixels *out)
 static void destroy(void *userdata)
 {
     mac_capture *capture = userdata;
-    gr_macos_host_unref(capture->host);
+    gr_scene_host_unref(capture->host);
     free(capture);
 }
 

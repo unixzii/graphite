@@ -56,7 +56,7 @@ void gr_gtk_renderer_unref(gr_gtk_renderer *r)
     g_free(r);
 }
 
-bool gr_gtk_renderer_render(gr_gtk_renderer *renderer, gr_gtk_host *host, double scale, gr_gtk_pixels *out)
+bool gr_gtk_renderer_render(gr_gtk_renderer *renderer, const gr_scene_host *host, double scale, gr_gtk_pixels *out)
 {
     if (!out)
         return false;

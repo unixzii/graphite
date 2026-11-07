@@ -22,6 +22,11 @@ static void pixel(gr_macos_pixels *p, size_t x, size_t y, bool red)
     CHECK(v[0] == (red ? 255 : 0) && v[1] == 0 && v[2] == 0 && v[3] == (red ? 255 : 0));
 }
 
+static void ignore_host(void *data)
+{
+    (void)data;
+}
+
 static void invalid_arguments(void)
 {
     @autoreleasepool
@@ -33,13 +38,21 @@ static void invalid_arguments(void)
         CHECK(!gr_macos_render_layer((__bridge void *)layer, (gr_size){ldexp(1, 62), 1}, 1, &pixels));
         CHECK(!gr_macos_render_layer((__bridge void *)layer, (gr_size){1, ldexp(1, 62)}, 1, &pixels));
         gr_scene *scene = gr_scene_new((gr_size){10, 10});
-        gr_macos_host *host = gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1);
+        gr_scene_host *host = gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1);
         CHECK(host);
         CHECK(!gr_macos_host_render(host, (gr_size){NAN, 10}, 1, &pixels));
         CHECK(!gr_macos_host_render(host, (gr_size){-1, 10}, 1, &pixels));
         CHECK(!gr_macos_host_render(host, (gr_size){10, 10}, NAN, &pixels));
         CHECK(!pixels.data);
-        gr_macos_host_unref(host);
+        gr_scene_host_unref(host);
+
+        /* Hosts from other platforms are rejected. */
+        static const gr_scene_host_vtable foreign = {ignore_host};
+        host = gr_scene_host_new(scene, &foreign, NULL);
+        CHECK(!gr_macos_host_get_layer(host) && !gr_macos_host_get_view(host));
+        CHECK(!gr_macos_host_render(host, (gr_size){10, 10}, 1, &pixels) && !pixels.data);
+        CHECK(!gr_macos_host_get_layer(NULL));
+        gr_scene_host_unref(host);
         gr_scene_unref(scene);
     }
 }
@@ -92,7 +105,7 @@ static void view_hosting(void)
         OK(gr_layer_set_frame(child, (gr_rect){{0, 0}, {10, 10}}));
         OK(gr_layer_add_child(gr_scene_get_root(scene), child));
         gr_layer_unref(child);
-        gr_macos_host *h = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+        gr_scene_host *h = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
         CHECK(h);
         [window orderFrontRegardless];
         OK(gr_scene_commit(scene));
@@ -109,7 +122,7 @@ static void view_hosting(void)
         CHECK_NEAR(parent.bounds.size.height, 160);
         CHECK_NEAR(gr_scene_get_backing_scale(scene), window.backingScaleFactor);
         NSView *view = (__bridge NSView *)gr_macos_host_get_view(h);
-        gr_macos_host_unref(h);
+        gr_scene_host_unref(h);
         CHECK(view.superview == window.contentView);
         gr_scene_unref(scene);
         spin();
@@ -129,7 +142,7 @@ static void graphite_offscreen(void)
         OK(gr_layer_set_background(layer, &red));
         OK(gr_layer_add_child(gr_scene_get_root(scene), layer));
         gr_layer_unref(layer);
-        gr_macos_host *host = gr_macos_offscreen_new(scene, (gr_size){100, 100}, 1);
+        gr_scene_host *host = gr_macos_offscreen_new(scene, (gr_size){100, 100}, 1);
         CHECK(host);
         gr_macos_pixels invalid = {0};
         CHECK(!gr_macos_host_render(host, (gr_size){-1, 100}, 1, &invalid));
@@ -144,7 +157,7 @@ static void graphite_offscreen(void)
             gr_macos_pixels_clear(&pixels);
         }
         gr_scene_unref(scene);
-        gr_macos_host_unref(host);
+        gr_scene_host_unref(host);
     }
 }
 
@@ -153,7 +166,7 @@ static void expired_scene(void)
     @autoreleasepool
     {
         gr_scene *scene = gr_scene_new((gr_size){10, 10});
-        gr_macos_host *host = gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1);
+        gr_scene_host *host = gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1);
         CHECK(host);
         CHECK(!gr_macos_offscreen_new(scene, (gr_size){10, 10}, 1));
         OK(gr_scene_commit(scene));
@@ -161,7 +174,7 @@ static void expired_scene(void)
         gr_macos_pixels pixels = {0};
         CHECK(!gr_macos_host_render(host, (gr_size){10, 10}, 1, &pixels));
         CHECK(pixels.data == NULL);
-        gr_macos_host_unref(host);
+        gr_scene_host_unref(host);
         spin();
     }
 }
