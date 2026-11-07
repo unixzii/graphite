@@ -1,5 +1,5 @@
 add_library(graphite_demo_scenes STATIC
-    scenes/util.c scenes/images.c scenes/ui.c
+    scenes/util.c scenes/images.c scenes/ui.c scenes/stress.c
     scenes/showcase/showcase.c scenes/showcase/transforms.c scenes/showcase/canvas.c
     scenes/showcase/shapes.c scenes/showcase/masks.c scenes/showcase/clipping.c
     scenes/showcase/compositing.c)
@@ -32,6 +32,7 @@ if(TARGET graphite_demo)
     if(BUILD_TESTING)
         add_test(NAME graphite.demo.showcase COMMAND graphite_demo --selftest)
         add_test(NAME graphite.demo.ui COMMAND graphite_demo --scene ui --selftest)
-        set_tests_properties(graphite.demo.showcase graphite.demo.ui PROPERTIES RUN_SERIAL TRUE TIMEOUT 20)
+        add_test(NAME graphite.demo.stress COMMAND graphite_demo --scene stress --selftest)
+        set_tests_properties(graphite.demo.showcase graphite.demo.ui graphite.demo.stress PROPERTIES RUN_SERIAL TRUE TIMEOUT 20)
     endif()
 endif()

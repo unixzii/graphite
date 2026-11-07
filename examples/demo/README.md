@@ -7,6 +7,9 @@ platform-specific macOS, GTK and Windows shells.
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
 - `ui` (1000 × 600): a control/gallery layout with placeholder text
   bars, animated switch, slider, caret, spinner and progress bar.
+- `stress` (800 × 800): a 32 × 32 grid of independent square layers. Every three
+  seconds, a ripple travels outward from the center, animating each cell's scale,
+  radial displacement and color.
 
 The windowed C executable supports macOS 14+, Linux with GTK 4.22+, and Windows 11.
 The scene library builds independently of the native shell.
@@ -17,10 +20,13 @@ cmake --build /tmp/graphite-c --target graphite_demo
 /tmp/graphite-c/examples/demo/demo
 /tmp/graphite-c/examples/demo/demo --scene ui
 /tmp/graphite-c/examples/demo/demo --scene ui --fps
+/tmp/graphite-c/examples/demo/demo --scene stress --fps
 /tmp/graphite-c/examples/demo/demo --selftest
 /tmp/graphite-c/examples/demo/demo --scene ui --selftest
+/tmp/graphite-c/examples/demo/demo --scene stress --selftest
 /tmp/graphite-c/examples/demo/demo --snapshot showcase.png
 /tmp/graphite-c/examples/demo/demo --scene ui --snapshot ui.png
+/tmp/graphite-c/examples/demo/demo --scene stress --snapshot stress.png
 ```
 
 `--snapshot` poses the scene at 2.4 seconds and renders at 1x.
@@ -37,7 +43,7 @@ previous-tick changes committed before the next tick; successful output includes
 `uncommitted=[]`. It does not force a commit each tick. `--fps` reports actual display-callback
 rate every two seconds. Closing the window exits and releases scene resources.
 
-CMake's `check` target includes both native selftests on macOS, GTK and Windows. A graphical
+CMake's `check` target includes all three native selftests on macOS, GTK and Windows. A graphical
 session with the selected renderer available is required. Format checks include all C/Objective-C files in this demo.
 
 ## Ownership

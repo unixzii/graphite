@@ -18,6 +18,8 @@ int main(int argc, char **argv)
                 kind = DEMO_SHOWCASE;
             else if (strcmp(argv[i], "ui") == 0)
                 kind = DEMO_UI;
+            else if (strcmp(argv[i], "stress") == 0)
+                kind = DEMO_STRESS;
             else
             {
                 error = "unknown scene";
@@ -45,7 +47,8 @@ int main(int argc, char **argv)
     }
     if (error)
     {
-        fprintf(stderr, "%s\nusage: demo [--scene showcase|ui] [--selftest | --fps | --snapshot <out.png>]\n", error);
+        fprintf(stderr, "%s\nusage: demo [--scene showcase|ui|stress] [--selftest | --fps | --snapshot <out.png>]\n",
+                error);
         return 2;
     }
     demo *d = demo_new(kind);

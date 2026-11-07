@@ -34,7 +34,8 @@
 typedef enum
 {
     DEMO_SHOWCASE,
-    DEMO_UI
+    DEMO_UI,
+    DEMO_STRESS
 } demo_kind;
 typedef struct demo demo;
 
@@ -53,6 +54,7 @@ struct demo
     size_t front;
     gr_layer *switch_track, *switch_knob, *slider_fill, *slider_knob, *caret, *spinner, *progress;
     gr_image *drawing_picture;
+    gr_layer **stress_cells;
 };
 
 #ifdef __cplusplus
@@ -115,6 +117,8 @@ extern "C"
     void showcase_update(demo *d, double t);
     void ui_build(demo *d);
     void ui_update(demo *d, double t);
+    void stress_build(demo *d);
+    void stress_update(demo *d, double t);
     void clock_build(demo *d, gr_layer *card);
     void clock_update(demo *d, double t);
     void drawing_build(demo *d, gr_layer *card);

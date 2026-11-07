@@ -271,6 +271,8 @@ double wave(double t, double period, double offset)
 
 gr_size demo_size(demo_kind kind)
 {
+    if (kind == DEMO_STRESS)
+        return (gr_size){800, 800};
     return kind == DEMO_UI ? (gr_size){1000, 600} : (gr_size){960, 640};
 }
 
@@ -284,6 +286,8 @@ demo *demo_new(demo_kind kind)
     d->front = SIZE_MAX;
     if (kind == DEMO_UI)
         ui_build(d);
+    else if (kind == DEMO_STRESS)
+        stress_build(d);
     else
         showcase_build(d);
     demo_update(d, 0);
@@ -295,6 +299,8 @@ void demo_update(demo *d, double t)
     d->time = t;
     if (d->kind == DEMO_UI)
         ui_update(d, t);
+    else if (d->kind == DEMO_STRESS)
+        stress_update(d, t);
     else
         showcase_update(d, t);
 }
@@ -306,5 +312,7 @@ void demo_free(demo *d)
         gr_layer_unref(d->layers[i]);
     gr_image_unref(d->drawing_picture);
     free(d->layers);
+    if (d->stress_cells)
+        free(d->stress_cells);
     free(d);
 }
