@@ -22,6 +22,7 @@ void compositing_build(demo *d, gr_layer *card)
         D_OK(gr_layer_add_child(d->fan, p));
     }
     gr_image_unref(picture);
+    d->front = SIZE_MAX; /* The first update brings the current photo to the front. */
     gr_layer *left = layer(d, card, D_RECT(16, 196, 124, 76)), *right = layer(d, card, D_RECT(148, 196, 124, 76));
     D_OK(gr_layer_set_opacity(left, 0.5f));
     uint32_t colors[] = {D_PINK, D_BLUE};
@@ -40,11 +41,19 @@ void compositing_update(demo *d, double t)
     double spread = 0.1 + 0.24 * smooth(wave(t, 5, 0));
     for (size_t i = 0; i < 4; ++i)
         D_OK(gr_layer_set_transform(d->photos[i], rotation(((double)i - 1.5) * spread)));
-    size_t front = (size_t)(t / 1.2) % 4;
+    double turn = t / 1.2 + 0.5;
+    size_t front = (size_t)turn % 4;
     if (front != d->front)
     {
         d->front = front;
         D_OK(gr_layer_add_child(d->fan, d->photos[front]));
+    }
+    /* Depth of field: photos further down the stack blur more, easing over the first third of each turn. */
+    double ease = smooth(fmin(1, (turn - floor(turn)) * 3));
+    for (size_t i = 0; i < 4; ++i)
+    {
+        double depth = (double)((front + 4 - i) % 4), previous = (double)((front + 7 - i) % 4);
+        D_OK(gr_layer_set_blur(d->photos[i], 1.5 * (previous + (depth - previous) * ease)));
     }
     double slide = 12 * sin(t * 1.6);
     for (size_t i = 0; i < 2; ++i)

@@ -5,6 +5,7 @@ platform-specific macOS, GTK and Windows shells.
 
 - `showcase` (960 × 640): six animated cards covering transforms, Canvas paths and
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
+  The photo fan blurs each photo by its depth in the stack (layer blur).
 - `ui` (1000 × 600): a control/gallery layout with animated switch, slider,
   caret, spinner and progress bar. Its labels, calendar and editor paragraph
   are real text: English labels with emoji, and a wrapped paragraph with
