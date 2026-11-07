@@ -44,9 +44,17 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   (QPC time, compositor frame period) and then commits at once, so the frame's
   changes reach the next compositor frame instead of waiting for the
   DispatcherQueue. `WM_SIZE`/DPI changes report `GR_EVENT_VIEWPORT` and
-  `WM_SETFOCUS`/`WM_KILLFOCUS` report focus. Mouse input still passes through to
-  the parent (`HTTRANSPARENT`). Cursor and text input requests are accepted but
-  not applied yet.
+  `WM_SETFOCUS`/`WM_KILLFOCUS` report focus. Interactive host windows answer
+  `WM_NCHITTEST` with the client area (others stay `HTTRANSPARENT`) and report
+  mouse messages (pen-promoted ones as pens) with `SetCapture` for drags and
+  `TrackMouseEvent` for leaving, wheel messages in lines (fractional for
+  precision touchpads; unconsumed ones go on to the parent) and key messages:
+  `keys.cpp` maps set-1 scan codes (with the E0 prefix) and virtual keys, and
+  `MapVirtualKey` gives the unmodified text. Click counts follow the system
+  double-click time and rectangle. Presses take focus. Cursors are set from
+  `WM_SETCURSOR`. Each input message holds a host reference, so a handler that
+  releases the host cannot destroy the window mid-message. Text input requests
+  are accepted but not applied yet.
 - A per-thread context shares compositor/devices and remains alive for process
   teardown. dcomp.dll is pinned to avoid releases jumping into an unloaded DLL,
   to protect shutdown releases. This is an intentional

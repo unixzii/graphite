@@ -26,8 +26,16 @@ No additional container dependency is introduced: GTK already supplies GLib.
   **update** phase, before the layout-phase commit, with times from the frame
   clock and its refresh info. Allocation and scale changes report
   `GR_EVENT_VIEWPORT` (first on allocation). The widget is focusable and reports
-  focus while it is the focus widget of the active window. Cursor and text input
-  requests are accepted but not applied yet.
+  focus while it is the focus widget of the active window. A legacy event
+  controller turns raw GDK events into pointer (mouse and tablet tools), scroll
+  and key events; a motion controller reports crossings. Event positions are
+  surface-relative and converted to the widget; Wayland scroll events carry
+  none, so they use the last pointer position. Click counts come from the GTK
+  double-click settings, auto-repeat from the pressed-key set, and modifier
+  state is adjusted to after the event (GDK reports it before). `keys.c` maps
+  evdev codes (keycode − 8) and keyvals. Presses grab focus; unconsumed events
+  propagate. Cursors use CSS cursor names. Touchscreen events are not
+  reported yet, and text input requests are accepted but not applied yet.
 - `text.c`: the Pango text system (`gr_gtk_text_system_new`); `draw.c` replays
   its layouts with `gtk_snapshot_append_layout`. See the
   [backend notes](../../../docs/backends/gtk.md#text).

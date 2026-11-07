@@ -29,8 +29,18 @@ modes and paused after a frame without a new request; it fires before the
 backend's commit observer, so changes made for a frame commit with it. The view
 reports its size and backing scale as `GR_EVENT_VIEWPORT`, and keyboard focus
 while it is the first responder of the key window. Releasing the host
-invalidates the display link and leaves the view inert. Cursor and text input
-requests are accepted but not applied yet.
+invalidates the display link and leaves the view inert.
+
+The view also reports mouse and tablet pointer events (a tracking area gives
+hover moves and crossings; AppKit keeps drags with the view), wheel and touchpad
+scrolling with phases and momentum, and keys: `keys.m` maps `kVK_*` codes to
+physical keys and fixed named keys, other keys resolve their unmodified text
+with `charactersByApplyingModifiers:`, and modifier keys arrive through
+`flagsChanged:` using device-specific flags so left and right sides are
+distinguished. A press makes the view first responder. Unconsumed events go to
+`super`, which passes them up the responder chain. Cursors are set from
+`cursorUpdate:` and immediately while hovering. Text input requests are accepted
+but not applied yet.
 
 Offscreen rendering uses CARenderer with a shared BGRA8 Metal texture, an
 sRGB color space and a command-queue fence. Readback is flipped

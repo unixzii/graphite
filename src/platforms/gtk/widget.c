@@ -9,6 +9,15 @@ typedef struct
     GdkSurface *surface;
     GtkWindow *window;
     gulong layout_handler, update_handler, scale_handler, active_handler;
+    /* Input state. */
+    bool inside, scrolling;
+    uint32_t buttons; /* Pressed buttons, 1u << gr_button. */
+    uint32_t clicks;
+    gr_button click_button;
+    guint32 click_time;
+    gr_point click_position;
+    guint64 keys_down[4]; /* Bitset of pressed keycodes, to recognize auto-repeat. */
+    gr_point pointer;     /* Last known pointer position; Wayland scroll events carry none. */
 } GrGraphiteWidget;
 
 typedef struct
@@ -24,10 +33,9 @@ void gr_gtk_widget_request(GtkWidget *widget)
         gdk_frame_clock_request_phase(clock, GDK_FRAME_CLOCK_PHASE_LAYOUT);
 }
 
-static void dispatch(GrGraphiteWidget *w, gr_event event)
+static bool dispatch(GrGraphiteWidget *w, gr_event event)
 {
-    if (w->host)
-        gr_scene_host_dispatch_event(w->host, &event);
+    return w->host && gr_scene_host_dispatch_event(w->host, &event);
 }
 
 static double seconds(gint64 microseconds)
@@ -80,6 +88,8 @@ static void report_viewport(GrGraphiteWidget *w)
 static void update_focus(GrGraphiteWidget *w)
 {
     bool focused = gtk_widget_has_focus(GTK_WIDGET(w)) && (!w->window || gtk_window_is_active(w->window));
+    if (!focused)
+        memset(w->keys_down, 0, sizeof(w->keys_down)); /* Releases may go elsewhere. */
     dispatch(w, (gr_event){.type = focused ? GR_EVENT_FOCUS_IN : GR_EVENT_FOCUS_OUT,
                            .time = seconds(g_get_monotonic_time())});
 }
@@ -95,6 +105,337 @@ static void window_active_changed(GObject *object, GParamSpec *spec, gpointer us
     (void)object;
     (void)spec;
     update_focus(userdata);
+}
+
+/* Input */
+
+static gr_modifiers modifiers(GdkModifierType state)
+{
+    return (state & GDK_SHIFT_MASK ? GR_MODIFIER_SHIFT : 0) | (state & GDK_CONTROL_MASK ? GR_MODIFIER_CONTROL : 0) |
+           (state & GDK_ALT_MASK ? GR_MODIFIER_ALT : 0) |
+           (state & (GDK_SUPER_MASK | GDK_META_MASK | GDK_HYPER_MASK) ? GR_MODIFIER_SUPER : 0) |
+           (state & GDK_LOCK_MASK ? GR_MODIFIER_CAPS_LOCK : 0);
+}
+
+static double event_seconds(GdkEvent *event)
+{
+    return gdk_event_get_time(event) / 1000.0;
+}
+
+/* Event positions are relative to the surface; convert them to the widget. */
+static bool widget_point(GrGraphiteWidget *w, double x, double y, gr_point *out)
+{
+    GtkWidget *widget = GTK_WIDGET(w);
+    GtkNative *native = gtk_widget_get_native(widget);
+    if (!native)
+        return false;
+    double nx, ny;
+    gtk_native_get_surface_transform(native, &nx, &ny);
+    graphene_point_t p = GRAPHENE_POINT_INIT((float)(x - nx), (float)(y - ny)), r;
+    if (!gtk_widget_compute_point(GTK_WIDGET(native), widget, &p, &r))
+        return false;
+    *out = (gr_point){r.x, r.y};
+    return true;
+}
+
+static bool event_point(GrGraphiteWidget *w, GdkEvent *event, gr_point *out)
+{
+    double x, y;
+    if (!gdk_event_get_position(event, &x, &y) || !widget_point(w, x, y, out))
+        return false;
+    w->pointer = *out;
+    return true;
+}
+
+static bool contains(GrGraphiteWidget *w, gr_point p)
+{
+    GtkWidget *widget = GTK_WIDGET(w);
+    return p.x >= 0 && p.y >= 0 && p.x < gtk_widget_get_width(widget) && p.y < gtk_widget_get_height(widget);
+}
+
+static gr_event pointer_event(GrGraphiteWidget *w, gr_event_type type, GdkEvent *event, gr_point position)
+{
+    GdkDeviceTool *tool = gdk_event_get_device_tool(event);
+    GdkDeviceToolType kind = tool ? gdk_device_tool_get_tool_type(tool) : GDK_DEVICE_TOOL_TYPE_UNKNOWN;
+    bool pen = kind == GDK_DEVICE_TOOL_TYPE_PEN || kind == GDK_DEVICE_TOOL_TYPE_ERASER ||
+               kind == GDK_DEVICE_TOOL_TYPE_BRUSH || kind == GDK_DEVICE_TOOL_TYPE_PENCIL ||
+               kind == GDK_DEVICE_TOOL_TYPE_AIRBRUSH;
+    double pressure = 0;
+    if (!(pen && gdk_event_get_axis(event, GDK_AXIS_PRESSURE, &pressure)))
+        pressure = w->buttons ? 0.5 : 0;
+    gr_event e = {
+        .type = type, .time = event_seconds(event), .modifiers = modifiers(gdk_event_get_modifier_state(event))};
+    e.value.pointer = (gr_pointer_event){
+        .kind = pen ? GR_POINTER_PEN : GR_POINTER_MOUSE,
+        .position = position,
+        .buttons = w->buttons,
+        .pressure = (float)fmin(fmax(pressure, 0), 1),
+    };
+    return e;
+}
+
+static void hover(GrGraphiteWidget *w, bool inside, gr_point position, guint32 time)
+{
+    if (inside)
+        w->pointer = position;
+    if (inside == w->inside || !w->host)
+        return;
+    w->inside = inside;
+    gr_event e = {.type = inside ? GR_EVENT_POINTER_ENTER : GR_EVENT_POINTER_LEAVE, .time = time / 1000.0};
+    e.value.pointer = (gr_pointer_event){.kind = GR_POINTER_MOUSE, .position = position};
+    dispatch(w, e);
+}
+
+static gr_button button_of(guint button)
+{
+    switch (button)
+    {
+        case GDK_BUTTON_PRIMARY:
+            return GR_BUTTON_PRIMARY;
+        case GDK_BUTTON_MIDDLE:
+            return GR_BUTTON_MIDDLE;
+        case GDK_BUTTON_SECONDARY:
+            return GR_BUTTON_SECONDARY;
+        case 8:
+            return GR_BUTTON_BACK;
+        case 9:
+            return GR_BUTTON_FORWARD;
+        default:
+            return GR_BUTTON_NONE;
+    }
+}
+
+/* Counts consecutive presses of one button within the double-click time and distance. */
+static uint32_t count_click(GrGraphiteWidget *w, gr_button button, guint32 time, gr_point p)
+{
+    int interval = 400, distance = 5;
+    g_object_get(gtk_widget_get_settings(GTK_WIDGET(w)), "gtk-double-click-time", &interval,
+                 "gtk-double-click-distance", &distance, NULL);
+    bool repeat = w->clicks && button == w->click_button && time - w->click_time <= (guint32)interval &&
+                  fabs(p.x - w->click_position.x) <= distance && fabs(p.y - w->click_position.y) <= distance;
+    w->clicks = repeat ? w->clicks + 1 : 1;
+    w->click_button = button;
+    w->click_time = time;
+    w->click_position = p;
+    return w->clicks;
+}
+
+/* A press grabs the pointer implicitly, so moves and the release reach the widget until every button is up. */
+static gboolean press(GrGraphiteWidget *w, GdkEvent *event, bool down)
+{
+    gr_button button = button_of(gdk_button_event_get_button(event));
+    gr_point p;
+    if (button == GR_BUTTON_NONE || !event_point(w, event, &p))
+        return GDK_EVENT_PROPAGATE;
+    if (down)
+    {
+        gtk_widget_grab_focus(GTK_WIDGET(w));
+        if (!w->host)
+            return GDK_EVENT_PROPAGATE;
+    }
+    uint32_t bit = 1u << button;
+    w->buttons = down ? w->buttons | bit : w->buttons & ~bit;
+    gr_event e = pointer_event(w, down ? GR_EVENT_POINTER_DOWN : GR_EVENT_POINTER_UP, event, p);
+    e.value.pointer.button = button;
+    e.value.pointer.click_count = down ? count_click(w, button, gdk_event_get_time(event), p) : w->clicks;
+    bool handled = dispatch(w, e);
+    /* Crossings are not reported during drags; catch up once the last button is released. */
+    if (!w->buttons)
+        hover(w, contains(w, p), p, gdk_event_get_time(event));
+    return handled ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
+}
+
+static gboolean motion(GrGraphiteWidget *w, GdkEvent *event)
+{
+    gr_point p;
+    if (!event_point(w, event, &p))
+        return GDK_EVENT_PROPAGATE;
+    if (!w->buttons)
+        hover(w, true, p, gdk_event_get_time(event));
+    return dispatch(w, pointer_event(w, GR_EVENT_POINTER_MOVE, event, p)) ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
+}
+
+static gboolean scroll(GrGraphiteWidget *w, GdkEvent *event)
+{
+    gr_point p;
+    if (!event_point(w, event, &p))
+        p = w->pointer;
+    gr_event e = {.type = GR_EVENT_SCROLL,
+                  .time = event_seconds(event),
+                  .modifiers = modifiers(gdk_event_get_modifier_state(event))};
+    gr_scroll_event *s = &e.value.scroll;
+    s->position = p;
+    s->unit = GR_SCROLL_UNIT_LINE;
+    /* Discrete wheel events carry deltas too, which follow the device even where the direction does not. */
+    GdkScrollDirection direction = gdk_scroll_event_get_direction(event);
+    gdk_scroll_event_get_deltas(event, &s->delta.x, &s->delta.y);
+    if (s->delta.x == 0 && s->delta.y == 0)
+    {
+        s->delta.x = direction == GDK_SCROLL_LEFT ? -1 : direction == GDK_SCROLL_RIGHT ? 1 : 0;
+        s->delta.y = direction == GDK_SCROLL_UP ? -1 : direction == GDK_SCROLL_DOWN ? 1 : 0;
+    }
+    if (direction == GDK_SCROLL_SMOOTH)
+    {
+        if (gdk_scroll_event_get_unit(event) == GDK_SCROLL_UNIT_SURFACE)
+            s->unit = GR_SCROLL_UNIT_POINT;
+        /* Touchpads report gestures; a stop event ends one. */
+        GdkDevice *device = gdk_event_get_device(event);
+        if (device && gdk_device_get_source(device) == GDK_SOURCE_TOUCHPAD)
+        {
+            bool stop = gdk_scroll_event_is_stop(event);
+            s->phase = stop ? GR_SCROLL_PHASE_END : w->scrolling ? GR_SCROLL_PHASE_UPDATE : GR_SCROLL_PHASE_BEGIN;
+            w->scrolling = !stop;
+        }
+    }
+    return dispatch(w, e) ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
+}
+
+/* The modifier a key holds, or 0. */
+static gr_modifiers key_modifier(gr_key_code code)
+{
+    switch (code)
+    {
+        case GR_KEY_CODE_SHIFT_LEFT:
+        case GR_KEY_CODE_SHIFT_RIGHT:
+            return GR_MODIFIER_SHIFT;
+        case GR_KEY_CODE_CONTROL_LEFT:
+        case GR_KEY_CODE_CONTROL_RIGHT:
+            return GR_MODIFIER_CONTROL;
+        case GR_KEY_CODE_ALT_LEFT:
+        case GR_KEY_CODE_ALT_RIGHT:
+            return GR_MODIFIER_ALT;
+        case GR_KEY_CODE_META_LEFT:
+        case GR_KEY_CODE_META_RIGHT:
+            return GR_MODIFIER_SUPER;
+        default:
+            return 0;
+    }
+}
+
+/* GDK reports the modifier state before a key event; other platforms report it after. For modifier keys, recompute
+ * the key's own modifier from the keys still down, so releasing one Shift while the other is held keeps Shift. */
+static gr_modifiers modifiers_after(GrGraphiteWidget *w, gr_modifiers before, gr_key_code code)
+{
+    gr_modifiers own = key_modifier(code);
+    if (!own)
+        return before;
+    bool held = false;
+    for (guint keycode = 0; keycode < 256 && !held; ++keycode)
+        held = (w->keys_down[keycode / 64] >> (keycode % 64) & 1) && key_modifier(gr_gtk_key_code(keycode)) == own;
+    return held ? before | own : before & ~own;
+}
+
+static gboolean key(GrGraphiteWidget *w, GdkEvent *event, bool down)
+{
+    guint keyval = gdk_key_event_get_keyval(event), keycode = gdk_key_event_get_keycode(event);
+    bool repeat = false;
+    if (keycode < 256)
+    {
+        guint64 bit = (guint64)1 << (keycode % 64), *word = &w->keys_down[keycode / 64];
+        repeat = down && (*word & bit);
+        *word = down ? *word | bit : *word & ~bit;
+    }
+    gr_key named = gr_gtk_named_key(keyval);
+    uint32_t character = 0;
+    if (named == GR_KEY_UNKNOWN)
+    {
+        /* The text the key types on its layout without modifiers, for shortcuts. */
+        guint plain = 0;
+        if (!gdk_display_translate_key(gdk_event_get_display(event), keycode, 0, gdk_key_event_get_layout(event),
+                                       &plain, NULL, NULL, NULL))
+            plain = keyval;
+        character = gdk_keyval_to_unicode(gdk_keyval_to_lower(plain));
+        if (character < 0x20 || character == 0x7F)
+            character = 0;
+        if (character)
+            named = GR_KEY_CHARACTER;
+    }
+    gr_key_code code = gr_gtk_key_code(keycode);
+    gr_event e = {.type = down ? GR_EVENT_KEY_DOWN : GR_EVENT_KEY_UP,
+                  .time = event_seconds(event),
+                  .modifiers = modifiers_after(w, modifiers(gdk_event_get_modifier_state(event)), code)};
+    e.value.key = (gr_key_event){
+        .code = code,
+        .key = named,
+        .character = character,
+        .repeat = repeat,
+        .native_code = keycode,
+    };
+    return dispatch(w, e) ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
+}
+
+static void cancel_pointer(GrGraphiteWidget *w, guint32 time)
+{
+    if (!w->buttons)
+        return;
+    w->buttons = 0;
+    gr_event e = {.type = GR_EVENT_POINTER_CANCEL, .time = time / 1000.0};
+    e.value.pointer.kind = GR_POINTER_MOUSE;
+    dispatch(w, e);
+}
+
+static gboolean on_event(GtkEventControllerLegacy *controller, GdkEvent *event, gpointer userdata)
+{
+    (void)controller;
+    GrGraphiteWidget *w = userdata;
+    if (!w->host)
+        return GDK_EVENT_PROPAGATE;
+    switch (gdk_event_get_event_type(event))
+    {
+        case GDK_BUTTON_PRESS:
+            return press(w, event, true);
+        case GDK_BUTTON_RELEASE:
+            return press(w, event, false);
+        case GDK_MOTION_NOTIFY:
+            return motion(w, event);
+        case GDK_SCROLL:
+            return scroll(w, event);
+        case GDK_KEY_PRESS:
+            return key(w, event, true);
+        case GDK_KEY_RELEASE:
+            return key(w, event, false);
+        case GDK_GRAB_BROKEN:
+            cancel_pointer(w, gdk_event_get_time(event));
+            return GDK_EVENT_PROPAGATE;
+        default:
+            return GDK_EVENT_PROPAGATE;
+    }
+}
+
+/* Crossings come from a motion controller, which reports them in widget coordinates. */
+static void pointer_enter(GtkEventControllerMotion *controller, double x, double y, gpointer userdata)
+{
+    (void)controller;
+    GrGraphiteWidget *w = userdata;
+    if (!w->buttons)
+        hover(w, true, (gr_point){x, y}, GDK_CURRENT_TIME);
+}
+
+static void pointer_leave(GtkEventControllerMotion *controller, gpointer userdata)
+{
+    (void)controller;
+    GrGraphiteWidget *w = userdata;
+    if (!w->buttons)
+        hover(w, false, (gr_point){-1, -1}, GDK_CURRENT_TIME);
+}
+
+void gr_gtk_widget_set_cursor(GtkWidget *widget, gr_cursor cursor)
+{
+    static const char *const names[] = {
+        [GR_CURSOR_DEFAULT] = NULL,
+        [GR_CURSOR_POINTER] = "pointer",
+        [GR_CURSOR_TEXT] = "text",
+        [GR_CURSOR_CROSSHAIR] = "crosshair",
+        [GR_CURSOR_GRAB] = "grab",
+        [GR_CURSOR_GRABBING] = "grabbing",
+        [GR_CURSOR_RESIZE_EW] = "ew-resize",
+        [GR_CURSOR_RESIZE_NS] = "ns-resize",
+        [GR_CURSOR_RESIZE_NESW] = "nesw-resize",
+        [GR_CURSOR_RESIZE_NWSE] = "nwse-resize",
+        [GR_CURSOR_NOT_ALLOWED] = "not-allowed",
+        [GR_CURSOR_NONE] = "none",
+    };
+    gtk_widget_set_cursor_from_name(widget, names[cursor]);
 }
 
 static void commit_pending(GdkFrameClock *clock, gpointer userdata)
@@ -195,6 +536,9 @@ static void unrealize(GtkWidget *widget)
 {
     GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
     disconnect_signals(w);
+    cancel_pointer(w, GDK_CURRENT_TIME);
+    w->inside = w->scrolling = false;
+    memset(w->keys_down, 0, sizeof(w->keys_down));
     dispatch(w, (gr_event){.type = GR_EVENT_FOCUS_OUT, .time = seconds(g_get_monotonic_time())});
     GTK_WIDGET_CLASS(gr_graphite_widget_parent_class)->unrealize(widget);
 }
@@ -266,6 +610,13 @@ static void gr_graphite_widget_init(GrGraphiteWidget *widget)
     g_signal_connect(focus, "enter", G_CALLBACK(focus_changed), widget);
     g_signal_connect(focus, "leave", G_CALLBACK(focus_changed), widget);
     gtk_widget_add_controller(GTK_WIDGET(widget), focus);
+    GtkEventController *events = gtk_event_controller_legacy_new();
+    g_signal_connect(events, "event", G_CALLBACK(on_event), widget);
+    gtk_widget_add_controller(GTK_WIDGET(widget), events);
+    GtkEventController *crossing = gtk_event_controller_motion_new();
+    g_signal_connect(crossing, "enter", G_CALLBACK(pointer_enter), widget);
+    g_signal_connect(crossing, "leave", G_CALLBACK(pointer_leave), widget);
+    gtk_widget_add_controller(GTK_WIDGET(widget), crossing);
 }
 
 GtkWidget *gr_gtk_widget_new(gr_gtk_shared *shared)

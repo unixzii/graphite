@@ -25,6 +25,10 @@ void gr_ct_draw_layout(CGContextRef context, gr_text_layout *layout, gr_point or
 void gr_ct_draw_glyphs(CGContextRef context, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
                        gr_point origin, gr_color color);
 bool gr_macos_install(gr_scene *scene, CALayer *host);
+gr_key_code gr_macos_key_code(unsigned short code);
+gr_key gr_macos_named_key(unsigned short code);
+/* The device-specific modifier flag a modifier key sets while down, or 0 for other keys. */
+NSUInteger gr_macos_modifier_mask(unsigned short code);
 
 @interface GRSceneView : NSView
 @property(nonatomic) gr_scene_link *sceneLink;
@@ -35,6 +39,7 @@ bool gr_macos_install(gr_scene *scene, CALayer *host);
 - (void)reportViewport;
 - (void)requestFrame;
 - (void)detachHost;
+- (void)setCursorKind:(gr_cursor)cursor;
 @end
 
 @interface GRHost : NSObject

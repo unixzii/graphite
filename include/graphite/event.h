@@ -323,7 +323,8 @@ typedef struct
 {
     gr_event_type type;
     double time;            /**< Event time; for FRAME, the start of the frame. */
-    gr_modifiers modifiers; /**< Modifiers held during input events; 0 for FRAME, VIEWPORT and FOCUS events. */
+    gr_modifiers modifiers; /**< Modifiers held during input events, including a modifier key's own change (Shift
+                             * down reports SHIFT); 0 for FRAME, VIEWPORT and FOCUS events. */
 
     union
     {

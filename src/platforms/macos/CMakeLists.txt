@@ -1,4 +1,4 @@
-add_library(graphite_macos backend.m draw.m convert.m host.m offscreen.m text.m)
+add_library(graphite_macos backend.m draw.m convert.m host.m keys.m offscreen.m text.m)
 add_library(graphite::macos ALIAS graphite_macos)
 target_link_libraries(graphite_macos PUBLIC graphite
     "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" "-framework CoreText" "-framework Metal")

@@ -62,11 +62,12 @@ static double now(void *)
     return seconds_now();
 }
 
-/* Cursor and text input are accepted but not applied yet. */
-static void set_cursor(void *, gr_cursor)
+static void set_cursor(void *data, gr_cursor cursor)
 {
+    set_window_cursor(static_cast<gr_windows_host *>(data)->hwnd, cursor);
 }
 
+/* Text input is accepted but not applied yet. */
 static void set_text_input(void *, gr_text_input const *)
 {
 }

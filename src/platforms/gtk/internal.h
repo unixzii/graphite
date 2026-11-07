@@ -56,5 +56,10 @@ void gr_gtk_widget_request(GtkWidget *widget);
 /* Points the widget's events at host (borrowed), or detaches it with NULL. */
 void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host);
 void gr_gtk_widget_request_frame(GtkWidget *widget);
+void gr_gtk_widget_set_cursor(GtkWidget *widget, gr_cursor cursor);
+/* Physical key of an X11/Wayland keycode (evdev code + 8). */
+gr_key_code gr_gtk_key_code(guint keycode);
+/* Named key of a keyval, or GR_KEY_UNKNOWN for keys that type text. */
+gr_key gr_gtk_named_key(guint keyval);
 
 #endif

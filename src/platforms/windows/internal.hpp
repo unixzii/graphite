@@ -101,6 +101,12 @@ bool install(gr_scene *scene, ContainerVisual const &scaled);
 HWND create_window(gr_scene *scene, bool track_dpi, DWORD ex, DWORD style, int x, int y, int w, int h, HWND parent);
 /* Points a host window's events at host (borrowed), or detaches them with nullptr. */
 void set_window_host(HWND hwnd, gr_scene_host *host);
+/* Sets the cursor shown over a host window. */
+void set_window_cursor(HWND hwnd, gr_cursor cursor);
+/* Physical key of a scan code, with 0xE000 set for E0-prefixed keys. */
+gr_key_code key_code(unsigned scan);
+/* Named key of a virtual key, or GR_KEY_UNKNOWN for keys that type text. */
+gr_key named_key(unsigned vk);
 /* Reports the host window's client size and scale as GR_EVENT_VIEWPORT. */
 void report_viewport(HWND hwnd);
 double seconds_now();

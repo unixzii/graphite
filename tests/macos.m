@@ -1,6 +1,9 @@
 #include "internal.h"
 #include "test.h"
 
+#include <Carbon/Carbon.h>
+#include <IOKit/hidsystem/IOLLEvent.h>
+
 static CALayer *red_square(void)
 {
     CALayer *container = [CALayer layer];
@@ -327,6 +330,153 @@ static void view_events(void)
     }
 }
 
+static NSEvent *mouse(NSEventType type, NSWindow *window, NSPoint point, NSEventModifierFlags flags, NSInteger clicks)
+{
+    return [NSEvent mouseEventWithType:type
+                              location:point
+                         modifierFlags:flags
+                             timestamp:5
+                          windowNumber:window.windowNumber
+                               context:nil
+                           eventNumber:0
+                            clickCount:clicks
+                              pressure:1];
+}
+
+static NSEvent *crossing(NSEventType type, NSWindow *window, NSPoint point)
+{
+    return [NSEvent enterExitEventWithType:type
+                                  location:point
+                             modifierFlags:0
+                                 timestamp:5
+                              windowNumber:window.windowNumber
+                                   context:nil
+                               eventNumber:0
+                            trackingNumber:0
+                                  userData:NULL];
+}
+
+static NSEvent *key(NSEventType type, NSWindow *window, unsigned short code, NSString *text, NSEventModifierFlags flags,
+                    bool repeat)
+{
+    return [NSEvent keyEventWithType:type
+                            location:NSZeroPoint
+                       modifierFlags:flags
+                           timestamp:6
+                        windowNumber:window.windowNumber
+                             context:nil
+                          characters:text
+         charactersIgnoringModifiers:text
+                           isARepeat:repeat
+                             keyCode:code];
+}
+
+static void view_input(void)
+{
+    @autoreleasepool
+    {
+        [NSApplication sharedApplication];
+        NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(100, 100, 200, 100)
+                                                       styleMask:NSWindowStyleMaskTitled
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        window.releasedWhenClosed = NO;
+        gr_scene *scene = gr_scene_new((gr_size){200, 100});
+        gr_scene_host *host = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+        GRSceneView *view = (__bridge GRSceneView *)gr_macos_host_get_view(host);
+        event_log log = {0};
+        gr_event_handler handler = {&log, log_event, NULL};
+        OK(gr_scene_host_set_event_handler(host, &handler));
+        [window orderFrontRegardless];
+        spin();
+        log.count = 0;
+
+        /* Window coordinates have a bottom-left origin; host coordinates a top-left one. */
+        [view mouseDown:mouse(NSEventTypeLeftMouseDown, window, NSMakePoint(50, 30), NSEventModifierFlagShift, 2)];
+        CHECK(window.firstResponder == view); /* Clicks take keyboard focus. */
+        const gr_event *down = last_event(&log, GR_EVENT_POINTER_DOWN);
+        CHECK(down && down->time == 5 && down->modifiers == GR_MODIFIER_SHIFT);
+        gr_pointer_event p = down->value.pointer;
+        CHECK_NEAR(p.position.x, 50);
+        CHECK_NEAR(p.position.y, 70);
+        CHECK(p.kind == GR_POINTER_MOUSE && p.button == GR_BUTTON_PRIMARY && p.buttons == 1u << GR_BUTTON_PRIMARY);
+        CHECK(p.click_count == 2 && p.pressure == 0.5f);
+        [view rightMouseDown:mouse(NSEventTypeRightMouseDown, window, NSMakePoint(60, 30), 0, 1)];
+        CHECK(last_event(&log, GR_EVENT_POINTER_DOWN)->value.pointer.buttons ==
+              ((1u << GR_BUTTON_PRIMARY) | (1u << GR_BUTTON_SECONDARY)));
+        [view rightMouseUp:mouse(NSEventTypeRightMouseUp, window, NSMakePoint(60, 30), 0, 1)];
+        /* Drags outside the view stay with it. */
+        [view mouseDragged:mouse(NSEventTypeLeftMouseDragged, window, NSMakePoint(250, -20), 0, 0)];
+        const gr_event *move = last_event(&log, GR_EVENT_POINTER_MOVE);
+        CHECK(move && move->value.pointer.button == GR_BUTTON_NONE &&
+              move->value.pointer.buttons == 1u << GR_BUTTON_PRIMARY);
+        CHECK_NEAR(move->value.pointer.position.x, 250);
+        CHECK_NEAR(move->value.pointer.position.y, 120);
+        [view mouseUp:mouse(NSEventTypeLeftMouseUp, window, NSMakePoint(250, -20), 0, 1)];
+        const gr_event *up = last_event(&log, GR_EVENT_POINTER_UP);
+        CHECK(up && up->value.pointer.button == GR_BUTTON_PRIMARY && up->value.pointer.buttons == 0);
+        CHECK(up->value.pointer.pressure == 0);
+
+        /* Hover crossings. */
+        [view mouseEntered:crossing(NSEventTypeMouseEntered, window, NSMakePoint(10, 10))];
+        [view mouseMoved:mouse(NSEventTypeMouseMoved, window, NSMakePoint(12, 10), 0, 0)];
+        [view mouseExited:crossing(NSEventTypeMouseExited, window, NSMakePoint(-5, 10))];
+        CHECK(count_events(&log, GR_EVENT_POINTER_ENTER) == 1 && count_events(&log, GR_EVENT_POINTER_LEAVE) == 1);
+        CHECK(log.events[log.count - 1].type == GR_EVENT_POINTER_LEAVE);
+
+        /* Scrolling uses the "positive scrolls down" convention. */
+        CGEventRef wheel = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, -12, 4);
+        NSEvent *scroll = [NSEvent eventWithCGEvent:wheel];
+        CFRelease(wheel);
+        [view scrollWheel:scroll];
+        const gr_event *scrolled = last_event(&log, GR_EVENT_SCROLL);
+        CHECK(scrolled && scrolled->value.scroll.unit == GR_SCROLL_UNIT_POINT);
+        CHECK(scrolled->value.scroll.delta.y == -scroll.scrollingDeltaY && scroll.scrollingDeltaY != 0);
+        CHECK(scrolled->value.scroll.delta.x == -scroll.scrollingDeltaX);
+
+        /* Keys: physical code, named or character key, repeat and modifier keys. */
+        [view keyDown:key(NSEventTypeKeyDown, window, kVK_Return, @"\r", 0, false)];
+        const gr_event *k = last_event(&log, GR_EVENT_KEY_DOWN);
+        CHECK(k && k->value.key.code == GR_KEY_CODE_ENTER && k->value.key.key == GR_KEY_ENTER);
+        CHECK(k->value.key.character == 0 && k->value.key.native_code == kVK_Return && !k->value.key.repeat);
+        [view keyDown:key(NSEventTypeKeyDown, window, kVK_ANSI_A, @"a", NSEventModifierFlagCommand, true)];
+        k = last_event(&log, GR_EVENT_KEY_DOWN);
+        CHECK(k->value.key.code == GR_KEY_CODE_A && k->value.key.key == GR_KEY_CHARACTER);
+        CHECK(k->value.key.character != 0 && k->value.key.repeat && k->modifiers == GR_MODIFIER_SUPER);
+        [view keyUp:key(NSEventTypeKeyUp, window, kVK_ANSI_A, @"a", 0, false)];
+        CHECK(last_event(&log, GR_EVENT_KEY_UP)->value.key.code == GR_KEY_CODE_A);
+        [view keyDown:key(NSEventTypeKeyDown, window, kVK_F5, @"\uF708", 0, false)];
+        CHECK(last_event(&log, GR_EVENT_KEY_DOWN)->value.key.key == GR_KEY_F5);
+        size_t before = log.count;
+        NSEventModifierFlags shift = NSEventModifierFlagShift | NX_DEVICELSHIFTKEYMASK;
+        [view flagsChanged:key(NSEventTypeFlagsChanged, window, kVK_Shift, @"", shift, false)];
+        [view flagsChanged:key(NSEventTypeFlagsChanged, window, kVK_RightShift, @"", shift | NX_DEVICERSHIFTKEYMASK,
+                               false)];
+        [view flagsChanged:key(NSEventTypeFlagsChanged, window, kVK_RightShift, @"", shift, false)];
+        CHECK(log.count == before + 3);
+        CHECK(log.events[before].type == GR_EVENT_KEY_DOWN && log.events[before].value.key.key == GR_KEY_SHIFT);
+        CHECK(log.events[before + 1].type == GR_EVENT_KEY_DOWN &&
+              log.events[before + 1].value.key.code == GR_KEY_CODE_SHIFT_RIGHT);
+        CHECK(log.events[before + 2].type == GR_EVENT_KEY_UP &&
+              log.events[before + 2].value.key.code == GR_KEY_CODE_SHIFT_RIGHT);
+
+        /* Cursors apply on cursor updates. */
+        OK(gr_scene_host_set_cursor(host, GR_CURSOR_TEXT));
+        [view cursorUpdate:crossing(NSEventTypeCursorUpdate, window, NSMakePoint(10, 10))];
+        CHECK(NSCursor.currentCursor == NSCursor.IBeamCursor);
+        OK(gr_scene_host_set_cursor(host, GR_CURSOR_NONE));
+        OK(gr_scene_host_set_cursor(host, GR_CURSOR_RESIZE_NWSE));
+        OK(gr_scene_host_set_cursor(host, GR_CURSOR_DEFAULT));
+
+        gr_scene_host_unref(host);
+        size_t after = log.count;
+        [view mouseDown:mouse(NSEventTypeLeftMouseDown, window, NSMakePoint(50, 30), 0, 1)];
+        CHECK(log.count == after && !view.acceptsFirstResponder);
+        gr_scene_unref(scene);
+        [window close];
+    }
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool
@@ -334,7 +484,7 @@ int main(int argc, char **argv)
         const gr_test_case cases[] = {GR_TEST_CASE(invalid_arguments),  GR_TEST_CASE(rows_are_top_down),
                                       GR_TEST_CASE(scaled_rendering),   GR_TEST_CASE(view_hosting),
                                       GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
-                                      GR_TEST_CASE(view_events)};
+                                      GR_TEST_CASE(view_events),        GR_TEST_CASE(view_input)};
         return gr_test_run("macos", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
     }
 }

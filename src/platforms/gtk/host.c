@@ -69,13 +69,12 @@ static double now(void *data)
     return (double)g_get_monotonic_time() / G_TIME_SPAN_SECOND;
 }
 
-/* Cursor and text input are accepted but not applied yet. */
 static void set_cursor(void *data, gr_cursor cursor)
 {
-    (void)data;
-    (void)cursor;
+    gr_gtk_widget_set_cursor(((gr_gtk_host *)data)->widget, cursor);
 }
 
+/* Text input is accepted but not applied yet. */
 static void set_text_input(void *data, const gr_text_input *input)
 {
     (void)data;

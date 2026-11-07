@@ -267,6 +267,14 @@ static void widget_events(void)
     CHECK(!gr_scene_host_has_focus(host) && state.focus_outs == state.focus_ins);
     gtk_widget_set_focusable(widget, TRUE);
 
+    /* Cursors map to CSS cursor names. */
+    OK(gr_scene_host_set_cursor(host, GR_CURSOR_TEXT));
+    CHECK(gtk_widget_get_cursor(widget) && strcmp(gdk_cursor_get_name(gtk_widget_get_cursor(widget)), "text") == 0);
+    OK(gr_scene_host_set_cursor(host, GR_CURSOR_RESIZE_NWSE));
+    CHECK(strcmp(gdk_cursor_get_name(gtk_widget_get_cursor(widget)), "nwse-resize") == 0);
+    OK(gr_scene_host_set_cursor(host, GR_CURSOR_DEFAULT));
+    CHECK(!gtk_widget_get_cursor(widget));
+
     /* A request outstanding at release stops with the host; the widget keeps rendering. */
     OK(gr_scene_host_request_frame(host));
     gr_scene_host_unref(host);

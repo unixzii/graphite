@@ -1,5 +1,5 @@
-add_library(graphite_windows context.cpp convert.cpp effects.cpp draw.cpp backend.cpp window.cpp host.cpp offscreen.cpp
-    text.cpp)
+add_library(graphite_windows context.cpp convert.cpp effects.cpp draw.cpp backend.cpp window.cpp keys.cpp host.cpp
+    offscreen.cpp text.cpp)
 add_library(graphite::windows ALIAS graphite_windows)
 target_compile_features(graphite_windows PRIVATE cxx_std_20)
 target_compile_definitions(graphite_windows PRIVATE GRAPHITE_WINDOWS_BUILDING NOMINMAX WIN32_LEAN_AND_MEAN)
