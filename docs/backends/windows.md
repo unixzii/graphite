@@ -60,6 +60,14 @@ factory and draws it with `ID2D1DeviceContext::DrawTextLayout`:
   elided text land on the visible edge, and the first `isTrimmed` hit-test
   entry gives the elision start. Without an ellipsis the extra lines are
   clipped when drawing.
+- **DirectWrite only trims a line it cuts.** When the cut falls at a paragraph
+  break (or between unwrapped lines), max-height trimming would flag the line
+  as trimmed without drawing a sign, so those layouts are clipped instead and
+  get a separate "…" layout, eliding graphemes until it fits.
+- **`trailingWhitespaceLength` includes the paragraph separator**, so it is
+  not subtracted on top of `newlineLength`.
+- Letter spacing uses trailing character spacing, removed from each
+  paragraph's last grapheme so it only goes between graphemes.
 - With no wrapping and width 0, centering happens around x = 0, so unbounded
   layouts get the widest line as their width after a first pass.
 - **`CreateTextLayout` rejects a NULL string** even when its length is 0.

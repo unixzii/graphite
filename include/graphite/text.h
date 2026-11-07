@@ -67,8 +67,9 @@ enum
  * empty means "system-ui". Missing families and glyphs fall back natively. size is in points, > 0. weight is in
  * [1,1000] (400 regular, 700 bold) and is matched to the nearest available face. color is paint-only and applies
  * only through spans selecting GR_TEXT_STYLE_COLOR; text outside them uses the color supplied when drawing, so
- * changing that color does not need a new layout. Decorations use the text's color. letter_spacing is extra advance
- * in points after each grapheme cluster; it may be negative. */
+ * changing that color does not need a new layout. Decorations use the text's color. letter_spacing is extra space
+ * in points between adjacent grapheme clusters of a paragraph, none after its last one; it may be negative. Where
+ * carets fall inside that space is platform-specific. */
 typedef struct
 {
     gr_string family;
@@ -148,7 +149,8 @@ typedef enum
 typedef enum
 {
     GR_TEXT_TRUNCATE_NONE,
-    GR_TEXT_TRUNCATE_END /**< Replaces the end of the last visible line with an ellipsis when content is cut. */
+    GR_TEXT_TRUNCATE_END /**< Ends the last visible line with an ellipsis when content is cut, also when the cut falls
+                          *   at a paragraph break; text that does not leave room for it is elided. */
 } gr_text_truncation;
 
 /** Without max_width, lines break only at paragraph separators ("\n", "\r\n", "\r", U+2029) and the box is as wide
@@ -257,8 +259,9 @@ size_t gr_text_layout_previous_caret_stop(const gr_text_layout *layout, size_t i
 gr_text_position gr_text_layout_hit_test(const gr_text_layout *layout, gr_point point);
 
 /** Stores a zero-width caret rectangle spanning the line height in *out; out is required. In bidirectional text an
- * index can have two visual carets; this returns the one belonging to the run of the character the affinity
- * selects. An unknown affinity returns ARGUMENT and zeroes *out. */
+ * index can have two visual carets: downstream is the leading edge of the grapheme at the index, upstream the
+ * trailing edge of the grapheme before it (in each grapheme's own direction). Where there is no such grapheme, the
+ * other one is used. An unknown affinity returns ARGUMENT and zeroes *out. */
 gr_result gr_text_layout_get_caret_rect(const gr_text_layout *layout, gr_text_position position, gr_rect *out);
 
 /** Writes up to capacity rectangles covering range, at most one per line and direction run, in visual order;

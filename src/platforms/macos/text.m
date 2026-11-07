@@ -611,16 +611,38 @@ static const ct_line *line_for_position(const ct_layout *l, gr_text_position p)
 }
 
 /* x of the caret at UTF-16 index within line, in layout coordinates. */
-static double caret_x(const ct_line *line, CFIndex index, bool upstream)
+/* Offset of one edge of the grapheme starting at index, or NAN when the line has no caret there. */
+static double edge(CTLineRef line, CFIndex index, bool leading)
+{
+    __block double found = NAN;
+    CTLineEnumerateCaretOffsets(line, ^(double offset, CFIndex at, bool is_leading, bool *stop) {
+      if (at == index && is_leading == leading)
+      {
+          found = offset;
+          *stop = true;
+      }
+    });
+    return found;
+}
+
+/* x of the caret at UTF-16 index within line, in layout coordinates. Downstream is the leading edge of the grapheme
+ * at index, upstream the trailing edge of the one before; CoreText's primary offset is neither in bidi text. */
+static double caret_x(const ct_layout *l, const ct_line *line, CFIndex index, bool upstream)
 {
     if (line->token && index >= line->elided)
         return line->rtl ? line->token_x + line->token_w : line->token_x;
     if (!line->line)
         return line->x;
-    CGFloat secondary = 0;
-    CGFloat primary = CTLineGetOffsetForStringIndex(line->line, index, &secondary);
-    bool interior = index > line->units.location && index < line->units.location + line->units.length;
-    return line->pen + (upstream && interior ? secondary : primary);
+    CFRange glyphs = CTLineGetStringRange(line->line);
+    bool has_next = index<glyphs.location + glyphs.length, has_previous = index> glyphs.location;
+    double x = NAN;
+    if (has_previous && (upstream || !has_next))
+        x = edge(line->line, CFStringGetRangeOfComposedCharactersAtIndex(l->string, index - 1).location, false);
+    else if (has_next)
+        x = edge(line->line, index, true);
+    if (isnan(x))
+        x = CTLineGetOffsetForStringIndex(line->line, index, NULL);
+    return line->pen + x;
 }
 
 static gr_rect ct_caret_rect(void *data, gr_text_position position)
@@ -630,7 +652,7 @@ static gr_rect ct_caret_rect(void *data, gr_text_position position)
     CFIndex index = utf16(l, position.index);
     if (index > line->caret_limit)
         index = line->caret_limit;
-    double x = caret_x(line, index, position.affinity == GR_TEXT_AFFINITY_UPSTREAM);
+    double x = caret_x(l, line, index, position.affinity == GR_TEXT_AFFINITY_UPSTREAM);
     return (gr_rect){{x, line->top}, {0, line->ascent + line->descent + line->leading}};
 }
 

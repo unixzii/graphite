@@ -12,7 +12,7 @@
 #define STR(literal) ((gr_string){literal, sizeof(literal) - 1})
 #define CHECK(expression) conf_check(c, (expression), "%s:%d: %s", __FILE__, __LINE__, #expression)
 #define OK(expression) CHECK((expression) == GR_OK)
-#define NEAR(measured, expected) expect_near(c, #measured, (measured), (expected), 1e-6)
+#define CLOSE(measured, expected) expect_near(c, #measured, (measured), (expected), 1e-6)
 #define SYSTEM_OR_SKIP(c)                                                                                              \
     gr_text_system *system = text_system(c);                                                                           \
     if (!system)                                                                                                       \
@@ -72,9 +72,9 @@ void text_metrics_describe_lines(ctx *c)
     CHECK(m.first_baseline > 10 && m.first_baseline == m.last_baseline);
     gr_text_line l = line(layout, 0);
     CHECK(l.range.start == 0 && l.range.end == 5);
-    NEAR(l.bounds.size.width, m.size.width);
-    NEAR(l.baseline - l.ascent, l.bounds.origin.y);
-    NEAR(l.bounds.size.height, m.size.height);
+    CLOSE(l.bounds.size.width, m.size.width);
+    CLOSE(l.baseline - l.ascent, l.bounds.origin.y);
+    CLOSE(l.bounds.size.height, m.size.height);
     gr_text_layout_unref(layout);
 
     /* Larger and bolder text is wider. */
@@ -184,7 +184,7 @@ void text_truncates_to_max_lines(ctx *c)
     CHECK(hit.index > last.range.start && hit.index < PANGRAM.count);
     gr_rect at_hit = caret(layout, hit.index, hit.affinity);
     gr_rect at_end = caret(layout, PANGRAM.count, GR_TEXT_AFFINITY_DOWNSTREAM);
-    NEAR(at_hit.origin.x, at_end.origin.x);
+    CLOSE(at_hit.origin.x, at_end.origin.x);
     CHECK(at_end.origin.x > last.bounds.origin.x && at_end.origin.x < 80);
     gr_text_layout_unref(layout);
 
@@ -209,18 +209,18 @@ void text_aligns_by_paragraph_direction(ctx *c)
     gr_text_layout_unref(layout);
     o.align = GR_TEXT_ALIGN_CENTER;
     layout = layout_of(c, STR("Hi"), o);
-    NEAR(line(layout, 0).bounds.origin.x, (200 - start.bounds.size.width) / 2);
+    CLOSE(line(layout, 0).bounds.origin.x, (200 - start.bounds.size.width) / 2);
     gr_text_layout_unref(layout);
     o.align = GR_TEXT_ALIGN_END;
     layout = layout_of(c, STR("Hi"), o);
-    NEAR(line(layout, 0).bounds.origin.x, 200 - start.bounds.size.width);
+    CLOSE(line(layout, 0).bounds.origin.x, 200 - start.bounds.size.width);
     gr_text_layout_unref(layout);
 
     /* Start alignment follows the paragraph direction, unless the direction is explicit. */
     o.align = GR_TEXT_ALIGN_START;
     layout = layout_of(c, STR("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"), o);
     gr_text_line rtl = line(layout, 0);
-    NEAR(rtl.bounds.origin.x + rtl.bounds.size.width, 200);
+    CLOSE(rtl.bounds.origin.x + rtl.bounds.size.width, 200);
     gr_text_layout_unref(layout);
     o.direction = GR_TEXT_DIRECTION_LTR;
     layout = layout_of(c, STR("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"), o);
@@ -243,7 +243,7 @@ void text_carets_follow_grapheme_clusters(ctx *c)
     }
     gr_rect rect;
     CHECK(gr_text_layout_get_range_rects(layout, (gr_text_range){0, 11}, &rect, 1) == 1);
-    NEAR(rect.size.width, line(layout, 0).bounds.size.width);
+    CLOSE(rect.size.width, line(layout, 0).bounds.size.width);
     gr_text_layout_unref(layout);
 
     /* e + U+0301 is one cluster, and so is a flag made of two regional indicators. */
@@ -332,13 +332,14 @@ typedef struct
 {
     gr_text_layout *layout;
     gr_point origin;
+    gr_color color;
 } text_drawing;
 
 static void draw_text(void *userdata, gr_canvas *canvas, const gr_draw_info *info)
 {
     (void)info;
     const text_drawing *d = userdata;
-    API(gr_canvas_draw_text_layout(canvas, d->layout, d->origin, color(RED)));
+    API(gr_canvas_draw_text_layout(canvas, d->layout, d->origin, d->color));
 }
 
 static void free_text(void *userdata)
@@ -360,7 +361,9 @@ void text_is_drawn_upright_in_its_box(ctx *c)
     if (!d)
         abort();
     *d = (text_drawing){
-        layout_with(c, STR("Hello world"), (gr_text_span_list){&blue, 1}, gr_text_layout_options_default()), {8, 10}};
+        layout_with(c, STR("Hello world"), (gr_text_span_list){&blue, 1}, gr_text_layout_options_default()),
+        {8, 10},
+        color(RED)};
     gr_text_layout_metrics m = gr_text_layout_get_metrics(d->layout);
     CHECK(d->origin.x + m.size.width < 100);
 
@@ -398,4 +401,224 @@ void text_is_drawn_upright_in_its_box(ctx *c)
     conf_check(c, outside == 0, "%zu pixels outside the layout box", outside);
     /* The underline runs below the blue word's baseline. */
     conf_check(c, underline > 10 * f->scale, "%zu underline pixels", underline);
+}
+
+/* Adds a full-scene content layer drawing layout at origin in color; the layer owns a layout reference. */
+static void show(ctx *c, gr_scene *s, gr_text_layout *layout, gr_point origin, gr_color fill)
+{
+    text_drawing *d = malloc(sizeof(*d));
+    if (!d)
+        abort();
+    *d = (text_drawing){gr_text_layout_ref(layout), origin, fill};
+    gr_layer *l = new_layer(c, s, GR_LAYER_CONTENT);
+    API(gr_layer_set_frame(l, RECT(0, 0, 100, 100)));
+    gr_drawer drawer = {d, draw_text, free_text};
+    API(gr_content_layer_set_drawer(l, &drawer));
+    API(gr_layer_add_child(gr_scene_get_root(s), l));
+}
+
+static size_t inked(const frame *f, gr_rect r)
+{
+    size_t count = 0;
+    const gr_conf_pixels *p = &f->pixels;
+    for (uint32_t y = 0; y < p->height; ++y)
+        for (uint32_t x = 0; x < p->width; ++x)
+        {
+            double lx = (x + 0.5) / f->scale, ly = (y + 0.5) / f->scale;
+            if (lx >= r.origin.x && ly >= r.origin.y && lx < r.origin.x + r.size.width &&
+                ly < r.origin.y + r.size.height && p->data[((size_t)y * p->width + x) * 4 + 3] > 64)
+                ++count;
+        }
+    return count;
+}
+
+void text_color_is_paint_only(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    /* A color span leaves the layout unchanged. */
+    gr_text_layout *plain = layout_of(c, STR("Paint only"), gr_text_layout_options_default());
+    gr_text_span colored = {{0, 5}, GR_TEXT_STYLE_COLOR, gr_text_style_default()};
+    colored.style.color = color(BLUE);
+    gr_text_layout *styled =
+        layout_with(c, STR("Paint only"), (gr_text_span_list){&colored, 1}, gr_text_layout_options_default());
+    gr_text_layout_metrics a = gr_text_layout_get_metrics(plain), b = gr_text_layout_get_metrics(styled);
+    CLOSE(b.size.width, a.size.width);
+    CLOSE(b.size.height, a.size.height);
+    CLOSE(line(styled, 0).bounds.origin.x, line(plain, 0).bounds.origin.x);
+    for (size_t i = 0; i <= 10; ++i)
+        CLOSE(caret(styled, i, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x,
+              caret(plain, i, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x);
+    gr_text_layout_unref(styled);
+
+    /* The same layout drawn in two colors covers the same pixels. */
+    gr_scene *s = new_scene(c);
+    show(c, s, plain, POINT(4, 10), color(RED));
+    show(c, s, plain, POINT(4, 50), color(BLUE));
+    frame *f = render(c, s);
+    size_t top = 0, bottom = 0, differ = 0;
+    const gr_conf_pixels *p = &f->pixels;
+    uint32_t shift = (uint32_t)lround(40 * f->scale);
+    for (uint32_t y = 0; y < shift && y + shift < p->height; ++y)
+        for (uint32_t x = 0; x < p->width; ++x)
+        {
+            const uint8_t *u = p->data + ((size_t)y * p->width + x) * 4;
+            const uint8_t *v = p->data + ((size_t)(y + shift) * p->width + x) * 4;
+            top += u[3] > 64;
+            bottom += v[3] > 64;
+            differ += abs((int)u[3] - (int)v[3]) > 8;
+        }
+    conf_check(c, top > 20 && differ <= top / 50, "coverage %zu vs %zu, %zu pixels differ", top, bottom, differ);
+    gr_text_layout_unref(plain);
+}
+
+void text_letter_spacing_goes_between_graphemes(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_layout *plain = layout_of(c, STR("Hello"), gr_text_layout_options_default());
+    gr_text_span spaced = {{0, 5}, GR_TEXT_STYLE_LETTER_SPACING, gr_text_style_default()};
+    spaced.style.letter_spacing = 3;
+    gr_text_layout *wide =
+        layout_with(c, STR("Hello"), (gr_text_span_list){&spaced, 1}, gr_text_layout_options_default());
+    expect_near(c, "width gained by 3 pt between five graphemes",
+                gr_text_layout_get_metrics(wide).size.width - gr_text_layout_get_metrics(plain).size.width, 12, 0.5);
+    /* Carets move by the gaps before them, give or take where they sit inside a gap. */
+    for (size_t i = 0; i <= 5; ++i)
+    {
+        double shift = caret(wide, i, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x -
+                       caret(plain, i, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x;
+        double low = i ? 3.0 * ((double)i - 1) : 0, high = 3.0 * (double)(i < 5 ? i : 4);
+        conf_check(c, shift >= low - 0.5 && shift <= high + 0.5, "caret %zu moved %.2f, expected %.0f to %.0f", i,
+                   shift, low, high);
+    }
+    gr_text_layout_unref(wide);
+    gr_text_layout_unref(plain);
+}
+
+void text_styles_and_decorations_render(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_span bold = {{0, 4}, GR_TEXT_STYLE_WEIGHT, gr_text_style_default()};
+    bold.style.weight = 700;
+    gr_text_layout *regular = layout_of(c, STR("Mmmm"), gr_text_layout_options_default());
+    gr_text_layout *heavy =
+        layout_with(c, STR("Mmmm"), (gr_text_span_list){&bold, 1}, gr_text_layout_options_default());
+    CHECK(gr_text_layout_get_metrics(heavy).size.width > gr_text_layout_get_metrics(regular).size.width);
+    gr_text_layout_unref(heavy);
+
+    gr_text_span italic = {{0, 4}, GR_TEXT_STYLE_SLANT, gr_text_style_default()};
+    italic.style.slant = GR_FONT_SLANT_ITALIC;
+    gr_text_span strike = {{0, 4}, GR_TEXT_STYLE_DECORATIONS, gr_text_style_default()};
+    strike.style.decorations = GR_TEXT_DECORATION_STRIKETHROUGH;
+    gr_text_layout *slanted =
+        layout_with(c, STR("Mmmm"), (gr_text_span_list){&italic, 1}, gr_text_layout_options_default());
+    gr_text_layout *struck =
+        layout_with(c, STR("Mmmm"), (gr_text_span_list){&strike, 1}, gr_text_layout_options_default());
+    gr_scene *s = new_scene(c);
+    show(c, s, regular, POINT(4, 4), color(RED));
+    show(c, s, slanted, POINT(4, 34), color(RED));
+    show(c, s, struck, POINT(4, 64), color(RED));
+    frame *f = render(c, s);
+    gr_text_layout_metrics m = gr_text_layout_get_metrics(regular);
+    gr_text_line l = line(regular, 0);
+
+    /* Italic glyphs lean: the top half of the line moves right relative to the bottom half. */
+    double half = l.baseline / 2;
+    gr_rect upper = RECT(4, 4, m.size.width + 4, half), lower = RECT(4, 4 + half, m.size.width + 4, half);
+    size_t straight = inked(f, upper) + inked(f, lower);
+    size_t changed = 0;
+    const gr_conf_pixels *p = &f->pixels;
+    uint32_t shift = (uint32_t)lround(30 * f->scale);
+    for (uint32_t y = (uint32_t)(4 * f->scale); y < (uint32_t)((4 + m.size.height) * f->scale); ++y)
+        for (uint32_t x = 0; x < p->width; ++x)
+            changed += abs((int)p->data[((size_t)y * p->width + x) * 4 + 3] -
+                           (int)p->data[((size_t)(y + shift) * p->width + x) * 4 + 3]) > 64;
+    conf_check(c, straight > 0 && changed > straight / 10, "italic changed %zu of %zu inked pixels", changed, straight);
+
+    /* Strikethrough adds ink between the glyphs at about half the x-height. */
+    gr_rect band_plain = RECT(4, 4 + l.baseline - l.ascent * 0.45, m.size.width, l.ascent * 0.3);
+    gr_rect band_struck = band_plain;
+    band_struck.origin.y += 60;
+    size_t base_ink = inked(f, band_plain), struck_ink = inked(f, band_struck);
+    conf_check(c, struck_ink > base_ink + (size_t)(m.size.width * f->scale * 0.5),
+               "strikethrough band %zu vs plain %zu", struck_ink, base_ink);
+    gr_text_layout_unref(struck);
+    gr_text_layout_unref(slanted);
+    gr_text_layout_unref(regular);
+}
+
+void text_carets_follow_affinity_at_direction_changes(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    /* "abc " then three Hebrew letters (bytes 4 to 10), shown reversed, then " def". */
+    gr_text_layout *layout = layout_of(c, STR("abc \xD7\x90\xD7\x91\xD7\x92 def"), gr_text_layout_options_default());
+    gr_rect hebrew;
+    CHECK(gr_text_layout_get_range_rects(layout, (gr_text_range){4, 10}, &hebrew, 1) == 1);
+    double left = hebrew.origin.x, right = left + hebrew.size.width;
+    /* Downstream belongs to the character at the index, upstream to the one before it. */
+    expect_near(c, "downstream caret at the first Hebrew letter",
+                caret(layout, 4, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x, right, 0.5);
+    expect_near(c, "upstream caret after the space", caret(layout, 4, GR_TEXT_AFFINITY_UPSTREAM).origin.x, left, 0.5);
+    expect_near(c, "downstream caret at the space after Hebrew",
+                caret(layout, 10, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x, right, 0.5);
+    expect_near(c, "upstream caret after the last Hebrew letter", caret(layout, 10, GR_TEXT_AFFINITY_UPSTREAM).origin.x,
+                left, 0.5);
+    /* Inside the run, carets move leftward as the index grows. */
+    CHECK(caret(layout, 6, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x < right - 1 &&
+          caret(layout, 8, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x <
+              caret(layout, 6, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x);
+    gr_text_layout_unref(layout);
+}
+
+void text_rtl_paragraphs_hit_test_from_the_right(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_layout *layout = layout_of(c, STR("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"), width(200));
+    gr_text_line l = line(layout, 0);
+    double left = l.bounds.origin.x, right = left + l.bounds.size.width;
+    expect_near(c, "start caret at the right edge", caret(layout, 0, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x, right, 0.5);
+    expect_near(c, "end caret at the left edge", caret(layout, 8, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x, left, 0.5);
+    double previous = right + 1;
+    for (size_t i = 0; i <= 8; i += 2)
+    {
+        double x = caret(layout, i, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x;
+        CHECK(x < previous);
+        previous = x;
+        /* Just left of a caret is the character after it. */
+        CHECK(gr_text_layout_hit_test(layout, (gr_point){x - 0.5, l.baseline}).index == (i < 8 ? i : 8));
+    }
+    CHECK(gr_text_layout_hit_test(layout, (gr_point){right + 20, l.baseline}).index == 0);
+    CHECK(gr_text_layout_hit_test(layout, (gr_point){left - 20, l.baseline}).index == 8);
+    gr_text_layout_unref(layout);
+}
+
+void text_ellipsis_marks_a_cut_at_a_paragraph_break(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    /* The first paragraph fits; the cut falls exactly at its separator. */
+    gr_text_layout *whole = layout_of(c, STR("First line"), gr_text_layout_options_default());
+    double natural = gr_text_layout_get_metrics(whole).size.width;
+    gr_text_layout_unref(whole);
+    gr_text_layout_options o = width(200);
+    o.max_lines = 1;
+    o.truncation = GR_TEXT_TRUNCATE_END;
+    gr_text_layout *layout = layout_of(c, STR("First line\nSecond line"), o);
+    gr_text_layout_metrics m = gr_text_layout_get_metrics(layout);
+    CHECK(m.line_count == 1 && m.truncated && m.visible.end == 11);
+    gr_text_line l = line(layout, 0);
+    CHECK(l.range.start == 0 && l.range.end == 11);
+    conf_check(c, l.bounds.size.width > natural + 3, "line width %.2f, text alone %.2f: no ellipsis",
+               l.bounds.size.width, natural);
+    /* The ellipsis is drawn after the text, inside the box. */
+    gr_scene *s = new_scene(c);
+    show(c, s, layout, POINT(4, 10), color(RED));
+    frame *f = render(c, s);
+    conf_check(c, inked(f, RECT(4 + natural + 1, 10, l.bounds.size.width - natural, m.size.height)) > 0,
+               "nothing drawn after the text");
+    gr_text_layout_unref(layout);
 }

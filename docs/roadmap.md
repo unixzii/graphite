@@ -20,7 +20,7 @@
   conformance suite and has a real-window test.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
   border widths snap to device pixels), shadow spread.
-- **Conformance suite**: 26 semantic, 7 measured and 8 text cases at 1×, 1.5×
+- **Conformance suite**: 26 semantic, 7 measured and 14 text cases at 1×, 1.5×
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
@@ -173,10 +173,16 @@ The conformance suite's `text` cases (`conformance/text.c`) run against every
 backend that provides a text system. Fonts differ per platform, so they assert
 relations and invariants rather than exact metrics: wrapping inside the width,
 line ranges covering the text, `max_lines` with the truncated/visible metrics,
-ellipsis hit testing, alignment by paragraph direction, monotonic carets that
-round-trip through hit testing, grapheme cluster stops, bidi selection pieces,
-concurrent queries, and drawing (upright, inside its box, no color leaks,
-underline). Still missing: paint-only color changes keeping the same layout.
+ellipsis hit testing and the ellipsis at paragraph breaks, alignment by
+paragraph direction, monotonic carets that round-trip through hit testing,
+caret affinity at direction changes, RTL hit testing, grapheme cluster stops,
+bidi selection pieces, letter spacing between graphemes, paint-only color,
+weight, italic and strikethrough, concurrent queries, and drawing (upright,
+inside its box, no color leaks, underline). Writing these found and fixed
+backend disagreements: macOS and GTK placed bidi carets on the opposite
+edges, GTK and Windows dropped the ellipsis when the cut fell at a paragraph
+break, Windows added spacing after the last grapheme and measured lines
+ending in separators too short.
 
 Register a bundled test font internally to reduce variance. Use same-backend
 golden snapshots for rasterization. See also [testing](testing.md#text-tests).

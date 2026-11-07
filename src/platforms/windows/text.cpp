@@ -53,7 +53,14 @@ struct TextLayout
     std::vector<ColorSpan> colors;
     std::vector<Line> lines;
     std::vector<UINT32> stops; // Grapheme cluster boundaries in UTF-16, including 0 and the end.
-    double clip_height = 0;    // > 0 hides lines cut by max_lines without an ellipsis.
+    double clip_height = 0;    // > 0 hides lines cut by max_lines below the last visible line.
+    bool rtl = false;
+    // An ellipsis DirectWrite did not add: the cut fell at a paragraph break or between unwrapped lines.
+    com_ptr<IDWriteTextLayout> token;
+    gr_point token_at{}; // Top-left in layout coordinates.
+    double token_width = 0;
+    double cutoff = NAN; // NAN, or the x beyond which the last line's glyphs are hidden.
+    std::optional<gr_color> token_color;
     gr_text_layout_metrics metrics{};
 };
 
@@ -165,6 +172,82 @@ std::vector<UINT32> grapheme_stops(gr_utf16 u)
     return stops;
 }
 
+UINT32 previous_stop16(TextLayout const *l, UINT32 u);
+
+/* Whether DirectWrite drew its trimming sign on line: a zero-length hit-test entry with a width. */
+bool has_sign(IDWriteTextLayout *layout, Line const &line)
+{
+    for (auto const &h : hit_range(layout, line.start, std::max<UINT32>(line.end - line.start, 1)))
+        if (std::abs(h.top - line.bounds.origin.y) <= 0.01 && !h.length && h.width > 0)
+            return true;
+    return false;
+}
+
+/* Ends the last visible line with an ellipsis in the font and color of its last grapheme, eliding graphemes from
+ * its end until the ellipsis fits inside the box. */
+void add_token(TextLayout *l, double box)
+{
+    auto &line = l->lines.back();
+    auto layout = l->layout.get();
+    UINT32 at = line.stop > line.start ? line.stop - 1 : line.start;
+    UINT32 length = 0;
+    check_hresult(layout->GetFontFamilyNameLength(at, &length));
+    std::wstring family(length + 1, L'\0');
+    check_hresult(layout->GetFontFamilyName(at, family.data(), length + 1));
+    float size = 0;
+    DWRITE_FONT_WEIGHT weight{};
+    DWRITE_FONT_STYLE style{};
+    check_hresult(layout->GetFontSize(at, &size));
+    check_hresult(layout->GetFontWeight(at, &weight));
+    check_hresult(layout->GetFontStyle(at, &style));
+    com_ptr<IDWriteTextFormat> format;
+    check_hresult(l->system->factory->CreateTextFormat(family.c_str(), nullptr, weight, style,
+                                                       DWRITE_FONT_STRETCH_NORMAL, size, L"", format.put()));
+    check_hresult(l->system->factory->CreateTextLayout(L"\u2026", 1, format.get(), FLT_MAX, FLT_MAX, l->token.put()));
+    for (auto const &span : l->colors)
+        if (span.range.startPosition <= at && at < span.range.startPosition + span.range.length)
+            l->token_color = span.color;
+    DWRITE_TEXT_METRICS tm;
+    check_hresult(l->token->GetMetrics(&tm));
+    DWRITE_LINE_METRICS lm;
+    UINT32 lines = 0;
+    check_hresult(l->token->GetLineMetrics(&lm, 1, &lines));
+    double width = tm.widthIncludingTrailingWhitespace;
+    double left = line.bounds.origin.x, right = left + line.bounds.size.width;
+    bool rtl = l->rtl;
+    double edge = rtl ? left : right;
+    if (rtl ? left - width < -1e-6 : right + width > box + 1e-6)
+    {
+        /* Walk grapheme boundaries back from the end until the ellipsis fits beside the kept text. */
+        edge = rtl ? right : left;
+        line.caret = line.start;
+        for (UINT32 stop = line.stop; stop > line.start; stop = previous_stop16(l, stop))
+        {
+            float x = 0, y = 0;
+            DWRITE_HIT_TEST_METRICS h;
+            check_hresult(layout->HitTestTextPosition(stop, stop == line.stop, &x, &y, &h));
+            if (stop == line.stop)
+                x = static_cast<float>(rtl ? left : right);
+            if (rtl ? x - width >= -1e-6 : x + width <= box + 1e-6)
+            {
+                edge = x;
+                line.caret = stop;
+                break;
+            }
+        }
+        l->cutoff = edge;
+    }
+    l->token_width = width;
+    l->token_at = {rtl ? edge - width : edge, line.baseline - lm.baseline};
+    if (rtl)
+    {
+        line.bounds.size.width = right - l->token_at.x;
+        line.bounds.origin.x = l->token_at.x;
+    }
+    else
+        line.bounds.size.width = edge + width - left;
+}
+
 void build(TextLayout *l)
 {
     auto const &o = l->options;
@@ -176,7 +259,8 @@ void build(TextLayout *l)
     check_hresult(factory->CreateTextFormat(
         family_name(base.family).c_str(), nullptr, static_cast<DWRITE_FONT_WEIGHT>(base.weight), font_style(base.slant),
         DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(base.size), L"", format.put()));
-    bool rtl = o.direction == GR_TEXT_DIRECTION_RTL;
+    bool &rtl = l->rtl;
+    rtl = o.direction == GR_TEXT_DIRECTION_RTL;
     if (o.direction == GR_TEXT_DIRECTION_AUTO && n)
         rtl = ubidi_getBaseDirection(reinterpret_cast<UChar const *>(u.data), static_cast<int32_t>(n)) == UBIDI_RTL;
     check_hresult(format->SetReadingDirection(rtl ? DWRITE_READING_DIRECTION_RIGHT_TO_LEFT
@@ -207,11 +291,32 @@ void build(TextLayout *l)
     if (base.decorations)
         apply_style(layout, base, GR_TEXT_STYLE_DECORATIONS, all, l->colors);
     gr_text_span_list spans = gr_attributed_text_get_spans(l->text);
+    bool spaced = base.letter_spacing != 0;
     for (size_t i = 0; i < spans.count; ++i)
     {
         auto const &span = spans.data[i];
         UINT32 start = to16(l, span.range.start), end = to16(l, span.range.end);
         apply_style(layout, span.style, span.fields, {start, end - start}, l->colors);
+        spaced |= (span.fields & GR_TEXT_STYLE_LETTER_SPACING) != 0;
+    }
+    l->stops = grapheme_stops(u);
+    if (spaced)
+    {
+        /* Spacing goes between graphemes: none after the last grapheme of each paragraph. */
+        com_ptr<IDWriteTextLayout1> spacing;
+        if (SUCCEEDED(layout->QueryInterface(IID_PPV_ARGS(spacing.put()))))
+            for (UINT32 start = 0; start < n;)
+            {
+                UINT32 end = paragraph_end(u, start), stop = end;
+                while (stop > start && paragraph_break(u.data[stop - 1]))
+                    --stop;
+                if (stop > start)
+                {
+                    UINT32 last = previous_stop16(l, stop);
+                    check_hresult(spacing->SetCharacterSpacing(0, 0, 0, {last, stop - last}));
+                }
+                start = end;
+            }
     }
 
     /* Unbounded layouts align inside their widest line, which DirectWrite needs as the layout width. */
@@ -229,7 +334,10 @@ void build(TextLayout *l)
     double height = 0;
     for (size_t i = 0; i < visible; ++i)
         height += metrics[i].height;
-    if (cut && ellipsize && o.wrap != GR_TEXT_WRAP_NONE)
+    /* DirectWrite only trims a line it cuts, so a cut at a paragraph break gets a manual ellipsis instead. */
+    bool at_break = cut && metrics[visible - 1].newlineLength > 0;
+    bool trim_height = cut && ellipsize && o.wrap != GR_TEXT_WRAP_NONE && !at_break;
+    if (trim_height)
     {
         check_hresult(layout->SetMaxHeight(static_cast<float>(height + metrics[visible].height / 2)));
         check_hresult(layout->GetLineMetrics(metrics.data(), count, &count));
@@ -250,7 +358,7 @@ void build(TextLayout *l)
         line.stop = line.end - m.newlineLength;
         bool last_cut = cut && i + 1 == visible;
         line.soft = i + 1 < visible && m.newlineLength == 0;
-        if (last_cut && ellipsize && o.wrap != GR_TEXT_WRAP_NONE)
+        if (last_cut && trim_height)
         {
             /* The ellipsized last line owns the rest of its paragraph. */
             line.end = paragraph_end(u, line.start);
@@ -260,7 +368,8 @@ void build(TextLayout *l)
         }
         line.caret = line.soft ? line.end : line.stop;
         double left = DBL_MAX, right = -DBL_MAX;
-        UINT32 shown = line.stop - line.start - (m.isTrimmed ? 0 : m.trailingWhitespaceLength);
+        /* trailingWhitespaceLength already counts the paragraph separator. */
+        UINT32 shown = m.isTrimmed ? line.stop - line.start : m.length - m.trailingWhitespaceLength;
         if (m.isTrimmed)
             trimmed = true;
         for (auto const &h : hit_range(layout, line.start, std::max<UINT32>(shown, 1)))
@@ -291,9 +400,11 @@ void build(TextLayout *l)
         top += m.height;
         l->lines.push_back(line);
     }
-    l->stops = grapheme_stops(u);
+    double box = o.has_max_width ? o.max_width : widest;
+    if (cut && ellipsize && !has_sign(layout, l->lines.back()))
+        add_token(l, box);
     auto const &first = l->lines.front(), &last = l->lines.back();
-    l->metrics.size = {o.has_max_width ? o.max_width : widest, top};
+    l->metrics.size = {box, top};
     l->metrics.line_count = visible;
     l->metrics.first_baseline = first.baseline;
     l->metrics.last_baseline = last.baseline;
@@ -421,11 +532,14 @@ gr_rect dw_caret_rect(void *data, gr_text_position position)
     auto const &line = line_for_position(l.l, position);
     UINT32 index = std::min(to16(l.l, position.index), line.caret);
     bool upstream = position.affinity == GR_TEXT_AFFINITY_UPSTREAM;
+    bool has_previous = index > line.start, has_next = index < line.stop;
     float x = 0, y = 0;
     DWRITE_HIT_TEST_METRICS h;
-    if (upstream && index > line.start && (index < line.caret || (line.soft && index == line.end)))
-        /* The trailing edge of the previous grapheme: the end of an earlier line, or the other side of a direction
-         * change. */
+    if (l->token && &line == &l->lines.back() && index >= line.caret)
+        /* At the ellipsis: its edge facing the kept text. */
+        x = static_cast<float>(l->rtl ? l->token_at.x + l->token_width : l->token_at.x);
+    else if (has_previous && (upstream || !has_next))
+        /* The trailing edge of the grapheme before index. */
         check_hresult(l->layout->HitTestTextPosition(previous_stop16(l.l, index), TRUE, &x, &y, &h));
     else
         check_hresult(l->layout->HitTestTextPosition(index, FALSE, &x, &y, &h));
@@ -441,7 +555,14 @@ size_t dw_range_rects(void *data, gr_text_range range, gr_rect *rects, size_t ca
     size_t total = 0;
     for (auto const &line : l->lines)
     {
-        UINT32 a = std::max(start, line.start), b = std::min(end, line.stop);
+        bool tokened = l->token && &line == &l->lines.back();
+        UINT32 a = std::max(start, line.start), b = std::min(end, tokened ? line.caret : line.stop);
+        if (tokened && end > line.caret && start < line.end)
+        {
+            if (total < capacity)
+                rects[total] = {{l->token_at.x, line.bounds.origin.y}, {l->token_width, line.bounds.size.height}};
+            ++total;
+        }
         if (a >= b)
             continue;
         std::vector<std::pair<double, double>> spans;
@@ -513,9 +634,30 @@ void draw_text_layout(ID2D1DeviceContext *dc, gr_text_layout *layout, gr_point o
     if (l->clip_height > 0)
         dc->PushAxisAlignedClip(D2D1::RectF(-1e5f, -1e5f, 1e5f, static_cast<float>(origin.y + l->clip_height)),
                                 D2D1_ANTIALIAS_MODE_ALIASED);
-    dc->DrawTextLayout(point(origin), l->layout.get(), solid(color).get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    auto fill = solid(color);
+    auto options = D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
+    if (std::isnan(l->cutoff))
+        dc->DrawTextLayout(point(origin), l->layout.get(), fill.get(), options);
+    else
+    {
+        /* Lines above the last one, then the last line's kept side of the cutoff. */
+        auto const &last = l->lines.back();
+        auto top = static_cast<float>(origin.y + last.bounds.origin.y);
+        auto bottom = static_cast<float>(origin.y + last.bounds.origin.y + last.bounds.size.height);
+        auto cut = static_cast<float>(origin.x + l->cutoff);
+        dc->PushAxisAlignedClip(D2D1::RectF(-1e5f, -1e5f, 1e5f, top), D2D1_ANTIALIAS_MODE_ALIASED);
+        dc->DrawTextLayout(point(origin), l->layout.get(), fill.get(), options);
+        dc->PopAxisAlignedClip();
+        dc->PushAxisAlignedClip(l->rtl ? D2D1::RectF(cut, top, 1e5f, bottom) : D2D1::RectF(-1e5f, top, cut, bottom),
+                                D2D1_ANTIALIAS_MODE_ALIASED);
+        dc->DrawTextLayout(point(origin), l->layout.get(), fill.get(), options);
+        dc->PopAxisAlignedClip();
+    }
     if (l->clip_height > 0)
         dc->PopAxisAlignedClip();
+    if (l->token)
+        dc->DrawTextLayout(point({origin.x + l->token_at.x, origin.y + l->token_at.y}), l->token.get(),
+                           l->token_color ? solid(*l->token_color).get() : fill.get(), options);
     dc->SetTextAntialiasMode(mode);
     if (!l->colors.empty())
         check_hresult(l->layout->SetDrawingEffect(nullptr, {0, UINT32_MAX}));

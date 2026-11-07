@@ -76,6 +76,14 @@ conformance suite's text cases) lays text out with Pango and draws it with
 - Pango maps the ellipsis onto the elided range; its run is found through
   `PANGO_ANALYSIS_FLAG_IS_ELLIPSIS`, and positions inside it collapse onto the
   elision start like on CoreText.
+- **Pango only ellipsizes a paragraph it cuts.** When the cut falls at a
+  paragraph break (or between unwrapped lines), the last line gets a separate
+  "…" layout in its last run's font and color; graphemes are elided from the
+  line's end, by clipping the second of two draws, until it fits.
+- **Carets come from grapheme edges**, not `pango_layout_get_cursor_pos`: its
+  strong and weak cursors follow the paragraph direction, while affinity
+  follows the grapheme (`pango_layout_index_to_pos` gives negative widths
+  for right-to-left graphemes).
 - Pango line lengths exclude paragraph separators; line ranges extend to the
   next line's start to include them.
 - Pango is not thread-safe: a mutex per text system serializes layout,
@@ -86,9 +94,8 @@ conformance suite's text cases) lays text out with Pango and draws it with
 
 ## Known gaps
 
-- Text: unwrapped text with an ellipsis and a line limit hides extra
-  paragraphs without an ellipsis on the last line; mixed-direction paragraphs
-  in unwrapped text without an ellipsis share one alignment shift.
+- Text: mixed-direction paragraphs in unwrapped text without an ellipsis share
+  one alignment shift.
 - Shadows that can show under their layer are a blur of the filled shape,
   re-rendered whenever their region is damaged.
 - No headless setup yet (for example `mutter --headless`); the tests need a

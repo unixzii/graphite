@@ -44,7 +44,15 @@ typedef struct
     PangoContext *context;
     PangoLayout *layout;
     double shift;       /* x offset applied to Pango coordinates. */
-    double clip_height; /* > 0 hides lines cut by max_lines without an ellipsis. */
+    double clip_height; /* > 0 hides lines cut by max_lines below the last visible line. */
+    /* An ellipsis Pango did not add (the cut fell at a paragraph break or between unwrapped lines). */
+    PangoLayout *token;
+    gr_point token_at; /* Top-left in layout coordinates. */
+    double token_width;
+    double cutoff;    /* NAN, or the x beyond which the last line's glyphs are hidden to make room. */
+    bool cutoff_left; /* The hidden side is left of cutoff (right-to-left lines). */
+    bool token_colored;
+    GdkRGBA token_color;
     pg_line *lines;
     size_t count;
     const PangoLogAttr *attrs;
@@ -192,6 +200,103 @@ static double layout_flush(const gr_text_layout_options *o, bool rtl)
     return (o->align == GR_TEXT_ALIGN_START) == !rtl ? 0 : 1;
 }
 
+static size_t byte_at(const pg_layout *l, int offset);
+static int chars_before(const pg_layout *l, size_t index);
+
+static bool line_has_ellipsis(PangoLayoutLine *line)
+{
+    for (GSList *run = line->runs; run; run = run->next)
+        if (((PangoGlyphItem *)run->data)->item->analysis.flags & PANGO_ANALYSIS_FLAG_IS_ELLIPSIS)
+            return true;
+    return false;
+}
+
+/* x of the leading edge of the grapheme at index, in Pango coordinates; widths are negative for RTL graphemes. */
+static double leading_edge(PangoLayout *layout, size_t index)
+{
+    PangoRectangle r;
+    pango_layout_index_to_pos(layout, (int)index, &r);
+    return from_pango(r.x);
+}
+
+/* Ends the last visible line with an ellipsis of the last run's font and color, eliding graphemes from its end
+ * until the ellipsis fits inside the box. */
+static void add_token(pg_layout *l, double box)
+{
+    pg_line *line = &l->lines[l->count - 1];
+    PangoLayoutLine *native = pango_layout_get_line_readonly(l->layout, (int)l->count - 1);
+    PangoLayout *token = pango_layout_new(l->context);
+    pango_layout_set_text(token, "\xE2\x80\xA6", -1);
+    GSList *runs = native->runs, *last = runs ? g_slist_last(runs) : NULL;
+    if (line->rtl && runs)
+        last = runs; /* Visual order: the logical end of a right-to-left line is its first run. */
+    if (last)
+    {
+        PangoItem *item = ((PangoGlyphItem *)last->data)->item;
+        PangoFontDescription *font = pango_font_describe_with_absolute_size(item->analysis.font);
+        pango_layout_set_font_description(token, font);
+        pango_font_description_free(font);
+        for (GSList *a = item->analysis.extra_attrs; a; a = a->next)
+        {
+            PangoAttribute *attribute = a->data;
+            if (attribute->klass->type == PANGO_ATTR_FOREGROUND)
+            {
+                PangoColor c = ((PangoAttrColor *)attribute)->color;
+                l->token_color = (GdkRGBA){c.red / 65535.f, c.green / 65535.f, c.blue / 65535.f, 1};
+                l->token_colored = true;
+            }
+            else if (attribute->klass->type == PANGO_ATTR_FOREGROUND_ALPHA)
+                l->token_color.alpha = ((PangoAttrInt *)attribute)->value / 65535.f;
+        }
+    }
+    else
+        pango_layout_set_font_description(token, pango_layout_get_font_description(l->layout));
+    PangoRectangle logical;
+    pango_layout_get_extents(token, NULL, &logical);
+    double width = from_pango(logical.width);
+    double left = line->bounds.origin.x, right = left + line->bounds.size.width;
+    bool fits = line->rtl ? left - width >= -1e-6 : right + width <= box + 1e-6;
+    double at = line->rtl ? left : right;
+    if (!fits)
+    {
+        /* Walk grapheme boundaries back from the end until the ellipsis fits beside the kept text. */
+        int k = chars_before(l, line->stop);
+        for (;; --k)
+        {
+            size_t index = byte_at(l, k);
+            if (index <= line->range.start)
+            {
+                at = line->rtl ? right : left;
+                line->caret_limit = line->range.start;
+                break;
+            }
+            if (!l->attrs[k].is_cursor_position)
+                continue;
+            double x = (index < line->stop ? leading_edge(l->layout, index) : (line->rtl ? left : right) - l->shift) +
+                       l->shift;
+            if (line->rtl ? x - width >= -1e-6 : x + width <= box + 1e-6)
+            {
+                at = x;
+                line->caret_limit = index;
+                break;
+            }
+        }
+        l->cutoff = at;
+        l->cutoff_left = line->rtl;
+    }
+    l->token = token;
+    l->token_width = width;
+    double baseline = from_pango(pango_layout_get_baseline(token));
+    l->token_at = (gr_point){line->rtl ? at - width : at, line->baseline - baseline};
+    if (line->rtl)
+    {
+        line->bounds.size.width = right - l->token_at.x;
+        line->bounds.origin.x = l->token_at.x;
+    }
+    else
+        line->bounds.size.width = at + width - left;
+}
+
 static void build(pg_layout *l)
 {
     const gr_text_layout_options *o = &l->options;
@@ -296,13 +401,16 @@ static void build(pg_layout *l)
     }
     for (size_t i = 0; i < visible; ++i)
         lines[i].bounds.origin.x += l->shift;
+    l->cutoff = NAN;
+    l->lines = lines;
+    l->count = visible;
+    l->attrs = pango_layout_get_log_attrs_readonly(layout, &l->attr_count);
+    if (cut && ellipsize && !line_has_ellipsis(pango_layout_get_line_readonly(layout, (int)visible - 1)))
+        add_token(l, box);
     pg_line *first = &lines[0], *last = &lines[visible - 1];
     double height = last->bounds.origin.y + last->bounds.size.height;
     if (cut && !height_cut)
         l->clip_height = height;
-    l->lines = lines;
-    l->count = visible;
-    l->attrs = pango_layout_get_log_attrs_readonly(layout, &l->attr_count);
     l->metrics = (gr_text_layout_metrics){
         .size = {box, height},
         .line_count = visible,
@@ -445,21 +553,28 @@ static gr_rect pg_caret_rect(void *data, gr_text_position position)
     const pg_line *line = line_for_position(l, position);
     size_t index = position.index < line->caret_limit ? position.index : line->caret_limit;
     bool upstream = position.affinity == GR_TEXT_AFFINITY_UPSTREAM;
+    bool has_previous = index > line->range.start, has_next = index < line->stop;
     double x;
-    if (upstream && line->soft && index == line->range.end && index > line->range.start)
+    if (l->token && line == &l->lines[l->count - 1] && index >= line->caret_limit)
+        /* At the ellipsis: its edge facing the kept text. */
+        x = (line->rtl ? l->token_at.x + l->token_width : l->token_at.x) - l->shift;
+    else if (has_previous && (upstream || !has_next))
     {
-        /* The trailing edge of the last grapheme on the earlier line; widths are negative for RTL. */
-        const char *previous = g_utf8_find_prev_char(l->utf8, l->utf8 + index);
+        /* The trailing edge of the grapheme before index; widths are negative for RTL graphemes. */
+        int k = chars_before(l, index) - 1;
+        while (k > 0 && !l->attrs[k].is_cursor_position)
+            --k;
         PangoRectangle grapheme;
-        pango_layout_index_to_pos(l->layout, (int)(previous - l->utf8), &grapheme);
+        pango_layout_index_to_pos(l->layout, (int)byte_at(l, k), &grapheme);
         x = from_pango(grapheme.x + grapheme.width);
     }
+    else if (has_next)
+        x = leading_edge(l->layout, index);
     else
     {
-        PangoRectangle strong, weak;
-        pango_layout_get_cursor_pos(l->layout, (int)index, &strong, &weak);
-        bool interior = index > line->range.start && index < line->caret_limit;
-        x = from_pango(upstream && interior ? weak.x : strong.x);
+        PangoRectangle strong;
+        pango_layout_get_cursor_pos(l->layout, (int)index, &strong, NULL);
+        x = from_pango(strong.x);
     }
     gr_rect rect = {{x + l->shift, line->bounds.origin.y}, {0, line->bounds.size.height}};
     done(l);
@@ -473,8 +588,17 @@ static size_t pg_range_rects(void *data, gr_text_range range, gr_rect *rects, si
     for (size_t i = 0; i < l->count; ++i)
     {
         const pg_line *line = &l->lines[i];
+        bool tokened = l->token && i + 1 == l->count;
+        size_t end = tokened ? line->caret_limit : line->stop;
         size_t a = range.start > line->range.start ? range.start : line->range.start;
-        size_t b = range.end < line->stop ? range.end : line->stop;
+        size_t b = range.end < end ? range.end : end;
+        if (tokened && range.end > line->caret_limit && range.start < line->range.end)
+        {
+            if (total < capacity)
+                rects[total] =
+                    (gr_rect){{l->token_at.x, line->bounds.origin.y}, {l->token_width, line->bounds.size.height}};
+            ++total;
+        }
         if (a >= b)
             continue;
         int *ranges = NULL, n = 0;
@@ -501,6 +625,8 @@ static void pg_layout_destroy(void *data)
     pg_layout *l = data;
     if (l->layout)
         g_object_unref(l->layout);
+    if (l->token)
+        g_object_unref(l->token);
     g_object_unref(l->context);
     g_free(l->lines);
     g_free(l->utf8);
@@ -527,9 +653,32 @@ void gr_pango_draw_layout(GtkSnapshot *s, gr_text_layout *layout, gr_point origi
         gtk_snapshot_push_clip(s, &clip);
     }
     GdkRGBA rgba = gr_gdk_color(color);
-    gtk_snapshot_append_layout(s, l->layout, &rgba);
+    if (isnan(l->cutoff))
+        gtk_snapshot_append_layout(s, l->layout, &rgba);
+    else
+    {
+        /* Lines above the last one, then the last line's kept side of the cutoff. */
+        const pg_line *last = &l->lines[l->count - 1];
+        float top = (float)last->bounds.origin.y, cut = (float)(l->cutoff - l->shift);
+        graphene_rect_t above = GRAPHENE_RECT_INIT(-1e5f, -1e5f, 2e5f, 1e5f + top);
+        graphene_rect_t kept = l->cutoff_left
+                                   ? GRAPHENE_RECT_INIT(cut, top, 1e5f, (float)last->bounds.size.height)
+                                   : GRAPHENE_RECT_INIT(-1e5f, top, 1e5f + cut, (float)last->bounds.size.height);
+        gtk_snapshot_push_clip(s, &above);
+        gtk_snapshot_append_layout(s, l->layout, &rgba);
+        gtk_snapshot_pop(s);
+        gtk_snapshot_push_clip(s, &kept);
+        gtk_snapshot_append_layout(s, l->layout, &rgba);
+        gtk_snapshot_pop(s);
+    }
     if (l->clip_height > 0)
         gtk_snapshot_pop(s);
+    if (l->token)
+    {
+        graphene_point_t token = {(float)(l->token_at.x - l->shift), (float)l->token_at.y};
+        gtk_snapshot_translate(s, &token);
+        gtk_snapshot_append_layout(s, l->token, l->token_colored ? &l->token_color : &rgba);
+    }
     gtk_snapshot_restore(s);
     done(l);
 }

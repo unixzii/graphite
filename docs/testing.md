@@ -63,5 +63,6 @@ keep timing runs separate from instrumented allocation runs and builds.
 systems are tested by the conformance suite's `text` cases, which every
 backend with a text system runs: wrapping, line limits, ellipsis, bidi,
 grapheme boundaries, caret and selection queries, concurrency and drawing.
-They assert relations across platforms; captures cover rasterization per
-platform. Paint-only changes are not covered yet.
+They assert relations across platforms, including the behaviors where native
+engines disagree (ellipsis at paragraph breaks, bidi caret affinity, letter
+spacing); captures cover rasterization per platform.

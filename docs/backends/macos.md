@@ -51,7 +51,11 @@ conformance suite's text cases) lays text out with CoreText:
   keeps them consistent.
 - Selection rectangles come from `CTLineEnumerateCaretOffsets`, merged per
   line, so a range across a direction change yields one rectangle per visual
-  piece.
+  piece. Carets use the same grapheme edges: `CTLineGetOffsetForStringIndex`'s
+  primary offset is the opposite edge from the affinity's at a direction
+  change.
+- Letter spacing is `kCTTrackingAttributeName`, which already goes between
+  graphemes only.
 - Layout is built on first use under an `os_unfair_lock` and is immutable
   afterwards, so queries are safe from any thread.
 
