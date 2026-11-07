@@ -138,6 +138,12 @@ void gr_cg_replay(CGContextRef c, const gr_display_list *list)
                     gr_ct_draw_layout(c, op->value.text_layout.layout, op->value.text_layout.origin,
                                       op->value.text_layout.color);
                 break;
+            case GR_DRAW_TEXT_GLYPHS:
+                if (gr_text_layout_get_vtable(op->value.text_glyphs.layout) == &gr_ct_layout_vtable)
+                    gr_ct_draw_glyphs(c, op->value.text_glyphs.layout, op->value.text_glyphs.line,
+                                      op->value.text_glyphs.glyphs, op->value.text_glyphs.origin,
+                                      op->value.text_glyphs.color);
+                break;
             case GR_DRAW_IMAGE:
             {
                 CGImageRef image = gr_cg_image(op->value.image.image);

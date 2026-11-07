@@ -53,6 +53,14 @@ conformance suite's text cases) lays text out with CoreText:
   draw color first; otherwise those underlines come out black.
 - CoreText draws no strikethrough, so it is a rectangle from the run's font
   metrics. It does not skip glyphs (browsers do not either).
+- Glyph font identities key on the PostScript name, `CTFontCopyVariation` and
+  the font matrix (synthetic oblique). Size matters only through variation
+  axes: SF's optical size axis makes 14 pt and 28 pt different faces.
+- **Glyph ranges draw with `CTRunDraw` over glyph subranges**, not
+  `CTFontDrawGlyphs`. Under the replay's y-down transform, `CTFontDrawGlyphs`
+  (with either a flipped text matrix or a flipped CTM) and `CTRunDraw` with a
+  flipped CTM place bitmap (sbix) emoji one device pixel off; only `CTRunDraw`
+  with the flipped text matrix matches whole-layout drawing.
 - Selection rectangles come from `CTLineEnumerateCaretOffsets`, merged per
   line, so a range across a direction change yields one rectangle per visual
   piece. Carets use the same grapheme edges: `CTLineGetOffsetForStringIndex`'s

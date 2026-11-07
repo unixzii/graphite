@@ -20,7 +20,7 @@
   conformance suite and has a real-window test.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
   border widths snap to device pixels), shadow spread.
-- **Conformance suite**: 26 semantic, 7 measured and 14 text cases at 1×, 1.5×
+- **Conformance suite**: 26 semantic, 7 measured and 18 text cases at 1×, 1.5×
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
@@ -167,6 +167,19 @@ and M2 below: CoreText (`gr_macos_text_system_new`), Pango
     `pango_layout_line_get_x_ranges`
   - DirectWrite: `HitTestPoint`, `HitTestTextPosition` and `HitTestTextRange`
 
+### Glyphs (done)
+
+`gr_text_layout_get_glyphs` lists a line's glyphs in visual order with their
+position, advance, ink bounds, cluster and flags (right-to-left, ellipsis), and
+`gr_canvas_draw_text_glyphs` draws a glyph range of one line with the layout
+box at any origin, so glyphs can be animated or placed one by one. Each glyph
+carries its glyph index, em size and a font face identity (face, variation
+axis values and synthetic bold or oblique, not size) that compares across
+layouts of one text system, so equal glyphs can be matched between layouts.
+Glyph drawing leaves out underline and strikethrough. Per-glyph positions in
+one call (text on a path) and glyph outlines would come next, through a font
+object reachable from the font identity.
+
 ### Testing
 
 The conformance suite's `text` cases (`conformance/text.c`) run against every
@@ -177,8 +190,10 @@ ellipsis hit testing and the ellipsis at paragraph breaks, alignment by
 paragraph direction, monotonic carets that round-trip through hit testing,
 caret affinity at direction changes, RTL hit testing, grapheme cluster stops,
 bidi selection pieces, letter spacing between graphemes, paint-only color,
-weight, italic and strikethrough, concurrent queries, and drawing (upright,
-inside its box, no color leaks, underline). Writing these found and fixed
+weight, italic and strikethrough, concurrent queries, drawing (upright, inside
+its box, no color leaks, underline), and glyphs (clusters for emoji and RTL,
+ellipsis glyphs, glyph ranges redrawing the layout pixel for pixel, placement
+by origin). Writing these found and fixed
 backend disagreements: macOS and GTK placed bidi carets on the opposite
 edges, GTK and Windows dropped the ellipsis when the cut fell at a paragraph
 break, Windows added spacing after the last grapheme and measured lines

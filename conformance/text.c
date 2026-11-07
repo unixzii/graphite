@@ -622,3 +622,238 @@ void text_ellipsis_marks_a_cut_at_a_paragraph_break(ctx *c)
                "nothing drawn after the text");
     gr_text_layout_unref(layout);
 }
+
+static size_t glyphs_of(gr_text_layout *layout, size_t line, gr_text_glyph *glyphs, size_t capacity)
+{
+    size_t count = gr_text_layout_get_glyphs(layout, line, glyphs, capacity);
+    return count < capacity ? count : capacity;
+}
+
+void text_glyphs_describe_lines(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_glyph g[64];
+    gr_text_layout *layout = layout_of(c, STR("Hello world"), gr_text_layout_options_default());
+    size_t n = glyphs_of(layout, 0, g, 64);
+    CHECK(n == gr_text_layout_get_glyphs(layout, 0, NULL, 0) && n >= 10);
+    CHECK(gr_text_layout_get_glyphs(layout, 1, g, 64) == 0);
+    double advance = 0;
+    bool covered[11] = {false};
+    for (size_t i = 0; i < n; ++i)
+    {
+        CHECK(!i || g[i].position.x >= g[i - 1].position.x);
+        CHECK(g[i].cluster.start < g[i].cluster.end && g[i].cluster.end <= 11 && !g[i].flags);
+        for (size_t k = g[i].cluster.start; k < g[i].cluster.end && k < 11; ++k)
+            covered[k] = true;
+        advance += g[i].advance;
+    }
+    for (size_t k = 0; k < 11; ++k)
+        CHECK(covered[k]);
+    expect_near(c, "advances add up to the line", advance, line(layout, 0).bounds.size.width, 1);
+    CHECK(g[0].bounds.size.width > 2 && g[0].bounds.size.height > 5 && g[0].position.y == line(layout, 0).baseline);
+    for (size_t i = 0; i < n; ++i)
+        if (g[i].cluster.start == 5) /* The space has no ink. */
+            CHECK(g[i].bounds.size.width == 0 || g[i].bounds.size.height == 0);
+    gr_text_layout_unref(layout);
+
+    /* A ZWJ emoji sequence is one cluster, however many glyphs draw it. */
+    layout = layout_of(c, STR("\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB"), gr_text_layout_options_default());
+    n = glyphs_of(layout, 0, g, 64);
+    CHECK(n >= 1);
+    for (size_t i = 0; i < n; ++i)
+        CHECK(g[i].cluster.start == 0 && g[i].cluster.end == 11);
+    gr_text_layout_unref(layout);
+
+    /* Right-to-left glyphs come in visual order: the logical first letter is rightmost. */
+    layout = layout_of(c, STR("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"), gr_text_layout_options_default());
+    n = glyphs_of(layout, 0, g, 64);
+    CHECK(n == 4 && (g[0].flags & GR_TEXT_GLYPH_RTL) && g[0].cluster.start == 6 && g[3].cluster.start == 0);
+    gr_text_layout_unref(layout);
+
+    /* Separators have no glyphs. */
+    layout = layout_of(c, STR("a\nb"), gr_text_layout_options_default());
+    CHECK(gr_text_layout_get_glyphs(layout, 0, NULL, 0) == 1 && gr_text_layout_get_glyphs(layout, 1, NULL, 0) == 1);
+    gr_text_layout_unref(layout);
+
+    /* An ellipsis is listed where it is drawn, covering the elided text. */
+    gr_text_layout_options o = width(80);
+    o.max_lines = 2;
+    o.truncation = GR_TEXT_TRUNCATE_END;
+    layout = layout_of(c, PANGRAM, o);
+    gr_text_line last = line(layout, 1);
+    n = glyphs_of(layout, 1, g, 64);
+    size_t elided = gr_text_layout_hit_test(layout, (gr_point){79, last.baseline}).index;
+    CHECK(n >= 2 && (g[n - 1].flags & GR_TEXT_GLYPH_ELLIPSIS) && !(g[0].flags & GR_TEXT_GLYPH_ELLIPSIS));
+    CHECK(g[n - 1].cluster.start == elided && g[n - 1].cluster.end == PANGRAM.count);
+    for (size_t i = 0; i < n; ++i)
+        CHECK((g[i].flags & GR_TEXT_GLYPH_ELLIPSIS) || g[i].cluster.end <= elided);
+    gr_text_layout_unref(layout);
+}
+
+typedef struct
+{
+    gr_text_layout *layout;
+    gr_point origin;
+    gr_color color;
+    bool single; /* Every glyph as its own range, else every line as one range. */
+} glyph_drawing;
+
+static void draw_glyphs(void *userdata, gr_canvas *canvas, const gr_draw_info *info)
+{
+    (void)info;
+    const glyph_drawing *d = userdata;
+    size_t lines = gr_text_layout_get_metrics(d->layout).line_count;
+    for (size_t l = 0; l < lines; ++l)
+    {
+        size_t n = gr_text_layout_get_glyphs(d->layout, l, NULL, 0);
+        if (d->single)
+            for (size_t i = 0; i < n; ++i)
+                API(gr_canvas_draw_text_glyphs(canvas, d->layout, l, (gr_glyph_range){i, i + 1}, d->origin, d->color));
+        else
+            API(gr_canvas_draw_text_glyphs(canvas, d->layout, l, (gr_glyph_range){0, n}, d->origin, d->color));
+    }
+}
+
+static void free_glyphs(void *userdata)
+{
+    glyph_drawing *d = userdata;
+    gr_text_layout_unref(d->layout);
+    free(d);
+}
+
+static void show_glyphs(ctx *c, gr_scene *s, gr_text_layout *layout, gr_point origin, bool single)
+{
+    glyph_drawing *d = malloc(sizeof(*d));
+    if (!d)
+        abort();
+    *d = (glyph_drawing){gr_text_layout_ref(layout), origin, color(RED), single};
+    gr_layer *l = new_layer(c, s, GR_LAYER_CONTENT);
+    API(gr_layer_set_frame(l, RECT(0, 0, 100, 100)));
+    gr_drawer drawer = {d, draw_glyphs, free_glyphs};
+    API(gr_content_layer_set_drawer(l, &drawer));
+    API(gr_layer_add_child(gr_scene_get_root(s), l));
+}
+
+/* Counts pixels whose channels differ by more than 48 between two equal-height bands shift apart. */
+static size_t band_difference(const frame *f, double top, double height, double shift, size_t *inked_pixels)
+{
+    const gr_conf_pixels *p = &f->pixels;
+    uint32_t y0 = (uint32_t)lround(top * f->scale), rows = (uint32_t)lround(height * f->scale);
+    uint32_t offset = (uint32_t)lround(shift * f->scale);
+    size_t differ = 0, inked_count = 0;
+    for (uint32_t y = y0; y < y0 + rows && y + offset < p->height; ++y)
+        for (uint32_t x = 0; x < p->width; ++x)
+        {
+            const uint8_t *u = p->data + ((size_t)y * p->width + x) * 4;
+            const uint8_t *v = p->data + ((size_t)(y + offset) * p->width + x) * 4;
+            inked_count += u[3] > 64;
+            for (int k = 0; k < 4; ++k)
+                if (abs((int)u[k] - (int)v[k]) > 48)
+                {
+                    ++differ;
+                    break;
+                }
+        }
+    *inked_pixels = inked_count;
+    return differ;
+}
+
+void text_glyph_ranges_redraw_the_layout(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    /* Two lines with a colored span; no decorations, which glyph drawing leaves out. */
+    gr_text_span spans[2] = {{{3, 8}, GR_TEXT_STYLE_COLOR, gr_text_style_default()},
+                             {{0, 16}, GR_TEXT_STYLE_SIZE, gr_text_style_default()}};
+    spans[0].style.color = color(BLUE);
+    spans[1].style.size = 11;
+    gr_text_layout *layout = layout_with(c, STR("Ag gyp\nfine \xF0\x9F\x98\x80"), (gr_text_span_list){spans, 2},
+                                         gr_text_layout_options_default());
+    /* Even offsets keep the three drawings on the same device pixel phase at 1.5x too. */
+    double height = gr_text_layout_get_metrics(layout).size.height, step = 2 * ceil((height + 1) / 2);
+    CHECK(2 + 3 * step < 100);
+    gr_scene *s = new_scene(c);
+    show(c, s, layout, POINT(4, 2), color(RED));
+    show_glyphs(c, s, layout, POINT(4, 2 + step), false);
+    show_glyphs(c, s, layout, POINT(4, 2 + 2 * step), true);
+    frame *f = render(c, s);
+    size_t ink = 0, ink2 = 0;
+    size_t lines = band_difference(f, 2, step, step, &ink);
+    size_t singles = band_difference(f, 2, step, 2 * step, &ink2);
+    conf_check(c, ink > 50 && lines <= ink / 50, "line ranges differ in %zu of %zu inked pixels", lines, ink);
+    conf_check(c, singles <= ink / 20, "single glyphs differ in %zu of %zu inked pixels", singles, ink);
+    gr_text_layout_unref(layout);
+}
+
+static void draw_one_glyph(void *userdata, gr_canvas *canvas, const gr_draw_info *info)
+{
+    (void)info;
+    const text_drawing *d = userdata;
+    API(gr_canvas_draw_text_glyphs(canvas, d->layout, 0, (gr_glyph_range){1, 2}, d->origin, d->color));
+}
+
+void text_glyphs_draw_where_their_origin_puts_them(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_layout *layout = layout_of(c, STR("Wg"), gr_text_layout_options_default());
+    gr_text_glyph g[4];
+    CHECK(glyphs_of(layout, 0, g, 4) == 2);
+    /* Draw "g" alone so that its origin lands at (50, 60). */
+    gr_point target = POINT(50, 60);
+    gr_point origin = POINT(target.x - g[1].position.x, target.y - g[1].position.y);
+    gr_rect ink = g[1].bounds;
+    ink.origin.x += origin.x;
+    ink.origin.y += origin.y;
+    gr_scene *s = new_scene(c);
+    text_drawing *d = malloc(sizeof(*d));
+    if (!d)
+        abort();
+    *d = (text_drawing){gr_text_layout_ref(layout), origin, color(RED)};
+    gr_layer *l = new_layer(c, s, GR_LAYER_CONTENT);
+    API(gr_layer_set_frame(l, RECT(0, 0, 100, 100)));
+    gr_drawer drawer = {d, draw_one_glyph, free_text};
+    API(gr_content_layer_set_drawer(l, &drawer));
+    API(gr_layer_add_child(gr_scene_get_root(s), l));
+    frame *f = render(c, s);
+    size_t inside = inked(f, RECT(ink.origin.x - 1, ink.origin.y - 1, ink.size.width + 2, ink.size.height + 2));
+    size_t all = inked(f, RECT(0, 0, 100, 100));
+    conf_check(c, inside > 10 && inside == all, "%zu of %zu inked pixels inside the glyph's bounds", inside, all);
+    /* The descender reaches below the target baseline. */
+    CHECK(inked(f, RECT(ink.origin.x, target.y + 1, ink.size.width, 10)) > 0);
+    gr_text_layout_unref(layout);
+}
+
+void text_glyphs_identify_font_and_glyph(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_glyph a[16], b[16], bold[16], emoji[16];
+    gr_text_layout *hello = layout_of(c, STR("Hello"), gr_text_layout_options_default());
+    gr_text_layout *help = layout_of(c, STR("Help"), gr_text_layout_options_default());
+    gr_text_span heavy = {{0, 5}, GR_TEXT_STYLE_WEIGHT, gr_text_style_default()};
+    heavy.style.weight = 700;
+    gr_text_layout *strong =
+        layout_with(c, STR("Hello"), (gr_text_span_list){&heavy, 1}, gr_text_layout_options_default());
+    gr_text_layout *smile = layout_of(c, STR("H\xF0\x9F\x98\x80"), gr_text_layout_options_default());
+    CHECK(glyphs_of(hello, 0, a, 16) == 5 && glyphs_of(help, 0, b, 16) == 4);
+    CHECK(glyphs_of(strong, 0, bold, 16) == 5 && glyphs_of(smile, 0, emoji, 16) >= 2);
+
+    /* The same letter in the same font and size is the same glyph across layouts. */
+    CHECK(a[0].font && a[0].font == b[0].font && a[0].glyph == b[0].glyph && a[0].font_size == b[0].font_size);
+    CHECK(a[2].glyph == b[2].glyph && a[2].glyph == a[3].glyph);
+    expect_near(c, "font size", a[0].font_size, 14, 1e-6);
+    /* Different letters are different glyphs of one font. */
+    CHECK(a[0].font == a[1].font && a[0].glyph != a[1].glyph);
+    /* Bold is another face, or another position on a weight axis. */
+    CHECK(bold[0].font && bold[0].font != a[0].font);
+    /* Emoji come from a fallback font. */
+    CHECK(emoji[0].font == a[0].font && emoji[0].glyph == a[0].glyph);
+    for (size_t i = 1; i < 2; ++i)
+        CHECK(emoji[i].font && emoji[i].font != a[0].font);
+    gr_text_layout_unref(smile);
+    gr_text_layout_unref(strong);
+    gr_text_layout_unref(help);
+    gr_text_layout_unref(hello);
+}

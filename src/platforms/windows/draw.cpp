@@ -203,6 +203,12 @@ void replay(ID2D1DeviceContext *dc, ID2D1Factory1 *factory, gr_display_list cons
                         draw_text_layout(dc, op.value.text_layout.layout, op.value.text_layout.origin,
                                          op.value.text_layout.color, state.alpha);
                     break;
+                case GR_DRAW_TEXT_GLYPHS:
+                    if (gr_text_layout_get_vtable(op.value.text_glyphs.layout) == &dwrite_layout_vtable)
+                        draw_text_glyphs(dc, op.value.text_glyphs.layout, op.value.text_glyphs.line,
+                                         op.value.text_glyphs.glyphs, op.value.text_glyphs.origin,
+                                         op.value.text_glyphs.color, state.alpha);
+                    break;
             }
         }
     }

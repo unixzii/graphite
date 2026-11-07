@@ -34,6 +34,9 @@ static void release_op(gr_draw_op *op)
         case GR_DRAW_TEXT_LAYOUT:
             gr_text_layout_unref(op->value.text_layout.layout);
             break;
+        case GR_DRAW_TEXT_GLYPHS:
+            gr_text_layout_unref(op->value.text_glyphs.layout);
+            break;
         default:
             break;
     }
@@ -180,6 +183,23 @@ gr_result gr_canvas_draw_text_layout(gr_canvas *c, gr_text_layout *layout, gr_po
     op.value.text_layout.layout = gr_text_layout_ref(layout);
     op.value.text_layout.origin = origin;
     op.value.text_layout.color = color;
+    push(c, op);
+    return GR_OK;
+}
+
+gr_result gr_canvas_draw_text_glyphs(gr_canvas *c, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
+                                     gr_point origin, gr_color color)
+{
+    if (!layout || !gr_valid_point(origin) || !gr_valid_color(color) || glyphs.start > glyphs.end ||
+        line >= gr_text_layout_get_metrics(layout).line_count ||
+        glyphs.end > gr_text_layout_get_glyphs(layout, line, NULL, 0))
+        return GR_ERROR_ARGUMENT;
+    gr_draw_op op = {.kind = GR_DRAW_TEXT_GLYPHS};
+    op.value.text_glyphs.layout = gr_text_layout_ref(layout);
+    op.value.text_glyphs.line = line;
+    op.value.text_glyphs.glyphs = glyphs;
+    op.value.text_glyphs.origin = origin;
+    op.value.text_glyphs.color = color;
     push(c, op);
     return GR_OK;
 }

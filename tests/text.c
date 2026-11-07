@@ -249,6 +249,33 @@ static size_t fake_range_rects(void *data, gr_text_range range, gr_rect *rects, 
     return 1;
 }
 
+/* One 7 pt glyph per code point of the line, excluding its separator. */
+static size_t fake_glyphs(void *data, size_t index, gr_text_glyph *glyphs, size_t capacity)
+{
+    fake_layout *f = data;
+    CHECK(index < f->lines && (capacity ? glyphs != NULL : glyphs == NULL));
+    gr_text_line l;
+    fake_line(data, index, &l);
+    size_t count = 0;
+    for (size_t i = l.range.start; i < l.range.end; ++i)
+    {
+        unsigned char c = (unsigned char)f->utf8.data[i];
+        if (c == '\n' || (c & 0xC0) == 0x80)
+            continue;
+        size_t end = i + 1;
+        while (end < l.range.end && ((unsigned char)f->utf8.data[end] & 0xC0) == 0x80)
+            ++end;
+        if (count < capacity)
+        {
+            double x = 7.0 * (double)(i - l.range.start);
+            glyphs[count] = (gr_text_glyph){
+                {x, l.baseline}, 7, {{x, l.baseline - 6}, {6, 6}}, {i, end}, 0, 1, 14, (unsigned char)f->utf8.data[i]};
+        }
+        ++count;
+    }
+    return count;
+}
+
 static void fake_layout_destroy(void *data)
 {
     fake_layout *f = data;
@@ -257,7 +284,8 @@ static void fake_layout_destroy(void *data)
 }
 
 static const gr_text_layout_vtable fake_layout_vtable = {
-    fake_metrics, fake_line, fake_next, fake_previous, fake_hit, fake_caret, fake_range_rects, fake_layout_destroy,
+    fake_metrics, fake_line,        fake_next,   fake_previous,       fake_hit,
+    fake_caret,   fake_range_rects, fake_glyphs, fake_layout_destroy,
 };
 
 static gr_text_layout *fake_layout_text(void *data, gr_attributed_text *text, const gr_text_layout_options *options)
@@ -436,6 +464,36 @@ static void canvas_text(void)
     CHECK(ops.count == 1 && ops.data[0].kind == GR_DRAW_TEXT_LAYOUT);
     CHECK(ops.data[0].value.text_layout.layout == layout && ops.data[0].value.text_layout.origin.y == 4);
     CHECK(ops.data[0].value.text_layout.color.r == 1);
+    gr_display_list_unref(list);
+    CHECK(state.destroyed == 2);
+
+    /* Glyph ranges are validated against the line's glyph list. */
+    system = fake_system_new(&state);
+    text = plain(STR("ab\xC3\xA9\ncd"));
+    layout = gr_text_system_layout(system, text, &options);
+    gr_attributed_text_unref(text);
+    gr_text_system_unref(system);
+    gr_text_glyph glyphs[4];
+    CHECK(gr_text_layout_get_glyphs(layout, 0, NULL, 0) == 3);
+    CHECK(gr_text_layout_get_glyphs(layout, 0, glyphs, 4) == 3);
+    CHECK(glyphs[2].cluster.start == 2 && glyphs[2].cluster.end == 4 && glyphs[2].position.x == 14);
+    CHECK(gr_text_layout_get_glyphs(layout, 1, glyphs, 1) == 2 && glyphs[0].cluster.start == 5);
+    CHECK(gr_text_layout_get_glyphs(layout, 2, glyphs, 4) == 0);
+    gr_point at = {1, 2};
+    CHECK(gr_canvas_draw_text_glyphs(canvas, NULL, 0, (gr_glyph_range){0, 1}, at, red) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_draw_text_glyphs(canvas, layout, 2, (gr_glyph_range){0, 0}, at, red) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_draw_text_glyphs(canvas, layout, 0, (gr_glyph_range){0, 4}, at, red) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_draw_text_glyphs(canvas, layout, 0, (gr_glyph_range){2, 1}, at, red) == GR_ERROR_ARGUMENT);
+    CHECK(gr_canvas_draw_text_glyphs(canvas, layout, 0, (gr_glyph_range){0, 1}, (gr_point){NAN, 0}, red) ==
+          GR_ERROR_ARGUMENT);
+    OK(gr_canvas_draw_text_glyphs(canvas, layout, 1, (gr_glyph_range){1, 2}, at, red));
+    OK(gr_canvas_draw_text_glyphs(canvas, layout, 0, (gr_glyph_range){3, 3}, at, red));
+    gr_text_layout_unref(layout);
+    list = gr_canvas_finish(canvas);
+    ops = gr_display_list_get_ops(list);
+    CHECK(ops.count == 2 && ops.data[0].kind == GR_DRAW_TEXT_GLYPHS && ops.data[0].value.text_glyphs.line == 1);
+    CHECK(ops.data[0].value.text_glyphs.glyphs.start == 1 && ops.data[0].value.text_glyphs.glyphs.end == 2);
+    CHECK(ops.data[0].value.text_glyphs.origin.x == 1 && state.destroyed == 0);
     gr_display_list_unref(list);
     CHECK(state.destroyed == 2);
 

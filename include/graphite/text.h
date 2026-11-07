@@ -270,11 +270,58 @@ gr_result gr_text_layout_get_caret_rect(const gr_text_layout *layout, gr_text_po
 size_t gr_text_layout_get_range_rects(const gr_text_layout *layout, gr_text_range range, gr_rect *rects,
                                       size_t capacity);
 
+/* Glyphs */
+
+/** Glyph indices within one line's glyph list. Half-open. */
+typedef struct
+{
+    size_t start, end;
+} gr_glyph_range;
+
+typedef uint32_t gr_text_glyph_flags;
+
+enum
+{
+    GR_TEXT_GLYPH_RTL = 1u,     /**< Belongs to a right-to-left run. */
+    GR_TEXT_GLYPH_ELLIPSIS = 2u /**< Part of a truncation ellipsis; cluster is the elided text. */
+};
+
+/** A positioned glyph of a line. Two glyphs with equal font and glyph have the same outline, scaled by font_size;
+ * with equal font_size too they draw the same shape, apart from position and color. Fonts compare only between
+ * layouts of one text system. Glyphs are not text: one character can take different glyphs (contextual forms,
+ * ligatures) and different characters can share one, so compare clusters to compare text. */
+typedef struct
+{
+    gr_point position;     /**< Glyph origin on the baseline, layout coordinates, glyph offsets applied. */
+    double advance;        /**< Visual advance, including letter spacing. */
+    gr_rect bounds;        /**< Ink bounds in layout coordinates; zero-sized for blank glyphs. */
+    gr_text_range cluster; /**< Text the glyph renders, shared by every glyph of a cluster (ligatures, emoji). */
+    gr_text_glyph_flags flags;
+    uint64_t font;    /**< Font face identity: face, variation axis values and synthetic bold or oblique, not size;
+                       *   never 0. Stable for the text system's lifetime. */
+    double font_size; /**< Em size in points. */
+    uint32_t glyph;   /**< Glyph index in font. */
+} gr_text_glyph;
+
+/** Writes up to capacity glyphs of visible line index in visual order (left to right); glyphs may be NULL when
+ * capacity is 0. Returns the line's glyph count, or 0 for an invalid line, so a second call can size the buffer.
+ * Paragraph separators have no glyphs; elided text has none either, while its ellipsis is listed where it is drawn.
+ * The list is fixed for the layout, so glyph indices are stable. */
+size_t gr_text_layout_get_glyphs(const gr_text_layout *layout, size_t line, gr_text_glyph *glyphs, size_t capacity);
+
 /* Drawing */
 
 /** Records drawing layout with its box origin at origin and refs layout. color (straight alpha) paints text outside
  * color spans; global alpha applies on top. Rejects nonfinite origin or invalid color. */
 gr_result gr_canvas_draw_text_layout(gr_canvas *canvas, gr_text_layout *layout, gr_point origin, gr_color color);
+
+/** Records drawing glyphs [glyphs.start, glyphs.end) of one line of layout, with the layout box origin at origin, so
+ * each glyph lands at origin + its position; place a glyph elsewhere by adjusting origin or the canvas transform.
+ * Draws glyphs only, without underline or strikethrough, so for text without decorations drawing every glyph range
+ * of every line at one origin matches gr_canvas_draw_text_layout. color and alpha work as there. Refs layout;
+ * rejects a line or range outside the layout, nonfinite origin or invalid color. */
+gr_result gr_canvas_draw_text_glyphs(gr_canvas *canvas, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
+                                     gr_point origin, gr_color color);
 
 /* Text system implementation */
 
@@ -286,7 +333,8 @@ gr_result gr_canvas_draw_text_layout(gr_canvas *canvas, gr_text_layout *layout, 
  * Implementations apply attributed text natively: the base style, then each span's selected fields in order, so
  * later spans win. Text outside color spans takes the color supplied when drawing.
  *
- * Replay: GR_DRAW_TEXT_LAYOUT ops carry {layout, origin, color}. A backend draws layouts whose vtable it
+ * Replay: GR_DRAW_TEXT_LAYOUT ops carry {layout, origin, color} and GR_DRAW_TEXT_GLYPHS ops {layout, line, glyphs,
+ * origin, color}, with a range validated against get_glyphs when recorded. A backend draws layouts whose vtable it
  * recognizes through gr_text_layout_get_vtable, using gr_text_layout_get_data, and skips the others. */
 
 /** Called only with validated arguments. layout returns a layout made by gr_text_layout_new with this system, the
@@ -308,8 +356,8 @@ gr_text_system *gr_text_system_new(const gr_text_system_vtable *vtable, void *sy
  * below the visible end, returning the first caret stop after it; for previous_caret_stop, any index in
  * (0, visible end], returning the last caret stop before it; finite points; positions at caret stops with a known
  * affinity; ranges with caret stop ends start < end within the visible range. get_range_rects receives NULL rects
- * when capacity is 0. destroy is called once, possibly on any thread, after the final layout reference is
- * released. */
+ * when capacity is 0, and get_glyphs a line below line_count and NULL glyphs when capacity is 0. destroy is called
+ * once, possibly on any thread, after the final layout reference is released. */
 typedef struct
 {
     gr_text_layout_metrics (*get_metrics)(void *layout);
@@ -319,6 +367,7 @@ typedef struct
     gr_text_position (*hit_test)(void *layout, gr_point point);
     gr_rect (*get_caret_rect)(void *layout, gr_text_position position);
     size_t (*get_range_rects)(void *layout, gr_text_range range, gr_rect *rects, size_t capacity);
+    size_t (*get_glyphs)(void *layout, size_t line, gr_text_glyph *glyphs, size_t capacity);
     void (*destroy)(void *layout);
 } gr_text_layout_vtable;
 

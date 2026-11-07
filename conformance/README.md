@@ -1,6 +1,6 @@
 # Backend conformance
 
-The suite contains **26 semantic cases, 7 measured cases and 14 text cases**,
+The suite contains **26 semantic cases, 7 measured cases and 18 text cases**,
 each at **1×, 1.5× and 2×**.
 
 ## Organization
@@ -13,7 +13,9 @@ each at **1×, 1.5× and 2×**.
 - `text.c`: text layout and rendering through the harness's native text
   system (metrics, line breaking, truncation and the ellipsis at paragraph
   breaks, alignment, carets and bidi affinity, letter spacing, paint-only
-  color, styles and decorations, threading and drawing). Fonts differ per platform, so these assert relations and
+  color, styles and decorations, threading, drawing, and glyphs: line glyph
+  lists, glyph ranges redrawing the layout, glyphs placed by origin, and font
+  and glyph identities across layouts). Fonts differ per platform, so these assert relations and
   invariants rather than exact metrics. A harness without `text_system`
   reports them as skipped.
 - `macos.m`: Core Animation host adapter; executes on the main thread.
@@ -24,8 +26,8 @@ each at **1×, 1.5× and 2×**.
 All captures are top-row-first premultiplied RGBA8. The PNG writer deliberately
 stores these bytes unchanged; it uses uncompressed
 DEFLATE blocks and introduces no image-codec dependency. Compare decoded pixels,
-not compressed PNG files. Each suite run generates 123 PNGs when all cases run
-(four text cases render).
+not compressed PNG files. Each suite run generates 129 PNGs when all cases run
+(six text cases render).
 
 ## Build and run
 

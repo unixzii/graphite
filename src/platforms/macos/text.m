@@ -25,7 +25,9 @@ typedef struct
 {
     gr_text_system *system; /* Weak: the system owns this userdata. */
     os_unfair_lock lock;
-    CFMutableDictionaryRef fonts; /* [family, size, weight, italic] -> CTFont. */
+    CFMutableDictionaryRef fonts;    /* [family, size, weight, italic] -> CTFont. */
+    CFMutableDictionaryRef font_ids; /* [PostScript name, variation, matrix] -> glyph font identity. */
+    uint64_t next_font;
 } ct_system;
 
 typedef struct
@@ -57,7 +59,26 @@ typedef struct
     ct_line *lines;
     size_t count;
     gr_text_layout_metrics metrics;
+    atomic_bool glyphs_ready;
+    struct ct_glyphs *glyphs; /* Per line, built on first use. */
 } ct_layout;
+
+/* A line's glyph and where it lives: drawing goes through CTRunDraw, the only call that places bitmap (sbix) emoji
+ * exactly under the replay's flipped text matrix. run is borrowed from the line or token. */
+typedef struct
+{
+    gr_text_glyph info;
+    CTRunRef run;
+    CFIndex index; /* Glyph index within run. */
+    gr_point pen;  /* Text position of run's line, layout coordinates on the baseline. */
+    bool from_context;
+} ct_glyph;
+
+struct ct_glyphs
+{
+    ct_glyph *data;
+    size_t count;
+};
 
 static void *zalloc(size_t count, size_t size)
 {
@@ -748,14 +769,193 @@ static void ct_layout_destroy(void *data)
         if (l->lines[i].token)
             CFRelease(l->lines[i].token);
     }
+    for (size_t i = 0; l->glyphs && i < l->count; ++i)
+        free(l->glyphs[i].data);
+    free(l->glyphs);
     free(l->lines);
     CFRelease(l->string);
     free(l);
 }
 
+/* Glyphs */
+
+/* A font face identity for glyphs: PostScript name, variation axis values (weight, optical size) and the font matrix
+ * (synthetic oblique), without size. */
+static uint64_t font_id(ct_system *s, CTFontRef font)
+{
+    NSString *name = CFBridgingRelease(CTFontCopyPostScriptName(font));
+    NSDictionary *variation = CFBridgingRelease(CTFontCopyVariation(font));
+    CGAffineTransform m = CTFontGetMatrix(font);
+    NSArray *key = @[
+        name ? name : @"", variation ? (id)variation : [NSNull null],
+        @[ @(m.a), @(m.b), @(m.c), @(m.d), @(m.tx), @(m.ty) ]
+    ];
+    os_unfair_lock_lock(&s->lock);
+    NSNumber *id = (__bridge NSNumber *)CFDictionaryGetValue(s->font_ids, (__bridge CFArrayRef)key);
+    if (!id)
+    {
+        id = @(++s->next_font);
+        CFDictionarySetValue(s->font_ids, (__bridge CFArrayRef)key, (__bridge CFNumberRef)id);
+    }
+    os_unfair_lock_unlock(&s->lock);
+    return id.unsignedLongLongValue;
+}
+
+static void append_run_glyphs(const ct_layout *l, CTRunRef run, double pen, double baseline, bool ellipsis,
+                              gr_text_range elided, struct ct_glyphs *out, size_t *capacity)
+{
+    CFIndex count = CTRunGetGlyphCount(run);
+    if (!count)
+        return;
+    NSDictionary *attributes = (__bridge NSDictionary *)CTRunGetAttributes(run);
+    CTFontRef font = (__bridge CTFontRef)attributes[CT_KEY(kCTFontAttributeName)];
+    bool from_context = [attributes[CT_KEY(kCTForegroundColorFromContextAttributeName)] boolValue];
+    bool rtl = CTRunGetStatus(run) & kCTRunStatusRightToLeft;
+    uint64_t face = font_id(l->system, font);
+    double size = CTFontGetSize(font);
+    CGGlyph *ids = zalloc((size_t)count, sizeof(*ids));
+    CGPoint *positions = zalloc((size_t)count, sizeof(*positions));
+    CGSize *advances = zalloc((size_t)count, sizeof(*advances));
+    CFIndex *indices = zalloc((size_t)count, sizeof(*indices));
+    CGRect *rects = zalloc((size_t)count, sizeof(*rects));
+    CTRunGetGlyphs(run, CFRangeMake(0, 0), ids);
+    CTRunGetPositions(run, CFRangeMake(0, 0), positions);
+    CTRunGetAdvances(run, CFRangeMake(0, 0), advances);
+    CTRunGetStringIndices(run, CFRangeMake(0, 0), indices);
+    CTFontGetBoundingRectsForGlyphs(font, kCTFontOrientationHorizontal, ids, rects, count);
+    CFRange range = CTRunGetStringRange(run);
+    for (CFIndex i = 0; i < count; ++i)
+    {
+        CFIndex at = indices[i];
+        if (!ellipsis && at < CFStringGetLength(l->string) && hard_break(CFStringGetCharacterAtIndex(l->string, at)))
+            continue;
+        /* A cluster runs to the next larger string index of the run: ligatures span characters, and several glyphs
+         * can share one index. */
+        CFIndex end = range.location + range.length;
+        for (CFIndex k = 0; k < count; ++k)
+            if (indices[k] > at && indices[k] < end)
+                end = indices[k];
+        if (*capacity == out->count)
+        {
+            *capacity = *capacity ? *capacity * 2 : 16;
+            out->data = realloc(out->data, *capacity * sizeof(*out->data));
+            if (!out->data)
+                abort();
+        }
+        double x = pen + positions[i].x, y = baseline - positions[i].y;
+        gr_rect bounds = {{x + rects[i].origin.x, y - rects[i].origin.y - rects[i].size.height},
+                          {rects[i].size.width, rects[i].size.height}};
+        gr_text_range cluster = ellipsis ? elided
+                                         : (gr_text_range){gr_attributed_text_utf8_index(l->text, (size_t)at),
+                                                           gr_attributed_text_utf8_index(l->text, (size_t)end)};
+        gr_text_glyph_flags flags = (rtl ? GR_TEXT_GLYPH_RTL : 0) | (ellipsis ? GR_TEXT_GLYPH_ELLIPSIS : 0);
+        out->data[out->count++] = (ct_glyph){{{x, y}, advances[i].width, bounds, cluster, flags, face, size, ids[i]},
+                                             run,
+                                             i,
+                                             {pen, baseline},
+                                             from_context};
+    }
+    free(ids);
+    free(positions);
+    free(advances);
+    free(indices);
+    free(rects);
+}
+
+static void sort_glyphs(ct_glyph *glyphs, size_t count)
+{
+    /* Insertion sort is stable and the glyphs are nearly sorted already (runs come in visual order). */
+    for (size_t i = 1; i < count; ++i)
+    {
+        ct_glyph g = glyphs[i];
+        size_t k = i;
+        while (k > 0 && glyphs[k - 1].info.position.x > g.info.position.x)
+        {
+            glyphs[k] = glyphs[k - 1];
+            --k;
+        }
+        glyphs[k] = g;
+    }
+}
+
+static ct_layout *glyphs_ready(void *data)
+{
+    ct_layout *l = ready(data);
+    if (atomic_load_explicit(&l->glyphs_ready, memory_order_acquire))
+        return l;
+    os_unfair_lock_lock(&l->lock);
+    if (!atomic_load_explicit(&l->glyphs_ready, memory_order_relaxed))
+    {
+        l->glyphs = zalloc(l->count, sizeof(*l->glyphs));
+        for (size_t i = 0; i < l->count; ++i)
+        {
+            const ct_line *line = &l->lines[i];
+            struct ct_glyphs *out = &l->glyphs[i];
+            size_t capacity = 0;
+            double baseline = line->top + line->ascent;
+            CFIndex end = line->units.location + line->units.length;
+            gr_text_range elided = {gr_attributed_text_utf8_index(l->text, (size_t)line->elided),
+                                    gr_attributed_text_utf8_index(l->text, (size_t)end)};
+            if (line->line)
+                for (id run in (__bridge NSArray *)CTLineGetGlyphRuns(line->line))
+                    append_run_glyphs(l, (__bridge CTRunRef)run, line->pen, baseline, false, elided, out, &capacity);
+            if (line->token)
+                for (id run in (__bridge NSArray *)CTLineGetGlyphRuns(line->token))
+                    append_run_glyphs(l, (__bridge CTRunRef)run, line->token_x, baseline, true, elided, out, &capacity);
+            sort_glyphs(out->data, out->count);
+        }
+        atomic_store_explicit(&l->glyphs_ready, true, memory_order_release);
+    }
+    os_unfair_lock_unlock(&l->lock);
+    return l;
+}
+
+static size_t ct_glyphs(void *data, size_t line, gr_text_glyph *glyphs, size_t capacity)
+{
+    ct_layout *l = glyphs_ready(data);
+    const struct ct_glyphs *list = &l->glyphs[line];
+    for (size_t i = 0; i < list->count && i < capacity; ++i)
+        glyphs[i] = list->data[i].info;
+    return list->count;
+}
+
+void gr_ct_draw_glyphs(CGContextRef c, gr_text_layout *layout, size_t line, gr_glyph_range range, gr_point origin,
+                       gr_color color)
+{
+    ct_layout *l = glyphs_ready(gr_text_layout_get_data(layout));
+    const struct ct_glyphs *list = &l->glyphs[line];
+    size_t end = range.end < list->count ? range.end : list->count;
+    if (range.start >= end)
+        return;
+    CGColorRef fill = gr_cg_color(color);
+    CGContextSaveGState(c);
+    /* Same state as whole-layout drawing: replay runs with a y-down CTM; flip glyphs back upright. */
+    CGContextSetTextMatrix(c, CGAffineTransformMakeScale(1, -1));
+    CGContextSetShouldSmoothFonts(c, false);
+    for (size_t i = range.start; i < end;)
+    {
+        /* Glyphs adjacent within one run draw together, in either direction. */
+        const ct_glyph *first = &list->data[i];
+        CFIndex lo = first->index, hi = first->index;
+        for (++i; i < end && list->data[i].run == first->run &&
+                  (list->data[i].index == hi + 1 || list->data[i].index == lo - 1);
+             ++i)
+        {
+            lo = list->data[i].index < lo ? list->data[i].index : lo;
+            hi = list->data[i].index > hi ? list->data[i].index : hi;
+        }
+        if (first->from_context)
+            CGContextSetFillColorWithColor(c, fill);
+        CGContextSetTextPosition(c, origin.x + first->pen.x, origin.y + first->pen.y);
+        CTRunDraw(first->run, c, CFRangeMake(lo, hi - lo + 1));
+    }
+    CGContextRestoreGState(c);
+    CGColorRelease(fill);
+}
+
 const gr_text_layout_vtable gr_ct_layout_vtable = {
-    ct_metrics,  ct_line_info,  ct_next_stop,   ct_previous_stop,
-    ct_hit_test, ct_caret_rect, ct_range_rects, ct_layout_destroy,
+    ct_metrics,    ct_line_info,   ct_next_stop, ct_previous_stop,  ct_hit_test,
+    ct_caret_rect, ct_range_rects, ct_glyphs,    ct_layout_destroy,
 };
 
 /* Drawing */
@@ -862,6 +1062,7 @@ static gr_text_layout *ct_layout_text(void *data, gr_attributed_text *text, cons
     l->options = *options;
     l->lock = OS_UNFAIR_LOCK_INIT;
     atomic_init(&l->ready, false);
+    atomic_init(&l->glyphs_ready, false);
     gr_utf16 units = gr_attributed_text_get_utf16(text);
     l->string = units.count
                     ? CFStringCreateWithCharactersNoCopy(NULL, units.data, (CFIndex)units.count, kCFAllocatorNull)
@@ -876,6 +1077,7 @@ static void ct_system_destroy(void *data)
 {
     ct_system *system = data;
     CFRelease(system->fonts);
+    CFRelease(system->font_ids);
     free(system);
 }
 
@@ -884,6 +1086,8 @@ gr_text_system *gr_macos_text_system_new(void)
     ct_system *system = zalloc(1, sizeof(*system));
     system->lock = OS_UNFAIR_LOCK_INIT;
     system->fonts =
+        CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    system->font_ids =
         CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     gr_text_system_vtable vtable = {ct_layout_text, ct_system_destroy};
     system->system = gr_text_system_new(&vtable, system);

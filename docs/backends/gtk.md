@@ -80,6 +80,12 @@ conformance suite's text cases) lays text out with Pango and draws it with
   paragraph break (or between unwrapped lines), the last line gets a separate
   "…" layout in its last run's font and color; graphemes are elided from the
   line's end, by clipping the second of two draws, until it fits.
+- Glyph font identities key on the HarfBuzz face (cached per file and index
+  by the font map), its design variation coordinates and synthetic bold
+  (a fraction of the em) and slant.
+- Glyph lists come from the layout iterator's runs (already in visual order),
+  and glyph ranges draw as `gsk_text_node_new` nodes over copies of the run's
+  glyph string, so their geometry matches the layout's text nodes.
 - **Carets come from grapheme edges**, not `pango_layout_get_cursor_pos`: its
   strong and weak cursors follow the paragraph direction, while affinity
   follows the grapheme (`pango_layout_index_to_pos` gives negative widths

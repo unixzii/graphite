@@ -39,6 +39,8 @@ void gr_gsk_paint_path(GtkSnapshot *snapshot, GskPath *path, gr_fill_rule rule, 
 GskRenderNode *gr_gsk_recording(const gr_display_list *list);
 extern const gr_text_layout_vtable gr_pango_layout_vtable;
 void gr_pango_draw_layout(GtkSnapshot *snapshot, gr_text_layout *layout, gr_point origin, gr_color color);
+void gr_pango_draw_glyphs(GtkSnapshot *snapshot, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
+                          gr_point origin, gr_color color);
 
 gr_gtk_shared *gr_gtk_shared_new(gr_scene *scene);
 gr_gtk_shared *gr_gtk_shared_ref(gr_gtk_shared *shared);

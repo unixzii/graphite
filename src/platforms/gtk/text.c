@@ -19,7 +19,9 @@ typedef struct
     gr_text_system *handle; /* Weak: the handle owns this userdata. */
     GMutex lock;
     PangoFontMap *font_map;
-    char *system_family; /* GTK's interface font family, used for "system-ui". */
+    char *system_family;  /* GTK's interface font family, used for "system-ui". */
+    GHashTable *font_ids; /* Face identity key -> glyph font identity; guarded by lock. */
+    uint64_t next_font;
 } pg_system;
 
 typedef struct
@@ -55,10 +57,28 @@ typedef struct
     GdkRGBA token_color;
     pg_line *lines;
     size_t count;
+    struct pg_glyphs *glyphs; /* Per line, built on first use. */
     const PangoLogAttr *attrs;
     int attr_count;
     gr_text_layout_metrics metrics;
 } pg_layout;
+
+/* A line's glyph and where it lives: run is borrowed from the layout (or the ellipsis token layout). */
+typedef struct
+{
+    gr_text_glyph info;
+    PangoGlyphItem *run;
+    int index;    /* Glyph index within run's glyph string. */
+    gr_point pen; /* Pen position of the glyph before offsets: layout coordinates on the baseline. */
+    bool colored; /* The run has its own color. */
+    GdkRGBA color;
+} pg_glyph;
+
+struct pg_glyphs
+{
+    pg_glyph *data;
+    size_t count, capacity;
+};
 
 static double from_pango(int units)
 {
@@ -620,9 +640,213 @@ static size_t pg_range_rects(void *data, gr_text_range range, gr_rect *rects, si
     return total;
 }
 
+/* Glyphs */
+
+static bool run_color(const PangoItem *item, GdkRGBA *out)
+{
+    bool colored = false;
+    *out = (GdkRGBA){0, 0, 0, 1};
+    for (GSList *a = item->analysis.extra_attrs; a; a = a->next)
+    {
+        PangoAttribute *attribute = a->data;
+        if (attribute->klass->type == PANGO_ATTR_FOREGROUND)
+        {
+            PangoColor c = ((PangoAttrColor *)attribute)->color;
+            out->red = c.red / 65535.f;
+            out->green = c.green / 65535.f;
+            out->blue = c.blue / 65535.f;
+            colored = true;
+        }
+        else if (attribute->klass->type == PANGO_ATTR_FOREGROUND_ALPHA)
+            out->alpha = ((PangoAttrInt *)attribute)->value / 65535.f;
+    }
+    return colored;
+}
+
+/* A font face identity for glyphs: the HarfBuzz face (cached per file and index by the font map), design variation
+ * coordinates and synthetic bold and slant, without size. The caller holds the system lock. */
+static uint64_t font_id(pg_system *s, PangoFont *font)
+{
+    hb_font_t *hb = pango_font_get_hb_font(font);
+    GString *key = g_string_new(NULL);
+    g_string_append_printf(key, "%p", (void *)hb_font_get_face(hb));
+    unsigned int count = 0;
+    const float *coords = hb_font_get_var_coords_design(hb, &count);
+    for (unsigned int i = 0; i < count; ++i)
+        g_string_append_printf(key, ",%g", coords[i]);
+    /* Synthetic bold is a fraction of the em, so it does not depend on size. */
+    float x = 0, y = 0;
+    hb_bool_t in_place = 0;
+    hb_font_get_synthetic_bold(hb, &x, &y, &in_place);
+    g_string_append_printf(key, "|%g,%g,%d|%g", x, y, in_place, hb_font_get_synthetic_slant(hb));
+    gpointer found = g_hash_table_lookup(s->font_ids, key->str);
+    uint64_t id;
+    if (found)
+    {
+        id = *(uint64_t *)found;
+        g_string_free(key, TRUE);
+    }
+    else
+    {
+        uint64_t *value = g_new(uint64_t, 1);
+        *value = id = ++s->next_font;
+        g_hash_table_insert(s->font_ids, g_string_free(key, FALSE), value);
+    }
+    return id;
+}
+
+/* Appends run's drawable glyphs, its first glyph's pen at x (layout coordinates) on baseline. Elided glyphs (at or
+ * after limit, when a manual ellipsis hides them) are skipped; ellipsis glyphs cover elided. */
+static void append_run_glyphs(pg_layout *l, PangoGlyphItem *run, double x, double baseline, size_t limit, bool ellipsis,
+                              gr_text_range elided, struct pg_glyphs *out)
+{
+    PangoItem *item = run->item;
+    PangoGlyphString *glyphs = run->glyphs;
+    bool rtl = item->analysis.level % 2;
+    ellipsis |= (item->analysis.flags & PANGO_ANALYSIS_FLAG_IS_ELLIPSIS) != 0;
+    GdkRGBA color;
+    bool colored = run_color(item, &color);
+    uint64_t face = font_id(l->system, item->analysis.font);
+    PangoFontDescription *description = pango_font_describe_with_absolute_size(item->analysis.font);
+    double size = from_pango(pango_font_description_get_size(description));
+    pango_font_description_free(description);
+    size_t item_end = (size_t)(item->offset + item->length);
+    double pen = x;
+    for (int g = 0; g < glyphs->num_glyphs; ++g)
+    {
+        PangoGlyphInfo *info = &glyphs->glyphs[g];
+        double advance = from_pango(info->geometry.width);
+        size_t start = (size_t)(item->offset + glyphs->log_clusters[g]), end = item_end;
+        for (int k = 0; k < glyphs->num_glyphs; ++k)
+        {
+            size_t other = (size_t)(item->offset + glyphs->log_clusters[k]);
+            if (other > start && other < end)
+                end = other;
+        }
+        bool hidden = info->glyph == PANGO_GLYPH_EMPTY || (!ellipsis && start >= limit);
+        if (!hidden)
+        {
+            if (out->count == out->capacity)
+            {
+                out->capacity = out->capacity ? out->capacity * 2 : 16;
+                out->data = g_renew(pg_glyph, out->data, out->capacity);
+            }
+            double gx = pen + from_pango(info->geometry.x_offset), gy = baseline + from_pango(info->geometry.y_offset);
+            PangoRectangle ink;
+            pango_font_get_glyph_extents(item->analysis.font, info->glyph, &ink, NULL);
+            gr_rect bounds = {{gx + from_pango(ink.x), gy + from_pango(ink.y)},
+                              {from_pango(ink.width), from_pango(ink.height)}};
+            gr_text_range cluster = ellipsis ? elided : (gr_text_range){start, end};
+            gr_text_glyph_flags flags = (rtl ? GR_TEXT_GLYPH_RTL : 0) | (ellipsis ? GR_TEXT_GLYPH_ELLIPSIS : 0);
+            out->data[out->count++] = (pg_glyph){{{gx, gy}, advance, bounds, cluster, flags, face, size, info->glyph},
+                                                 run,
+                                                 g,
+                                                 {pen, baseline},
+                                                 colored,
+                                                 color};
+        }
+        pen += advance;
+    }
+}
+
+/* Appends the glyphs of the line iter is on, visiting its runs in visual order. */
+static void append_line_glyphs(pg_layout *l, PangoLayoutIter *it, double shift, double dy, size_t limit, bool ellipsis,
+                               gr_text_range elided, struct pg_glyphs *out)
+{
+    PangoLayoutLine *line = pango_layout_iter_get_line_readonly(it);
+    double baseline = from_pango(pango_layout_iter_get_baseline(it)) + dy;
+    do
+    {
+        PangoGlyphItem *run = pango_layout_iter_get_run_readonly(it);
+        if (!run)
+            continue;
+        PangoRectangle logical;
+        pango_layout_iter_get_run_extents(it, NULL, &logical);
+        append_run_glyphs(l, run, from_pango(logical.x) + shift, baseline, limit, ellipsis, elided, out);
+    } while (pango_layout_iter_next_run(it) && pango_layout_iter_get_line_readonly(it) == line);
+}
+
+/* Builds every line's glyphs; the caller holds the system lock. */
+static void build_glyphs(pg_layout *l)
+{
+    if (l->glyphs)
+        return;
+    l->glyphs = g_new0(struct pg_glyphs, l->count);
+    PangoLayoutIter *it = pango_layout_get_iter(l->layout);
+    for (size_t i = 0; i < l->count; ++i)
+    {
+        const pg_line *line = &l->lines[i];
+        bool tokened = l->token && i + 1 == l->count;
+        gr_text_range elided = {line->caret_limit, line->range.end};
+        size_t limit = tokened ? line->caret_limit : SIZE_MAX;
+        append_line_glyphs(l, it, l->shift, 0, limit, false, elided, &l->glyphs[i]);
+        if (tokened)
+        {
+            PangoLayoutIter *token = pango_layout_get_iter(l->token);
+            /* append_line_glyphs adds the token's baseline; place its box top-left at token_at. */
+            append_line_glyphs(l, token, l->token_at.x, l->token_at.y, SIZE_MAX, true, elided, &l->glyphs[i]);
+            pango_layout_iter_free(token);
+        }
+        if (i + 1 < l->count)
+            while (pango_layout_iter_get_line_readonly(it) == pango_layout_get_line_readonly(l->layout, (int)i) &&
+                   pango_layout_iter_next_line(it))
+                ;
+    }
+    pango_layout_iter_free(it);
+}
+
+static size_t pg_glyphs(void *data, size_t line, gr_text_glyph *glyphs, size_t capacity)
+{
+    pg_layout *l = begin(data);
+    build_glyphs(l);
+    const struct pg_glyphs *list = &l->glyphs[line];
+    for (size_t i = 0; i < list->count && i < capacity; ++i)
+        glyphs[i] = list->data[i].info;
+    size_t count = list->count;
+    done(l);
+    return count;
+}
+
+void gr_pango_draw_glyphs(GtkSnapshot *s, gr_text_layout *layout, size_t line, gr_glyph_range range, gr_point origin,
+                          gr_color color)
+{
+    pg_layout *l = begin(gr_text_layout_get_data(layout));
+    build_glyphs(l);
+    const struct pg_glyphs *list = &l->glyphs[line];
+    size_t end = range.end < list->count ? range.end : list->count;
+    GdkRGBA fill = gr_gdk_color(color);
+    for (size_t i = range.start; i < end;)
+    {
+        /* Glyphs adjacent within one run become one text node, keeping their geometry. */
+        const pg_glyph *first = &list->data[i];
+        int n = 1;
+        while (i + (size_t)n < end && list->data[i + n].run == first->run &&
+               list->data[i + n].index == first->index + n)
+            ++n;
+        PangoGlyphString *glyphs = pango_glyph_string_new();
+        pango_glyph_string_set_size(glyphs, n);
+        memcpy(glyphs->glyphs, first->run->glyphs->glyphs + first->index, (size_t)n * sizeof(*glyphs->glyphs));
+        memcpy(glyphs->log_clusters, first->run->glyphs->log_clusters + first->index, (size_t)n * sizeof(int));
+        graphene_point_t at = {(float)(origin.x + first->pen.x), (float)(origin.y + first->pen.y)};
+        GskRenderNode *node =
+            gsk_text_node_new(first->run->item->analysis.font, glyphs, first->colored ? &first->color : &fill, &at);
+        if (node)
+        {
+            gtk_snapshot_append_node(s, node);
+            gsk_render_node_unref(node);
+        }
+        pango_glyph_string_free(glyphs);
+        i += (size_t)n;
+    }
+    done(l);
+}
+
 static void pg_layout_destroy(void *data)
 {
     pg_layout *l = data;
+    for (size_t i = 0; l->glyphs && i < l->count; ++i)
+        g_free(l->glyphs[i].data);
+    g_free(l->glyphs);
     if (l->layout)
         g_object_unref(l->layout);
     if (l->token)
@@ -634,8 +858,8 @@ static void pg_layout_destroy(void *data)
 }
 
 const gr_text_layout_vtable gr_pango_layout_vtable = {
-    pg_metrics,  pg_line_info,  pg_next_stop,   pg_previous_stop,
-    pg_hit_test, pg_caret_rect, pg_range_rects, pg_layout_destroy,
+    pg_metrics,    pg_line_info,   pg_next_stop, pg_previous_stop,  pg_hit_test,
+    pg_caret_rect, pg_range_rects, pg_glyphs,    pg_layout_destroy,
 };
 
 /* Drawing */
@@ -726,6 +950,7 @@ static void pg_system_destroy(void *data)
 {
     pg_system *system = data;
     g_object_unref(system->font_map);
+    g_hash_table_destroy(system->font_ids);
     g_free(system->system_family);
     g_mutex_clear(&system->lock);
     g_free(system);
@@ -736,6 +961,7 @@ gr_text_system *gr_gtk_text_system_new(void)
     pg_system *system = g_new0(pg_system, 1);
     g_mutex_init(&system->lock);
     system->font_map = pango_cairo_font_map_new();
+    system->font_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     system->system_family = g_strdup("sans-serif");
     GtkSettings *settings = gtk_settings_get_default();
     if (settings)

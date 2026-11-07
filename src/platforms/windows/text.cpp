@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include <d2d1_3.h>
 #include <dwrite_3.h>
 #include <icu.h>
 #include <mutex>
@@ -23,7 +24,48 @@ struct TextSystem
 {
     gr_text_system *handle = nullptr; // Weak: the handle owns this userdata.
     com_ptr<IDWriteFactory> factory;
+    std::mutex fonts;
+    std::unordered_map<std::string, uint64_t> font_ids; // Face identity key -> glyph font identity.
+    uint64_t next_font = 0;
 };
+
+/* A font face identity for glyphs: font files (loader and reference key), face index, simulations (synthetic bold
+ * or oblique) and variation axis values, without size. */
+uint64_t font_id(TextSystem *s, IDWriteFontFace *face)
+{
+    std::string key;
+    UINT32 count = 0;
+    check_hresult(face->GetFiles(&count, nullptr));
+    std::vector<IDWriteFontFile *> files(count);
+    check_hresult(face->GetFiles(&count, files.data()));
+    for (auto file : files)
+    {
+        void const *reference = nullptr;
+        UINT32 size = 0;
+        com_ptr<IDWriteFontFileLoader> loader;
+        if (SUCCEEDED(file->GetReferenceKey(&reference, &size)) && SUCCEEDED(file->GetLoader(loader.put())))
+        {
+            key += std::to_string(reinterpret_cast<uintptr_t>(loader.get())) + ":";
+            key.append(static_cast<char const *>(reference), size);
+            key += "|";
+        }
+        file->Release();
+    }
+    key += std::to_string(face->GetIndex()) + "|" + std::to_string(face->GetSimulations());
+    com_ptr<IDWriteFontFace5> variable;
+    if (SUCCEEDED(face->QueryInterface(IID_PPV_ARGS(variable.put()))))
+    {
+        std::vector<DWRITE_FONT_AXIS_VALUE> axes(variable->GetFontAxisValueCount());
+        if (!axes.empty() && SUCCEEDED(variable->GetFontAxisValues(axes.data(), static_cast<UINT32>(axes.size()))))
+            for (auto const &axis : axes)
+                key += "|" + std::to_string(axis.axisTag) + "=" + std::to_string(axis.value);
+    }
+    std::lock_guard<std::mutex> guard(s->fonts);
+    auto [it, added] = s->font_ids.try_emplace(key, 0);
+    if (added)
+        it->second = ++s->next_font;
+    return it->second;
+}
 
 struct Line
 {
@@ -40,6 +82,30 @@ struct ColorSpan
 {
     DWRITE_TEXT_RANGE range;
     gr_color color;
+};
+
+/* A glyph run copied from IDWriteTextLayout::Draw. */
+struct GlyphRun
+{
+    com_ptr<IDWriteFontFace> face;
+    float size = 0;
+    BOOL sideways = FALSE;
+    UINT32 level = 0;
+    std::vector<UINT16> ids;
+    std::vector<float> advances;
+    std::vector<DWRITE_GLYPH_OFFSET> offsets;
+    std::vector<UINT16> cluster_map; // Empty for the ellipsis, whose glyphs have no text.
+    UINT32 text = 0;                 // UTF-16 position of the run's text.
+    D2D1_POINT_2F origin{};          // Baseline origin, layout coordinates.
+    bool ellipsis = false;
+};
+
+struct GlyphRef
+{
+    gr_text_glyph info;
+    size_t run;
+    UINT32 index;                  // Glyph index within the run.
+    std::optional<gr_color> color; // From a color span or the ellipsis; otherwise the draw color.
 };
 
 struct TextLayout
@@ -62,6 +128,9 @@ struct TextLayout
     double cutoff = NAN; // NAN, or the x beyond which the last line's glyphs are hidden.
     std::optional<gr_color> token_color;
     gr_text_layout_metrics metrics{};
+    bool glyphs_ready = false;
+    std::vector<GlyphRun> runs;
+    std::vector<std::vector<GlyphRef>> glyphs; // Per visible line, in visual order.
 };
 
 std::wstring family_name(gr_string family)
@@ -584,6 +653,278 @@ size_t dw_range_rects(void *data, gr_text_range range, gr_rect *rects, size_t ca
     return total;
 }
 
+/* Glyphs */
+
+/* Records the glyph runs IDWriteTextLayout::Draw produces; the ellipsis sign is an inline object drawing through it. */
+struct Collector final : IDWriteTextRenderer
+{
+    std::vector<GlyphRun> runs;
+    bool ellipsis = false;
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override
+    {
+        if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWritePixelSnapping) || iid == __uuidof(IDWriteTextRenderer))
+        {
+            *out = static_cast<IDWriteTextRenderer *>(this);
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override
+    {
+        return 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        return 1;
+    }
+
+    HRESULT STDMETHODCALLTYPE IsPixelSnappingDisabled(void *, BOOL *out) override
+    {
+        *out = TRUE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetCurrentTransform(void *, DWRITE_MATRIX *out) override
+    {
+        *out = {1, 0, 0, 1, 0, 0};
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetPixelsPerDip(void *, FLOAT *out) override
+    {
+        *out = 1;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DrawGlyphRun(void *, FLOAT x, FLOAT y, DWRITE_MEASURING_MODE, DWRITE_GLYPH_RUN const *run,
+                                           DWRITE_GLYPH_RUN_DESCRIPTION const *description, IUnknown *) override
+    {
+        GlyphRun copy;
+        copy.face.copy_from(run->fontFace);
+        copy.size = run->fontEmSize;
+        copy.sideways = run->isSideways;
+        copy.level = run->bidiLevel;
+        copy.ids.assign(run->glyphIndices, run->glyphIndices + run->glyphCount);
+        copy.advances.assign(run->glyphAdvances, run->glyphAdvances + run->glyphCount);
+        if (run->glyphOffsets)
+            copy.offsets.assign(run->glyphOffsets, run->glyphOffsets + run->glyphCount);
+        else
+            copy.offsets.assign(run->glyphCount, DWRITE_GLYPH_OFFSET{});
+        if (!ellipsis && description && description->clusterMap)
+        {
+            copy.cluster_map.assign(description->clusterMap, description->clusterMap + description->stringLength);
+            copy.text = description->textPosition;
+        }
+        copy.origin = {x, y};
+        copy.ellipsis = ellipsis;
+        runs.push_back(std::move(copy));
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DrawUnderline(void *, FLOAT, FLOAT, DWRITE_UNDERLINE const *, IUnknown *) override
+    {
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DrawStrikethrough(void *, FLOAT, FLOAT, DWRITE_STRIKETHROUGH const *, IUnknown *) override
+    {
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DrawInlineObject(void *context, FLOAT x, FLOAT y, IDWriteInlineObject *object,
+                                               BOOL sideways, BOOL rtl, IUnknown *effect) override
+    {
+        bool outer = ellipsis;
+        ellipsis = true;
+        HRESULT hr = object->Draw(context, this, x, y, sideways, rtl, effect);
+        ellipsis = outer;
+        return hr;
+    }
+};
+
+/* Builds every visible line's glyphs; the caller holds the layout's lock. */
+void build_glyphs(TextLayout *l)
+{
+    if (l->glyphs_ready)
+        return;
+    l->glyphs_ready = true;
+    l->glyphs.assign(l->lines.size(), {});
+    if (!l->layout)
+        return;
+    Collector collector;
+    check_hresult(l->layout->Draw(nullptr, &collector, 0, 0));
+    if (l->token)
+    {
+        collector.ellipsis = true;
+        check_hresult(
+            l->token->Draw(nullptr, &collector, static_cast<float>(l->token_at.x), static_cast<float>(l->token_at.y)));
+    }
+    l->runs = std::move(collector.runs);
+    gr_utf16 u = gr_attributed_text_get_utf16(l->text);
+    for (size_t r = 0; r < l->runs.size(); ++r)
+    {
+        auto const &run = l->runs[r];
+        /* Runs belong to the visible line with their baseline; clipped lines have none. */
+        size_t li = l->lines.size();
+        for (size_t i = 0; i < l->lines.size(); ++i)
+            if (std::abs(l->lines[i].baseline - run.origin.y) < 0.5)
+                li = i;
+        if (li == l->lines.size())
+            continue;
+        auto const &line = l->lines[li];
+        bool tokened = l->token && li + 1 == l->lines.size();
+        gr_text_range elided = {to8(l, line.caret), line.range.end};
+        auto n = static_cast<UINT32>(run.ids.size());
+        /* Clusters: maximal text spans mapping to one first glyph, owning glyphs up to the next cluster's. */
+        std::vector<std::pair<UINT32, UINT32>> clusters(n, {0, 0});
+        auto length = static_cast<UINT32>(run.cluster_map.size());
+        for (UINT32 p = 0; p < length;)
+        {
+            UINT32 q = p + 1;
+            while (q < length && run.cluster_map[q] == run.cluster_map[p])
+                ++q;
+            UINT32 first = run.cluster_map[p], last = q < length ? run.cluster_map[q] : n;
+            for (UINT32 g = std::min(first, last); g < std::max(first, last) && g < n; ++g)
+                clusters[g] = {run.text + p, run.text + q};
+            p = q;
+        }
+        DWRITE_FONT_METRICS font;
+        run.face->GetMetrics(&font);
+        double scale = run.size / font.designUnitsPerEm;
+        uint64_t face = font_id(l->system, run.face.get());
+        bool rtl = run.level & 1;
+        double pen = 0;
+        for (UINT32 i = 0; i < n; ++i)
+        {
+            double advance = run.advances[i];
+            double x = rtl ? run.origin.x - pen - advance - run.offsets[i].advanceOffset
+                           : run.origin.x + pen + run.offsets[i].advanceOffset;
+            double y = run.origin.y - run.offsets[i].ascenderOffset;
+            pen += advance;
+            UINT32 at = clusters[i].first;
+            if (!run.ellipsis && ((at < u.count && paragraph_break(u.data[at])) || (tokened && at >= line.caret)))
+                continue;
+            DWRITE_GLYPH_METRICS m{};
+            run.face->GetDesignGlyphMetrics(&run.ids[i], 1, &m, run.sideways);
+            double width =
+                std::max(0.0, (static_cast<double>(m.advanceWidth) - m.leftSideBearing - m.rightSideBearing) * scale);
+            double height =
+                std::max(0.0, (static_cast<double>(m.advanceHeight) - m.topSideBearing - m.bottomSideBearing) * scale);
+            gr_rect bounds = {{x + m.leftSideBearing * scale, y - (m.verticalOriginY - m.topSideBearing) * scale},
+                              {width, height}};
+            if (!width || !height)
+                bounds.size = {0, 0};
+            gr_text_range cluster = run.ellipsis ? elided : gr_text_range{to8(l, at), to8(l, clusters[i].second)};
+            gr_text_glyph_flags flags = (rtl ? GR_TEXT_GLYPH_RTL : 0u) | (run.ellipsis ? GR_TEXT_GLYPH_ELLIPSIS : 0u);
+            /* Runs are collected without drawing effects, so one run can hold several span colors. */
+            std::optional<gr_color> color = run.ellipsis ? l->token_color : std::nullopt;
+            if (!run.ellipsis)
+                for (auto const &span : l->colors)
+                    if (span.range.startPosition <= at && at < span.range.startPosition + span.range.length)
+                        color = span.color;
+            l->glyphs[li].push_back(
+                {{{x, y}, advance, bounds, cluster, flags, face, run.size, run.ids[i]}, r, i, color});
+        }
+    }
+    for (auto &line : l->glyphs)
+        std::stable_sort(line.begin(), line.end(),
+                         [](GlyphRef const &a, GlyphRef const &b) { return a.info.position.x < b.info.position.x; });
+}
+
+size_t dw_glyphs(void *data, size_t line, gr_text_glyph *glyphs, size_t capacity)
+{
+    Ready l(data);
+    try
+    {
+        build_glyphs(l.l);
+    }
+    catch (...)
+    {
+        report("DirectWrite glyphs");
+    }
+    if (line >= l->glyphs.size())
+        return 0;
+    auto const &list = l->glyphs[line];
+    for (size_t i = 0; i < list.size() && i < capacity; ++i)
+        glyphs[i] = list[i].info;
+    return list.size();
+}
+
+/* Draws a glyph run with color fonts (emoji) layer by layer, as DrawTextLayout does. Windows 11's emoji are COLRv1
+ * paint trees with gradients; without the paint path they would come out as flat COLRv0 layers. */
+void draw_run(ID2D1DeviceContext *dc, IDWriteFactory *factory, D2D1_POINT_2F at, DWRITE_GLYPH_RUN const &run,
+              ID2D1Brush *brush)
+{
+    com_ptr<IDWriteFactory4> colors;
+    com_ptr<ID2D1DeviceContext4> images;
+    com_ptr<IDWriteFactory8> paints;
+    com_ptr<ID2D1DeviceContext7> painter;
+    factory->QueryInterface(IID_PPV_ARGS(colors.put()));
+    dc->QueryInterface(IID_PPV_ARGS(images.put()));
+    factory->QueryInterface(IID_PPV_ARGS(paints.put()));
+    dc->QueryInterface(IID_PPV_ARGS(painter.put()));
+    if (colors && images)
+    {
+        auto formats = DWRITE_GLYPH_IMAGE_FORMATS_TRUETYPE | DWRITE_GLYPH_IMAGE_FORMATS_CFF |
+                       DWRITE_GLYPH_IMAGE_FORMATS_COLR | DWRITE_GLYPH_IMAGE_FORMATS_SVG |
+                       DWRITE_GLYPH_IMAGE_FORMATS_PNG | DWRITE_GLYPH_IMAGE_FORMATS_JPEG |
+                       DWRITE_GLYPH_IMAGE_FORMATS_TIFF | DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8;
+        com_ptr<IDWriteColorGlyphRunEnumerator1> layers;
+        HRESULT hr;
+        if (paints && painter)
+            hr = paints->TranslateColorGlyphRun(at, &run, nullptr, formats | DWRITE_GLYPH_IMAGE_FORMATS_COLR_PAINT_TREE,
+                                                painter->GetPaintFeatureLevel(), DWRITE_MEASURING_MODE_NATURAL, nullptr,
+                                                0, layers.put());
+        else
+            hr = colors->TranslateColorGlyphRun(at, &run, nullptr, formats, DWRITE_MEASURING_MODE_NATURAL, nullptr, 0,
+                                                layers.put());
+        if (SUCCEEDED(hr))
+        {
+            BOOL more = FALSE;
+            while (SUCCEEDED(layers->MoveNext(&more)) && more)
+            {
+                DWRITE_COLOR_GLYPH_RUN1 const *layer = nullptr;
+                check_hresult(layers->GetCurrentRun(&layer));
+                D2D1_POINT_2F origin{layer->baselineOriginX, layer->baselineOriginY};
+                switch (layer->glyphImageFormat)
+                {
+                    case DWRITE_GLYPH_IMAGE_FORMATS_PNG:
+                    case DWRITE_GLYPH_IMAGE_FORMATS_JPEG:
+                    case DWRITE_GLYPH_IMAGE_FORMATS_TIFF:
+                    case DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8:
+                        images->DrawColorBitmapGlyphRun(layer->glyphImageFormat, origin, &layer->glyphRun,
+                                                        layer->measuringMode,
+                                                        D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT);
+                        break;
+                    case DWRITE_GLYPH_IMAGE_FORMATS_SVG:
+                        images->DrawSvgGlyphRun(origin, &layer->glyphRun, brush, nullptr, 0, layer->measuringMode);
+                        break;
+                    case DWRITE_GLYPH_IMAGE_FORMATS_COLR_PAINT_TREE:
+                        painter->DrawPaintGlyphRun(origin, &layer->glyphRun, brush, 0, layer->measuringMode);
+                        break;
+                    default:
+                        if (layer->paletteIndex == 0xFFFF)
+                            dc->DrawGlyphRun(origin, &layer->glyphRun, brush, layer->measuringMode);
+                        else
+                        {
+                            com_ptr<ID2D1SolidColorBrush> paint;
+                            check_hresult(dc->CreateSolidColorBrush(layer->runColor, paint.put()));
+                            dc->DrawGlyphRun(origin, &layer->glyphRun, paint.get(), layer->measuringMode);
+                        }
+                }
+            }
+            return;
+        }
+        if (hr != DWRITE_E_NOCOLOR)
+            check_hresult(hr);
+    }
+    dc->DrawGlyphRun(at, &run, brush, DWRITE_MEASURING_MODE_NATURAL);
+}
+
 void dw_layout_destroy(void *data)
 {
     delete static_cast<TextLayout *>(data);
@@ -609,7 +950,8 @@ void dw_system_destroy(void *data)
 } // namespace
 
 const gr_text_layout_vtable dwrite_layout_vtable = {
-    dw_metrics, dw_line, dw_next_stop, dw_previous_stop, dw_hit_test, dw_caret_rect, dw_range_rects, dw_layout_destroy,
+    dw_metrics,    dw_line,        dw_next_stop, dw_previous_stop,  dw_hit_test,
+    dw_caret_rect, dw_range_rects, dw_glyphs,    dw_layout_destroy,
 };
 
 void draw_text_layout(ID2D1DeviceContext *dc, gr_text_layout *layout, gr_point origin, gr_color color, float alpha)
@@ -661,6 +1003,84 @@ void draw_text_layout(ID2D1DeviceContext *dc, gr_text_layout *layout, gr_point o
     dc->SetTextAntialiasMode(mode);
     if (!l->colors.empty())
         check_hresult(l->layout->SetDrawingEffect(nullptr, {0, UINT32_MAX}));
+}
+
+void draw_text_glyphs(ID2D1DeviceContext *dc, gr_text_layout *layout, size_t line, gr_glyph_range range,
+                      gr_point origin, gr_color color, float alpha)
+{
+    Ready l(gr_text_layout_get_data(layout));
+    build_glyphs(l.l);
+    if (line >= l->glyphs.size())
+        return;
+    auto const &list = l->glyphs[line];
+    size_t end = std::min(range.end, list.size());
+    if (range.start >= end)
+        return;
+    auto solid = [&](gr_color c)
+    {
+        com_ptr<ID2D1SolidColorBrush> brush;
+        check_hresult(dc->CreateSolidColorBrush(d2d_color(c), brush.put()));
+        return brush;
+    };
+    /* Bitmap emoji ignore brush opacity, so global alpha applies through a layer. */
+    if (alpha < 1)
+    {
+        D2D1_LAYER_PARAMETERS1 p{{-FLT_MAX, -FLT_MAX, FLT_MAX, FLT_MAX},
+                                 nullptr,
+                                 D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                 D2D1::Matrix3x2F::Identity(),
+                                 alpha,
+                                 nullptr,
+                                 D2D1_LAYER_OPTIONS1_NONE};
+        dc->PushLayer(&p, nullptr);
+    }
+    auto mode = dc->GetTextAntialiasMode();
+    dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    auto fill = solid(color);
+    /* DrawTextLayout snaps each run's baseline to whole device pixels under axis-aligned transforms; match it so a
+     * glyph drawn alone rasterizes like the same glyph in the layout. */
+    D2D1_MATRIX_3X2_F transform;
+    dc->GetTransform(&transform);
+    auto snap = [&](D2D1_POINT_2F p)
+    {
+        if (transform._12 != 0 || transform._21 != 0 || transform._22 == 0)
+            return p;
+        float y = std::round(transform._22 * p.y + transform._32);
+        p.y = (y - transform._32) / transform._22;
+        return p;
+    };
+    for (size_t i = range.start; i < end;)
+    {
+        /* Glyphs adjacent within one run draw together, in either direction. */
+        auto const &first = list[i];
+        UINT32 lo = first.index, hi = first.index;
+        auto same_color = [&](GlyphRef const &g)
+        {
+            if (g.color.has_value() != first.color.has_value())
+                return false;
+            return !g.color || !memcmp(&*g.color, &*first.color, sizeof(gr_color));
+        };
+        for (++i; i < end && list[i].run == first.run && same_color(list[i]) &&
+                  (list[i].index == hi + 1 || list[i].index + 1 == lo);
+             ++i)
+        {
+            lo = std::min(lo, list[i].index);
+            hi = std::max(hi, list[i].index);
+        }
+        auto const &run = l->runs[first.run];
+        double before = 0;
+        for (UINT32 g = 0; g < lo; ++g)
+            before += run.advances[g];
+        bool rtl = run.level & 1;
+        D2D1_POINT_2F at{static_cast<float>(origin.x + run.origin.x + (rtl ? -before : before)),
+                         static_cast<float>(origin.y + run.origin.y)};
+        DWRITE_GLYPH_RUN sub{run.face.get(),    run.size,         hi - lo + 1,  &run.ids[lo],
+                             &run.advances[lo], &run.offsets[lo], run.sideways, run.level};
+        draw_run(dc, l->system->factory.get(), snap(at), sub, first.color ? solid(*first.color).get() : fill.get());
+    }
+    dc->SetTextAntialiasMode(mode);
+    if (alpha < 1)
+        dc->PopLayer();
 }
 } // namespace gr_win
 

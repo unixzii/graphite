@@ -83,8 +83,9 @@ Text systems are platform objects independent of Scenes; see
 (UTF-8, a base style and ordered spans that platforms apply natively, and UTF-16
 mapping) and wraps platform layouts: it counts references, validates and
 normalizes query arguments, and forwards every query to the layout's vtable
-without caching. Canvas records layouts as `GR_DRAW_TEXT_LAYOUT` ops; a backend
-replays layouts whose vtable it recognizes. Color is a drawing argument, so
+without caching. Canvas records layouts as `GR_DRAW_TEXT_LAYOUT` ops and glyph
+ranges of a line as `GR_DRAW_TEXT_GLYPHS` ops; a backend replays layouts whose
+vtable it recognizes. Color is a drawing argument, so
 recoloring needs no relayout.
 
 ## Coordinates and pixel snapping

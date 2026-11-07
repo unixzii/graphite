@@ -228,7 +228,8 @@ typedef enum
     GR_DRAW_FILL_PATH,
     GR_DRAW_STROKE_PATH,
     GR_DRAW_IMAGE,
-    GR_DRAW_TEXT_LAYOUT
+    GR_DRAW_TEXT_LAYOUT,
+    GR_DRAW_TEXT_GLYPHS
 } gr_draw_op_kind;
 
 typedef struct
@@ -272,6 +273,15 @@ typedef struct
             gr_point origin; /**< Layout box origin in user coordinates. */
             gr_color color;  /**< Straight-alpha color of runs without their own. */
         } text_layout;
+
+        struct
+        {
+            gr_text_layout *layout;
+            size_t line;
+            gr_glyph_range glyphs; /**< Validated against the line's glyph count when recorded. */
+            gr_point origin;       /**< Layout box origin in user coordinates. */
+            gr_color color;        /**< Straight-alpha color of runs without their own. */
+        } text_glyphs;
     } value;
 } gr_draw_op;
 

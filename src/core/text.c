@@ -403,7 +403,7 @@ gr_text_layout *gr_text_layout_new(gr_text_system *system, gr_attributed_text *t
 {
     if (!system || !text || !valid_options(options) || !vtable || !vtable->get_metrics || !vtable->get_line ||
         !vtable->next_caret_stop || !vtable->previous_caret_stop || !vtable->hit_test || !vtable->get_caret_rect ||
-        !vtable->get_range_rects || !vtable->destroy)
+        !vtable->get_range_rects || !vtable->get_glyphs || !vtable->destroy)
         return NULL;
     gr_text_layout *l = gr_alloc(1, sizeof(*l));
     atomic_init(&l->refs, 1);
@@ -553,4 +553,15 @@ size_t gr_text_layout_get_range_rects(const gr_text_layout *l, gr_text_range ran
     if (start >= stop)
         return 0;
     return l->vtable.get_range_rects(l->userdata, (gr_text_range){start, stop}, capacity ? rects : NULL, capacity);
+}
+
+/* Glyphs */
+
+size_t gr_text_layout_get_glyphs(const gr_text_layout *l, size_t line, gr_text_glyph *glyphs, size_t capacity)
+{
+    if (!glyphs)
+        capacity = 0;
+    if (line >= l->vtable.get_metrics(l->userdata).line_count)
+        return 0;
+    return l->vtable.get_glyphs(l->userdata, line, capacity ? glyphs : NULL, capacity);
 }

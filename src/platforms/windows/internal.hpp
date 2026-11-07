@@ -91,6 +91,8 @@ com_ptr<ID2D1Bitmap1> bitmap(ID2D1DeviceContext *dc, gr_image const *image);
 void replay(ID2D1DeviceContext *dc, ID2D1Factory1 *factory, gr_display_list const *list, gr_affine base);
 extern const gr_text_layout_vtable dwrite_layout_vtable;
 void draw_text_layout(ID2D1DeviceContext *dc, gr_text_layout *layout, gr_point origin, gr_color color, float alpha);
+void draw_text_glyphs(ID2D1DeviceContext *dc, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
+                      gr_point origin, gr_color color, float alpha);
 bool install(gr_scene *scene, ContainerVisual const &scaled);
 HWND create_window(gr_scene *scene, bool track_dpi, DWORD ex, DWORD style, int x, int y, int w, int h, HWND parent);
 double window_scale(HWND hwnd);

@@ -22,6 +22,8 @@ CACornerMask gr_ca_corners(gr_corners corners);
 void gr_cg_replay(CGContextRef context, const gr_display_list *list);
 extern const gr_text_layout_vtable gr_ct_layout_vtable;
 void gr_ct_draw_layout(CGContextRef context, gr_text_layout *layout, gr_point origin, gr_color color);
+void gr_ct_draw_glyphs(CGContextRef context, gr_text_layout *layout, size_t line, gr_glyph_range glyphs,
+                       gr_point origin, gr_color color);
 bool gr_macos_install(gr_scene *scene, CALayer *host);
 
 @interface GRSceneView : NSView

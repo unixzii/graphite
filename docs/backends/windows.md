@@ -68,6 +68,20 @@ factory and draws it with `ID2D1DeviceContext::DrawTextLayout`:
   not subtracted on top of `newlineLength`.
 - Letter spacing uses trailing character spacing, removed from each
   paragraph's last grapheme so it only goes between graphemes.
+- Glyph font identities key on the font files (loader and reference key),
+  face index, `GetSimulations` (synthetic bold or oblique) and
+  `IDWriteFontFace5` axis values.
+- **Glyphs come from a custom `IDWriteTextRenderer`** passed to
+  `IDWriteTextLayout::Draw`; the ellipsis sign is an inline object that draws
+  through it too. Right-to-left runs arrive in logical order with their origin
+  on the right, so glyphs are sorted into visual order. Runs are collected
+  without drawing effects, so one run can hold several span colors.
+- **Glyph ranges draw like `DrawTextLayout` only with its two habits
+  reproduced**: run baselines snap to whole device pixels under axis-aligned
+  transforms, and color glyphs go through `TranslateColorGlyphRun` including
+  `COLR_PAINT_TREE` with `ID2D1DeviceContext7::DrawPaintGlyphRun`. Windows 11
+  emoji are COLRv1 paint trees with gradients; the COLRv0 path draws them as
+  flat layers.
 - With no wrapping and width 0, centering happens around x = 0, so unbounded
   layouts get the widest line as their width after a first pass.
 - **`CreateTextLayout` rejects a NULL string** even when its length is 0.

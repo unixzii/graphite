@@ -62,7 +62,8 @@ keep timing runs separate from instrumented allocation runs and builds.
 `tests/text.c` drives the core text API through a fake text system. Native text
 systems are tested by the conformance suite's `text` cases, which every
 backend with a text system runs: wrapping, line limits, ellipsis, bidi,
-grapheme boundaries, caret and selection queries, concurrency and drawing.
+grapheme boundaries, caret and selection queries, concurrency, drawing, and
+glyph lists and glyph-range drawing (which must redraw the layout).
 They assert relations across platforms, including the behaviors where native
 engines disagree (ellipsis at paragraph breaks, bidi caret affinity, letter
 spacing); captures cover rasterization per platform.

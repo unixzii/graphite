@@ -130,6 +130,17 @@ GskRenderNode *gr_gsk_recording(const gr_display_list *list)
                 if (top->alpha < 1)
                     gtk_snapshot_pop(s);
                 break;
+            case GR_DRAW_TEXT_GLYPHS:
+                if (gr_text_layout_get_vtable(op->value.text_glyphs.layout) != &gr_pango_layout_vtable)
+                    break;
+                if (top->alpha < 1)
+                    gtk_snapshot_push_opacity(s, top->alpha);
+                gr_pango_draw_glyphs(s, op->value.text_glyphs.layout, op->value.text_glyphs.line,
+                                     op->value.text_glyphs.glyphs, op->value.text_glyphs.origin,
+                                     op->value.text_glyphs.color);
+                if (top->alpha < 1)
+                    gtk_snapshot_pop(s);
+                break;
             case GR_DRAW_FILL_PATH:
             case GR_DRAW_STROKE_PATH:
             case GR_DRAW_IMAGE:
