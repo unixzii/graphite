@@ -53,8 +53,8 @@ struct demo
     gr_layer *drawing, *rings[3], *blob, *star, *compound;
     gr_layer *spotlight, *badge, *badge_mask;
     gr_layer *phone, *indicator, *morph, *leaf, *bar;
-    gr_layer *fan, *photos[4], *group[2], *single[2], *dot;
-    size_t front;
+    gr_layer *carousel, *photos[5], *group[2], *single[2], *dot;
+    size_t photo_order[5]; /**< Back to front. */
     gr_layer *switch_track, *switch_knob, *slider_fill, *slider_knob, *caret, *spinner, *progress;
     gr_image *drawing_picture;
     gr_layer **stress_cells;

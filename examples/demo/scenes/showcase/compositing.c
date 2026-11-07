@@ -1,28 +1,27 @@
 #include "demo.h"
 
+#define PHOTOS 5
+
 void compositing_build(demo *d, gr_layer *card)
 {
-    d->fan = layer(d, card, D_RECT(0, 0, CARD_WIDTH, CARD_HEIGHT));
+    d->carousel = layer(d, card, D_RECT(0, 0, CARD_WIDTH, CARD_HEIGHT));
     gr_image *picture = landscape(120, 80, 2);
     gr_gravity gravities[] = {GR_GRAVITY_ASPECT_FILL, GR_GRAVITY_ASPECT, GR_GRAVITY_RESIZE, GR_GRAVITY_CENTER};
-    for (size_t i = 0; i < 4; ++i)
+    for (size_t i = 0; i < PHOTOS; ++i)
     {
         gr_layer *p = new_layer(d, GR_LAYER_CONTENT);
         d->photos[i] = p;
-        D_OK(gr_layer_set_bounds(p, D_RECT(0, 0, 84, 112)));
-        D_OK(gr_layer_set_anchor_point(p, D_POINT(0.5, 1)));
-        D_OK(gr_layer_set_position(p, D_POINT(144, 176)));
+        D_OK(gr_layer_set_bounds(p, D_RECT(0, 0, 76, 100)));
         background(p, hex(0xE5E5EA));
         set_image(p, picture);
-        D_OK(gr_content_layer_set_gravity(p, gravities[i]));
+        D_OK(gr_content_layer_set_gravity(p, gravities[i % 4]));
         D_OK(gr_layer_set_corner_radius(p, 12));
         D_OK(gr_layer_set_masks_to_bounds(p, true));
         border(p, 3, D_WHITE);
         demo_shadow(p, alpha(D_BLACK, 0.3f), 0, 4, 5, NULL);
-        D_OK(gr_layer_add_child(d->fan, p));
+        D_OK(gr_layer_add_child(d->carousel, p));
     }
     gr_image_unref(picture);
-    d->front = SIZE_MAX; /* The first update brings the current photo to the front. */
     gr_layer *left = layer(d, card, D_RECT(16, 196, 124, 76)), *right = layer(d, card, D_RECT(148, 196, 124, 76));
     D_OK(gr_layer_set_opacity(left, 0.5f));
     uint32_t colors[] = {D_PINK, D_BLUE};
@@ -36,25 +35,52 @@ void compositing_build(demo *d, gr_layer *card)
     d->dot = pill(d, card, D_RECT(CARD_WIDTH - 28, 14, 12, 12), hex(D_PINK), 6);
 }
 
+/* A looping carousel: every 2.4 s it pages one photo to the left. The centered photo is upright, sharp and slightly
+ * enlarged; its neighbors shrink, tilt outward, blur and fade towards the edges. Photos sit 100 points apart, wider
+ * than any photo's tilted extent, so they never overlap and their stacking order never shows. */
+static void carousel_update(demo *d, double t)
+{
+    double page = t / 2.4, step = floor(page), progress = step + smooth(fmin(1, (page - step) / 0.3));
+    double offsets[PHOTOS];
+    for (size_t i = 0; i < PHOTOS; ++i)
+    {
+        double s = fmod((double)i - progress, PHOTOS);
+        if (s < -PHOTOS / 2.0)
+            s += PHOTOS;
+        else if (s >= PHOTOS / 2.0)
+            s -= PHOTOS;
+        offsets[i] = s;
+        double near = fmin(fabs(s), 1), far = fmax(fabs(s) - 1, 0), side = s < 0 ? -1 : 1;
+        gr_affine m = rotation(side * near * 0.22);
+        double k = 1.12 - 0.3 * near - 0.12 * far;
+        m = (gr_affine){m.a * k, m.b * k, m.c * k, m.d * k, 0, 0};
+        D_OK(gr_layer_set_position(d->photos[i], D_POINT(CARD_WIDTH / 2 + 100 * s, 98)));
+        D_OK(gr_layer_set_transform(d->photos[i], m));
+        D_OK(gr_layer_set_blur(d->photos[i], 3.5 * near + 2 * far));
+        D_OK(gr_layer_set_opacity(d->photos[i], (float)fmax(0, fmin(1, (1.8 - fabs(s)) / 0.8))));
+    }
+    /* Photos nearer the center draw on top; reorder only when the order changes. */
+    size_t order[PHOTOS];
+    for (size_t i = 0; i < PHOTOS; ++i)
+        order[i] = i;
+    for (size_t i = 1; i < PHOTOS; ++i)
+        for (size_t j = i; j > 0 && fabs(offsets[order[j]]) > fabs(offsets[order[j - 1]]); --j)
+        {
+            size_t swap = order[j];
+            order[j] = order[j - 1];
+            order[j - 1] = swap;
+        }
+    if (memcmp(order, d->photo_order, sizeof(order)))
+    {
+        memcpy(d->photo_order, order, sizeof(order));
+        for (size_t i = 0; i < PHOTOS; ++i)
+            D_OK(gr_layer_add_child(d->carousel, d->photos[order[i]]));
+    }
+}
+
 void compositing_update(demo *d, double t)
 {
-    double spread = 0.1 + 0.24 * smooth(wave(t, 5, 0));
-    for (size_t i = 0; i < 4; ++i)
-        D_OK(gr_layer_set_transform(d->photos[i], rotation(((double)i - 1.5) * spread)));
-    double turn = t / 1.2 + 0.5;
-    size_t front = (size_t)turn % 4;
-    if (front != d->front)
-    {
-        d->front = front;
-        D_OK(gr_layer_add_child(d->fan, d->photos[front]));
-    }
-    /* Depth of field: photos further down the stack blur more, easing over the first third of each turn. */
-    double ease = smooth(fmin(1, (turn - floor(turn)) * 3));
-    for (size_t i = 0; i < 4; ++i)
-    {
-        double depth = (double)((front + 4 - i) % 4), previous = (double)((front + 7 - i) % 4);
-        D_OK(gr_layer_set_blur(d->photos[i], 1.5 * (previous + (depth - previous) * ease)));
-    }
+    carousel_update(d, t);
     double slide = 12 * sin(t * 1.6);
     for (size_t i = 0; i < 2; ++i)
     {

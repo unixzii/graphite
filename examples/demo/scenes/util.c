@@ -284,7 +284,6 @@ demo *demo_new(demo_kind kind, gr_text_system *text)
     d->kind = kind;
     d->text = gr_text_system_ref(text);
     d->scene = gr_scene_new(demo_size(kind));
-    d->front = SIZE_MAX;
     if (kind == DEMO_UI)
         ui_build(d);
     else if (kind == DEMO_STRESS)
