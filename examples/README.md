@@ -16,6 +16,7 @@ They share one layer in `shared/`:
 | `showcase` | 960 × 640 | Six animated cards covering transforms, Canvas paths and gradients, shape layers, masks, clipping/scrolling, compositing and images. Its photo carousel pages in a loop; side photos shrink, tilt and blur (layer blur). |
 | `ui` | 1000 × 600 | A control/gallery layout with animated switch, slider, caret, spinner and progress bar. Its labels, calendar and editor paragraph are real text: English labels with emoji, and a wrapped paragraph with styled spans, a line of Chinese and an ellipsis. Without a platform text system it draws placeholder bars instead. |
 | `stress` | 800 × 800 | An 80 × 80 grid of independent square layers. Every three seconds, a ripple travels outward from the center, animating each cell's scale, radial displacement and color. |
+| `glyphs` | 960 × 600 | Per-glyph text transitions in four looping labels: a clock, a price counter that rolls up or down, swapping phrases (CJK and emoji included) and a wrapped paragraph that reflows as words are inserted and removed. Every glyph is its own content layer drawn with `gr_canvas_draw_text_glyphs`; glyphs that stay glide to their new place while the others scale, slide, fade and blur (layer blur) in or out, driven by springs. Needs a platform text system. |
 
 The executables support macOS 14+, Linux with GTK 4.22+, and Windows 11. Where
 no native shell is available, the scene sources still compile but no executable
@@ -23,10 +24,11 @@ is linked.
 
 ```sh
 cmake -S . -B /tmp/graphite-c -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/graphite-c --target graphite_example_showcase graphite_example_ui graphite_example_stress
+cmake --build /tmp/graphite-c --target graphite_example_showcase graphite_example_ui graphite_example_stress graphite_example_glyphs
 /tmp/graphite-c/examples/showcase/showcase
 /tmp/graphite-c/examples/ui/ui --fps
 /tmp/graphite-c/examples/stress/stress --fps
+/tmp/graphite-c/examples/glyphs/glyphs
 /tmp/graphite-c/examples/showcase/showcase --selftest
 /tmp/graphite-c/examples/ui/ui --snapshot ui.png
 ```
@@ -54,7 +56,7 @@ commit; macOS reports them as `coalesced`. `--fps` reports actual display-callba
 rate every two seconds. Closing the window exits and releases scene resources.
 
 Each example registers `graphite.examples.<name>` running its selftest, so CMake's
-`check` target includes all three on macOS, GTK and Windows. A graphical session
+`check` target includes all of them on macOS, GTK and Windows. A graphical session
 with the selected renderer available is required. Format checks include every
 C/Objective-C file under `examples`.
 
