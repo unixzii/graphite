@@ -14,7 +14,7 @@ each at **1×, 1.5× and 2×**.
   system (metrics, line breaking, truncation, alignment, carets, threading and
   drawing). Fonts differ per platform, so these assert relations and
   invariants rather than exact metrics. A harness without `text_system`
-  (Windows today) reports them as skipped.
+  reports them as skipped.
 - `macos.m`: Core Animation host adapter; executes on the main thread.
 - `tests.c`: crossing/coverage and unique-name unit tests plus frame
   probe/profile and context-storage growth checks, using the shared test harness.

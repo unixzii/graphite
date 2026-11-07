@@ -22,8 +22,14 @@ static void destroy(void *host)
     gr_windows_host_unref(host);
 }
 
+static gr_text_system *text_system(void *userdata)
+{
+    (void)userdata;
+    return gr_windows_text_system_new();
+}
+
 int main(int argc, char **argv)
 {
-    gr_conf_harness harness = {"windows", NULL, attach, capture, destroy};
+    gr_conf_harness harness = {"windows", NULL, attach, capture, destroy, text_system};
     return gr_conf_run_main(&harness, 1, argc, argv);
 }

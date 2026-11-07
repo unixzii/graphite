@@ -188,7 +188,7 @@ bool save_png(const char *path, gr_windows_pixels const &pixels)
 
 gr_text_system *demo_platform_text_system(void)
 {
-    return nullptr; // DirectWrite text system not implemented yet.
+    return gr_windows_text_system_new();
 }
 
 int demo_platform_run(demo *content, bool selftest, bool fps)

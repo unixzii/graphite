@@ -170,7 +170,7 @@ static const char body[] =
     "Graphite renders this text with the platform text stack: wrapping, bidi, fallback fonts and the ellipsis "
     "at the end. Mixed scripts need no extra work either. "
     "Emoji work as well \xF0\x9F\x8E\xA8\xF0\x9F\x9A\x80\xE2\x9C\xA8\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0"
-    "\x9F\x92\xBB\xF0\x9F\x87\xA8\xF0\x9F\x87\xB3\n"
+    "\x9F\x92\xBB\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5\n"
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam fringilla, est ut feugiat ultrices, elit "
     "lacus ultricies nibh, id commodo tortor nisi id elit.\n"
     "春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。\n"

@@ -40,6 +40,11 @@ bool gr_windows_capture_window(void *hwnd, gr_windows_pixels *out);
 /** Frees pixel storage and zeros the result; NULL is accepted. */
 void gr_windows_pixels_clear(gr_windows_pixels *pixels);
 
+/** Creates an owned DirectWrite text system, or NULL on failure; its layouts are drawn by this backend and may be
+ * created, queried and released on any thread. Generic families map to Segoe UI ("system-ui", "sans-serif"),
+ * Times New Roman and Consolas. Automatic direction follows the first strong character of the whole text. */
+gr_text_system *gr_windows_text_system_new(void);
+
 #ifdef __cplusplus
 }
 #endif

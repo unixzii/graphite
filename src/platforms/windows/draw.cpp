@@ -199,7 +199,9 @@ void replay(ID2D1DeviceContext *dc, ID2D1Factory1 *factory, gr_display_list cons
                     break;
                 }
                 case GR_DRAW_TEXT_LAYOUT:
-                    /* Native text drawing lands with the DirectWrite text system. */
+                    if (gr_text_layout_get_vtable(op.value.text_layout.layout) == &dwrite_layout_vtable)
+                        draw_text_layout(dc, op.value.text_layout.layout, op.value.text_layout.origin,
+                                         op.value.text_layout.color, state.alpha);
                     break;
             }
         }

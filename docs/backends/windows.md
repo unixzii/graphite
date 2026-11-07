@@ -42,6 +42,37 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
 - **Windows Update reboots the development VM**, which ends the
   interactive session; the tests cannot run until someone logs in again.
 
+## Text
+
+`gr_windows_text_system_new` (`src/platforms/windows/text.cpp`, tested by the
+conformance suite's text cases) lays text out with a shared DirectWrite
+factory and draws it with `ID2D1DeviceContext::DrawTextLayout`:
+
+- DirectWrite's range setters override earlier calls on overlapping ranges,
+  so spans apply natively in order.
+- **Colors are drawing effects only while drawing.** D2D brushes belong to a
+  device and layouts do not, so span colors become brushes for one
+  `DrawTextLayout` call and are removed afterwards. Color fonts are enabled
+  and text antialiasing is grayscale (surfaces are transparent).
+- **There is no line limit.** A max height covering the first `max_lines`
+  lines plus half the next, with an ellipsis trimming sign, trims the last of
+  them; the rest get height 0. Hit tests on the ellipsis and carets inside
+  elided text land on the visible edge, and the first `isTrimmed` hit-test
+  entry gives the elision start. Without an ellipsis the extra lines are
+  clipped when drawing.
+- With no wrapping and width 0, centering happens around x = 0, so unbounded
+  layouts get the widest line as their width after a first pass.
+- **`CreateTextLayout` rejects a NULL string** even when its length is 0.
+- **Cluster metrics are not grapheme clusters**: a flag's two regional
+  indicators are separate clusters. Caret stops come from the system ICU
+  (`icu.h`, `ubrk` character breaks).
+- Reading direction is layout-wide, so `GR_TEXT_DIRECTION_AUTO` uses ICU's
+  `ubidi_getBaseDirection` of the whole text.
+- `IDWriteTextLayout` is mutable, so a mutex per layout serializes queries and
+  drawing.
+- Windows' emoji font has no flag glyphs; regional indicator pairs render as
+  letters (for example "CN").
+
 ## Known gaps
 
 - **Device loss is not handled.** After a Direct3D device loss, drawing
@@ -54,6 +85,8 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
   hidden even where the mask layer extends. The mask's visual surface
   renders at the visual's own units, so mask edges may be soft at high
   scales.
+- Text: mixed-direction paragraphs share the reading direction of the first
+  strong character (DirectWrite's direction is layout-wide).
 - Shadow masks and drawings are rasterized per layer; there is no
   cross-layer cache beyond images.
 - `gr_windows_attach_to_hwnd` does not resize itself with the parent (the parent

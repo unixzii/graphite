@@ -17,14 +17,12 @@
   `HWND` or any `ContainerVisual`), Direct2D replay into drawing surfaces,
   shapes as `ShapeVisual`s, native group opacity, shadows and masks,
   DispatcherQueue commit scheduling and DPI tracking. Passes the whole
-  conformance suite and has a real-window test. Text (DirectWrite) is not
-  started, like on the other backends.
+  conformance suite and has a real-window test.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
   border widths snap to device pixels), shadow spread.
 - **Conformance suite**: 26 semantic, 7 measured and 8 text cases at 1×, 1.5×
-  and 2×; macOS, GTK and Windows pass all of them (Windows skips the text
-  cases until it has a text system). Shadow σ is calibrated for all
-  three backends.
+  and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
+  for all three backends.
   The runner executes on the platform-required thread.
 - **Platform-neutral demo** with two scenes (`showcase`, `ui`), `--selftest`,
   `--fps` and `--snapshot`.
@@ -97,10 +95,9 @@ position of an animating layer would then live in the compositor (like
 
 The API is [text.h](../include/graphite/text.h). Core implements it (attributed
 text, the text system and layout wrappers, and Canvas recording), and a fake
-text system tests it. macOS provides a CoreText text system
-(`gr_macos_text_system_new`) and GTK provides a Pango one
-(`gr_gtk_text_system_new`), both covering M1 and M2 below; Windows skips
-`GR_DRAW_TEXT_LAYOUT` ops until its DirectWrite text system lands.
+text system tests it. Each backend provides a native text system covering M1
+and M2 below: CoreText (`gr_macos_text_system_new`), Pango
+(`gr_gtk_text_system_new`) and DirectWrite (`gr_windows_text_system_new`).
 
 ### Design
 
@@ -153,18 +150,14 @@ text system tests it. macOS provides a CoreText text system
 - Native work per platform:
   - **macOS** (done): see [the Core Animation backend notes](backends/macos.md#text).
   - **GTK** (done): see [the GTK backend notes](backends/gtk.md#text).
-  - **Windows**: lay out with `IDWriteTextLayout`, which has no line limit:
-    derive `SetMaxHeight` from a first pass and trim with an ellipsis sign.
-    Per-run colors need a custom `IDWriteTextRenderer`, because D2D drawing
-    effects must be device-bound brushes. Enable color fonts.
+  - **Windows** (done): see [the Windows backend notes](backends/windows.md#text).
 - Demo: the `ui` scene shows real labels and a wrapped, styled paragraph with
-  Chinese and emoji (done on macOS and GTK; the Windows shell returns no text
-  system yet and keeps placeholder bars).
+  Chinese and emoji (done on all three backends).
 
 ### M2: carets and hit testing
 
 - Caret stops (next/previous), hit testing, caret rectangles with affinity, and
-  range rectangles for selections (done on macOS and GTK). Bidirectional text is the hard part: split
+  range rectangles for selections (done on all three backends). Bidirectional text is the hard part: split
   carets and visual-order range rectangles need care on every platform.
 - Native APIs:
   - CoreText: `CTLineGetStringIndexForPosition` and
@@ -204,8 +197,8 @@ golden snapshots for rasterization. See also [testing](testing.md#text-tests).
 ### Open questions
 
 - `GR_TEXT_DIRECTION_AUTO` resolves per paragraph. DirectWrite only has a
-  layout-wide reading direction, so mixed-direction paragraphs need splitting
-  or emulation.
+  layout-wide reading direction, so Windows uses the first strong character
+  of the whole text; mixed-direction paragraphs need splitting or emulation.
 - Whether ellipsis truncation should keep trailing whitespace in the visible
   range, which matters for consistent `visible` ranges.
 - How much Pango locking costs under concurrent use, and whether layouts

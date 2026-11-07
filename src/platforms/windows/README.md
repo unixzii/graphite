@@ -24,6 +24,9 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   widens paths and fills the resulting outline, avoiding aliased native strokes on affected VM GPUs.
 - Shadow masks use Direct2D drawing surfaces, with a blur-radius
   factor of 3 times sigma and retained outline keys for scale-only changes.
+- `text.cpp` implements the DirectWrite text system
+  (`gr_windows_text_system_new`); `draw.cpp` replays its layouts with
+  `DrawTextLayout`. See the [backend notes](../../../docs/backends/windows.md#text).
 - DispatcherQueue coalesces pending commits via weak Scene links. Backend maps
   borrow layer identities only within core's release-notification leases.
 - HWND hosts are input-transparent child windows; their DPI tracks the parent.
