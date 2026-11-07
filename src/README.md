@@ -5,7 +5,7 @@ consumer configuration are documented in the [CMake guide](../docs/cmake.md).
 
 | Directory | Responsibility |
 |---|---|
-| `core/` | Resources, Canvas, Scene/Layer ownership, dirty tracking and resolution |
+| `core/` | Resources, Canvas, text wrappers, Scene/Layer ownership, dirty tracking and resolution |
 | `platforms/macos/` | Objective-C ARC, Core Animation and CoreGraphics |
 | `platforms/gtk/` | C, GTK widgets and cached GSK render nodes |
 | `platforms/windows/` | C++20, C++/WinRT, Composition and Direct2D |
@@ -15,7 +15,8 @@ consumer configuration are documented in the [CMake guide](../docs/cmake.md).
 
 `core/model.h` defines the private pointer model. `core/scene.c` owns scheduling,
 weak links, cleanup and commit batches; `core/layer.c` owns properties and tree
-operations; `core/resolve.c` derives backend coordinates and drawing values.
+operations; `core/resolve.c` derives backend coordinates and drawing values;
+`core/text.c` owns attributed text and the text system and layout wrappers.
 
 The registry and dirty queue are intrusive lists. Detached dirty bits are kept
 until attachment. Batch storage scales with queued layers; clean commits do not

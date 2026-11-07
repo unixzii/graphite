@@ -133,6 +133,9 @@ void gr_cg_replay(CGContextRef c, const gr_display_list *list)
                 CGPathRelease(p);
                 break;
             }
+            case GR_DRAW_TEXT_LAYOUT:
+                /* Native text drawing lands with the CoreText text system. */
+                break;
             case GR_DRAW_IMAGE:
             {
                 CGImageRef image = gr_cg_image(op->value.image.image);

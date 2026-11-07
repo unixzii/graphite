@@ -6,6 +6,7 @@ add_library(graphite
     core/scene.c
     core/layer.c
     core/resolve.c
+    core/text.c
 )
 add_library(graphite::graphite ALIAS graphite)
 target_include_directories(graphite PUBLIC

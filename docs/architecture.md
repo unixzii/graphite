@@ -76,6 +76,17 @@ Windows uses composition drawing surfaces; GTK caches immutable GSK nodes and
 invalidates ancestors of changed children or masks. Scene mutation and nested
 drawing are rejected while a drawer runs.
 
+## Text
+
+Text systems are platform objects independent of Scenes; see
+[text.h](../include/graphite/text.h). Core owns immutable attributed text
+(UTF-8, a base style and ordered spans that platforms apply natively, and UTF-16
+mapping) and wraps platform layouts: it counts references, validates and
+normalizes query arguments, and forwards every query to the layout's vtable
+without caching. Canvas records layouts as `GR_DRAW_TEXT_LAYOUT` ops; a backend
+replays layouts whose vtable it recognizes. Color is a drawing argument, so
+recoloring needs no relayout.
+
 ## Coordinates and pixel snapping
 
 Box space runs from `(0,0)` to the resolved size. Background, border, image,

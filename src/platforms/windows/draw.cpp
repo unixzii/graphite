@@ -198,6 +198,9 @@ void replay(ID2D1DeviceContext *dc, ID2D1Factory1 *factory, gr_display_list cons
                                    nullptr);
                     break;
                 }
+                case GR_DRAW_TEXT_LAYOUT:
+                    /* Native text drawing lands with the DirectWrite text system. */
+                    break;
             }
         }
     }

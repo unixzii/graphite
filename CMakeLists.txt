@@ -62,7 +62,7 @@ if(BUILD_TESTING)
     add_custom_target(check
         COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-        DEPENDS graphite_resource_tests graphite_scene_tests format-check
+        DEPENDS graphite_resource_tests graphite_scene_tests graphite_text_tests format-check
         USES_TERMINAL)
     if(TARGET graphite_conformance_tests)
         add_dependencies(check graphite_conformance_tests)

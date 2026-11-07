@@ -18,3 +18,4 @@ endfunction()
 
 graphite_add_suite(graphite_resource_tests resources resources.c)
 graphite_add_suite(graphite_scene_tests scene scene.c lifecycle.c)
+graphite_add_suite(graphite_text_tests text text.c)

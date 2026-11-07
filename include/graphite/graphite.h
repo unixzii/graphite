@@ -6,6 +6,7 @@
 #include "layer.h"
 #include "resource.h"
 #include "scene.h"
+#include "text.h"
 #include "types.h"
 
 #endif

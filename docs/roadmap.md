@@ -34,10 +34,8 @@
    keyed by resource identity. All backends currently share image textures
    through per-layer reference counts. Caching paths or drawings across
    layers would need explicit notifications.
-2. **Text**: attributed text and opaque text layouts (measurement, line metrics,
-   index/position queries, max lines, truncation) and Canvas text drawing.
-   Design it against CoreText, Pango and DirectWrite side by side. See
-   [testing](testing.md#text-future) for the test strategy.
+2. **Text**: the API is in [text.h](../include/graphite/text.h) and its core
+   is implemented; native text systems are next. See [Text](#text) below.
 3. **Tier C review**: generate a side-by-side page from
    `target/conformance/*`, and keep same-backend golden snapshots.
 
@@ -94,11 +92,121 @@ position of an animating layer would then live in the compositor (like
 - Final minimum platform versions (proposed: macOS 14, Windows 11, GTK 4.22).
 - Whether web text should use DOM layout or an independent layout engine.
 
-## Text design direction
+## Text
 
-A backend layout operation will accept text and constraints and return an opaque,
-reference-counted platform layout. Canvas will draw it; measurement, line data,
-hit testing, caret and selection queries belong to the layout. Internal query
-structures may be lazy. Core will not cache layouts; clients/backends own policy.
-Paint-only attributes should not alter shaping/cache keys. Finalize index and
-affinity semantics, ligature paint boundaries and threading before adding APIs.
+The API is [text.h](../include/graphite/text.h). Core implements it (attributed
+text, the text system and layout wrappers, and Canvas recording), and a fake
+text system tests it. No platform provides a text system yet, and backends skip
+`GR_DRAW_TEXT_LAYOUT` ops until they do.
+
+### Design
+
+- A **text system** (`gr_text_system`) is a platform object separate from the
+  Scene backend, so text can be measured before a Scene has a backend and laid
+  out while a drawer runs (inside `apply`). Platforms create it
+  (`gr_macos_text_system_new` and its GTK and Windows counterparts) on top of
+  the core constructor `gr_text_system_new(vtable, userdata)`.
+- `gr_text_system_layout` takes an immutable `gr_attributed_text` and
+  `gr_text_layout_options` and returns a `gr_text_layout`. The platform builds
+  that layout with `gr_text_layout_new(system, text, options, vtable, userdata)`. Core
+  handles reference counting, identities and argument validation, and forwards
+  queries to the vtable.
+- **Lazy queries**: metrics, lines, carets and hit testing all go through the
+  vtable, and core caches nothing. A caller that only draws never pays for
+  queries it does not make. Platforms may defer native layout until the first
+  query or draw.
+- **Indices** are UTF-8 byte offsets. Core validates UTF-8 and code-point
+  boundaries, keeps spans in order for platforms to apply natively (later spans
+  win), and offers UTF-16 conversion for CoreText and DirectWrite. Caret stops are grapheme cluster
+  boundaries; affinity picks which side of a line break a caret is on.
+- **Paint-only color**: `gr_canvas_draw_text_layout` takes a default color for
+  runs without their own, so a color change does not need a new layout. Only
+  spans set colors (the base style's color is ignored), so the style has a
+  single optionality mechanism: the field mask. Each
+  platform supports this natively:
+  - CoreText: `kCTForegroundColorFromContextAttributeName`
+  - GTK: `gtk_snapshot_append_layout`
+  - DirectWrite: the default fill brush
+- **Threading**: texts, systems and layouts are immutable resources that any
+  thread may use. Vtable callbacks can run concurrently, so each
+  implementation synchronizes its lazy native state.
+- **Replay**: a backend draws layouts whose vtable it recognizes and skips
+  others.
+
+### M1: layout, measurement and drawing
+
+- Core (done): attributed text (validation, span copies, UTF-16 mapping),
+  the text system and layout wrappers with caret-stop normalization, the
+  `GR_DRAW_TEXT_LAYOUT` op with Canvas recording, and `tests/text.c` with a
+  fake text system.
+- Styles: family (including generic names), size, weight, slant, optional
+  color, underline/strikethrough, letter spacing.
+- Options: max width, wrap mode, max lines, end ellipsis, alignment, base
+  direction.
+- Queries: metrics (size, line count, first/last baseline, visible range,
+  truncated) and per-line range, bounds, baseline, ascent and descent.
+- Native work per platform:
+  - **macOS**: lay out with a CTTypesetter and break lines manually so
+    `max_lines` and the ellipsis line (`CTLineCreateTruncatedLine`) are under
+    control. Replay with a flipped text matrix, and turn off font smoothing in
+    transparent backing stores.
+  - **GTK**: lay out with Pango and draw with `gtk_snapshot_append_layout`.
+    Turn off metric hinting and glyph position rounding so layouts do not
+    depend on scale. Use `pango_layout_set_height(-max_lines)` with ellipsize.
+    `PangoLayout` is not thread-safe, so lock it.
+  - **Windows**: lay out with `IDWriteTextLayout`, which has no line limit:
+    derive `SetMaxHeight` from a first pass and trim with an ellipsis sign.
+    Per-run colors need a custom `IDWriteTextRenderer`, because D2D drawing
+    effects must be device-bound brushes. Enable color fonts.
+- Demo scene with wrapped, truncated, bidi and emoji text.
+
+### M2: carets and hit testing
+
+- Caret stops (next/previous), hit testing, caret rectangles with affinity, and
+  range rectangles for selections. Bidirectional text is the hard part: split
+  carets and visual-order range rectangles need care on every platform.
+- Native APIs:
+  - CoreText: `CTLineGetStringIndexForPosition` and
+    `CTLineGetOffsetForStringIndex`
+  - Pango: `pango_layout_xy_to_index`, `pango_layout_get_cursor_pos` and
+    `pango_layout_line_get_x_ranges`
+  - DirectWrite: `HitTestPoint`, `HitTestTextPosition` and `HitTestTextRange`
+
+### Testing
+
+Fonts differ per platform, so rendering is not compared across backends.
+Semantic cases instead:
+- narrower widths never produce fewer lines
+- `max_lines` and the truncated/visible metrics hold
+- hit testing is monotonic within a line
+- caret positions round-trip through hit testing
+- paint-only color changes keep the same layout
+
+Register a bundled test font internally to reduce variance. Use same-backend
+golden snapshots for rasterization. See also [testing](testing.md#future-text-tests).
+
+### Later
+
+- Line height and paragraph spacing (each platform defines them differently).
+- Locale and language (CJK glyph selection), font features, variable font
+  axes.
+- Loading fonts from bytes or files, and font fallback control.
+- Inline attachments (images or views in text), and paths from text.
+- Gradient and other paint fills for text: clip-to-text on CoreGraphics, mask
+  nodes on GSK, brushes on D2D.
+- Visual (left/right) caret movement in bidi text, word and line boundaries,
+  justification, start/middle truncation.
+- Text drawing performance: shared glyph caches across layers, and the
+  rasterization scale gap above (text blurs under zoom on Core Animation).
+
+### Open questions
+
+- `GR_TEXT_DIRECTION_AUTO` resolves per paragraph. DirectWrite only has a
+  layout-wide reading direction, so mixed-direction paragraphs need splitting
+  or emulation.
+- Whether ellipsis truncation should keep trailing whitespace in the visible
+  range, which matters for consistent `visible` ranges.
+- How much Pango locking costs under concurrent use, and whether layouts
+  should instead be pinned to a thread on GTK.
+- How a backend should treat a layout from a different text system: skip it,
+  as drafted, or fall back to paths.

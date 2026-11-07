@@ -31,6 +31,13 @@ specific native need. A stale provider/version returns an error rather than
 executing obsolete work. Respect the identity retirement boundary even when a
 provider itself remains alive.
 
+Replay `GR_DRAW_TEXT_LAYOUT` ops only for layouts made by your platform's text
+system: compare `gr_text_layout_get_vtable` with your static layout vtable and
+draw `gr_text_layout_get_data` natively; skip other layouts. Text systems are
+separate from the Scene backend (see [text.h](../../include/graphite/text.h)):
+build them with `gr_text_system_new` and `gr_text_layout_new`, and make every
+callback safe to call from any thread.
+
 Snapshot backends cache nodes and invalidate changed layers and ancestors.
 Retained compositors update native properties and backing stores incrementally.
 

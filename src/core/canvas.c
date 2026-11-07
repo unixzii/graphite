@@ -31,6 +31,9 @@ static void release_op(gr_draw_op *op)
         case GR_DRAW_IMAGE:
             gr_image_unref(op->value.image.image);
             break;
+        case GR_DRAW_TEXT_LAYOUT:
+            gr_text_layout_unref(op->value.text_layout.layout);
+            break;
         default:
             break;
     }
@@ -165,6 +168,18 @@ gr_result gr_canvas_draw_image(gr_canvas *c, gr_image *image, gr_rect dst)
     gr_draw_op op = {.kind = GR_DRAW_IMAGE};
     op.value.image.image = gr_image_ref(image);
     op.value.image.destination = dst;
+    push(c, op);
+    return GR_OK;
+}
+
+gr_result gr_canvas_draw_text_layout(gr_canvas *c, gr_text_layout *layout, gr_point origin, gr_color color)
+{
+    if (!layout || !gr_valid_point(origin) || !gr_valid_color(color))
+        return GR_ERROR_ARGUMENT;
+    gr_draw_op op = {.kind = GR_DRAW_TEXT_LAYOUT};
+    op.value.text_layout.layout = gr_text_layout_ref(layout);
+    op.value.text_layout.origin = origin;
+    op.value.text_layout.color = color;
     push(c, op);
     return GR_OK;
 }

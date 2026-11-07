@@ -120,6 +120,9 @@ GskRenderNode *gr_gsk_recording(const gr_display_list *list)
                 ++top->pushes;
                 break;
             }
+            case GR_DRAW_TEXT_LAYOUT:
+                /* Native text drawing lands with the Pango text system. */
+                break;
             case GR_DRAW_FILL_PATH:
             case GR_DRAW_STROKE_PATH:
             case GR_DRAW_IMAGE:
