@@ -50,5 +50,5 @@ orientation using an asymmetric native scene first. Use `gr_conf_harness` from
 for hosting/lifetime tests. Test idle wakeup, resizing, teardown, masks and
 reparenting. Native tests need a suitable graphical session.
 
-Add a shell under `examples/demo/platform`, sharing the existing scene code and
-CLI. Document prerequisites, mapping, known limitations and tested environments.
+Add a shell under `examples/shared/platform` implementing `platform.h` and select
+it in `examples/shared/CMakeLists.txt`; every example then builds for it. Document prerequisites, mapping, known limitations and tested environments.

@@ -2,7 +2,7 @@
 #define NOMINMAX
 #endif
 
-#include "demo.h"
+#include "platform.h"
 
 #include <graphite/windows.h>
 
@@ -11,6 +11,7 @@
 #include <chrono>
 #include <dcomp.h>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 #include <wincodec.h>
@@ -22,7 +23,7 @@ constexpr UINT frame_message = WM_APP + 1;
 
 struct WindowState
 {
-    demo *content = nullptr;
+    example *content = nullptr;
     gr_windows_host *host = nullptr;
     std::atomic<bool> frame_pending{false};
     unsigned frames = 0, fps_ticks = 0, unflushed[60]{}, missed = 0;
@@ -39,7 +40,7 @@ void update_frame(WindowState &s)
     if (s.selftest && s.frames > 1 && gr_scene_needs_commit(s.content->scene))
         s.unflushed[s.missed++] = s.frames;
     auto now = std::chrono::steady_clock::now();
-    demo_update(s.content, std::chrono::duration<double>(now - s.start).count());
+    example_update(s.content, std::chrono::duration<double>(now - s.start).count());
     if (s.fps)
     {
         ++s.fps_ticks;
@@ -186,12 +187,12 @@ bool save_png(const char *path, gr_windows_pixels const &pixels)
 }
 } // namespace
 
-gr_text_system *demo_platform_text_system(void)
+gr_text_system *example_platform_text_system(void)
 {
     return gr_windows_text_system_new();
 }
 
-int demo_platform_run(demo *content, bool selftest, bool fps)
+int example_platform_run(example *content, bool selftest, bool fps)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WindowState state;
@@ -201,18 +202,22 @@ int demo_platform_run(demo *content, bool selftest, bool fps)
     WNDCLASSW wc{};
     wc.lpfnWndProc = window_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = L"GraphiteCDemo";
+    wc.lpszClassName = L"GraphiteExample";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     RegisterClassW(&wc);
-    auto size = demo_size(content->kind);
+    auto size = content->desc->size;
     UINT dpi = GetDpiForSystem();
     double scale = dpi / 96.0;
     RECT rect{0, 0, static_cast<LONG>(std::round(size.width * scale)),
               static_cast<LONG>(std::round(size.height * scale))};
     AdjustWindowRectExForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
-    HWND window = CreateWindowExW(
-        0, wc.lpszClassName, L"graphite demo (Windows.UI.Composition)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
-        CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, wc.hInstance, &state);
+    std::wstring title = L"graphite ";
+    for (const char *c = content->desc->name; *c; ++c) /* Example names are ASCII. */
+        title += static_cast<wchar_t>(*c);
+    title += L" (Windows.UI.Composition)";
+    HWND window = CreateWindowExW(0, wc.lpszClassName, title.c_str(), WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
+                                  CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr,
+                                  wc.hInstance, &state);
     if (!window)
         return 1;
     state.host = gr_windows_attach_to_hwnd(content->scene, window);
@@ -247,7 +252,7 @@ int demo_platform_run(demo *content, bool selftest, bool fps)
     return state.status;
 }
 
-bool demo_platform_snapshot(demo *content, const char *path)
+bool example_platform_snapshot(example *content, const char *path)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     gr_windows_host *host = gr_windows_offscreen_new(content->scene, 1);

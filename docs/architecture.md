@@ -9,7 +9,7 @@ Cross-platform consistency is semantic, not pixel-identical.
 
 Core lives in `src/core`, native implementations in `src/platforms`, public
 headers in `include/graphite`, and backend-independent rendering tests in
-`conformance`. The shared demo is in `examples/demo`.
+`conformance`. Example scenes and their shared native shells are in `examples`.
 
 ## Ownership
 

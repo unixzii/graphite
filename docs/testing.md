@@ -7,7 +7,7 @@ cmake -S . -B /tmp/graphite-test -DCMAKE_BUILD_TYPE=Debug
 cmake --build /tmp/graphite-test --target check
 ```
 
-`check` builds tests and enabled demo/conformance targets, runs clang-format 18
+`check` builds tests and enabled example/conformance targets, runs clang-format 18
 validation and invokes CTest with progress output. `BUILD_TESTING=OFF` disables
 tests; examples and conformance have independent build switches. See
 [CMake packages](cmake.md).
@@ -54,7 +54,7 @@ main run-loop idle point on macOS. They test scheduling, not throughput.
 
 `tests/package` independently configures C or C++ projects using installed targets.
 Run against both static/shared packages and relocated installation prefixes.
-[Benchmarks](../benchmarks/README.md) measure core work and native demo processes;
+[Benchmarks](../benchmarks/README.md) measure core work and native example processes;
 keep timing runs separate from instrumented allocation runs and builds.
 
 ## Text tests

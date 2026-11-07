@@ -26,8 +26,8 @@
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
-- **Platform-neutral demo** with two scenes (`showcase`, `ui`), `--selftest`,
-  `--fps` and `--snapshot`.
+- **Examples**: one executable per scene (`showcase`, `ui`, `stress`) on a
+  shared native shell with `--selftest`, `--fps` and `--snapshot`.
 
 ## Next
 

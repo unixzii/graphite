@@ -83,4 +83,4 @@ LSAN_OPTIONS="suppressions=$PWD/tests/gtk-lsan.supp" GRAPHITE_GSK_RENDERERS=gl,c
   cmake --build /tmp/graphite-gtk-asan --target check
 ```
 
-See [demo usage](../../../examples/demo/README.md) for the frame-clock shell.
+See [example usage](../../../examples/README.md) for the frame-clock shell.

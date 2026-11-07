@@ -37,7 +37,7 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
   there, so it is what the read-back uses.
 - **`SetTimer` cannot drive 60 Hz animation**: its period is rounded up to
   the system timer resolution, so a 16 ms timer ticks at about 39 Hz. The
-  demo uses the compositor clock and posts updates to the window thread.
+  example shell uses the compositor clock and posts updates to the window thread.
 - **On the development VM's GPU, Direct2D strokes are not anti-aliased.**
   `DrawGeometry` drew strokes without a single partially covered pixel
   (counted on a test pentagram: 0 of 700 stroke pixels, against 837 of

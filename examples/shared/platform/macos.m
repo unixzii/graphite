@@ -1,4 +1,4 @@
-#include "demo.h"
+#include "platform.h"
 
 #include <graphite/macos.h>
 
@@ -22,9 +22,9 @@ static void stop_application(void)
 }
 
 API_AVAILABLE(macos(14.0))
-@interface GRDemoController : NSObject <NSWindowDelegate>
+@interface GRExampleController : NSObject <NSWindowDelegate>
 {
-    demo *_demo;
+    example *_example;
     CADisplayLink *_displayLink;
     unsigned _frame;
     unsigned _fpsTicks;
@@ -41,19 +41,19 @@ API_AVAILABLE(macos(14.0))
 }
 @property(nonatomic, weak) NSWindow *window;
 @property(nonatomic, readonly) int status;
-- (instancetype)initWithDemo:(demo *)content selftest:(bool)selftest fps:(bool)fps;
+- (instancetype)initWithExample:(example *)content selftest:(bool)selftest fps:(bool)fps;
 - (void)start;
 - (void)stop;
 @end
 
-@implementation GRDemoController
+@implementation GRExampleController
 
-- (instancetype)initWithDemo:(demo *)content selftest:(bool)selftest fps:(bool)fps
+- (instancetype)initWithExample:(example *)content selftest:(bool)selftest fps:(bool)fps
 {
     self = [super init];
     if (self)
     {
-        _demo = content;
+        _example = content;
         _selftest = selftest;
         _reportFPS = fps;
     }
@@ -89,7 +89,7 @@ API_AVAILABLE(macos(14.0))
  * are only counted, because their changes legitimately merge into one commit. */
 - (void)installIdleObserver
 {
-    __weak GRDemoController *weakSelf = self;
+    __weak GRExampleController *weakSelf = self;
     _idleObserver = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopBeforeWaiting, true, 1999500,
                                                        ^(CFRunLoopObserverRef observer, CFRunLoopActivity activity) {
                                                          (void)observer;
@@ -104,7 +104,7 @@ API_AVAILABLE(macos(14.0))
     if (!_changedSinceIdle)
         return;
     _changedSinceIdle = false;
-    if (!gr_scene_needs_commit(_demo->scene))
+    if (!gr_scene_needs_commit(_example->scene))
         ++_committedIdles;
     else if (_uncommittedCount < 60)
         _uncommitted[_uncommittedCount++] = _frame;
@@ -134,7 +134,7 @@ API_AVAILABLE(macos(14.0))
     for (unsigned i = 0; i < _uncommittedCount; ++i)
         printf("%s%u", i ? ", " : "", _uncommitted[i]);
     printf("] idle_commits=%u coalesced=%u backing_scale=%g\n", _committedIdles, _coalesced,
-           gr_scene_get_backing_scale(_demo->scene));
+           gr_scene_get_backing_scale(_example->scene));
     fflush(stdout);
     _status = _uncommittedCount || !_committedIdles ? 1 : 0;
     [self stop];
@@ -154,11 +154,11 @@ API_AVAILABLE(macos(14.0))
     }
     ++_frame;
     // The run loop did not go idle since the previous tick, so both ticks share one commit.
-    if (_selftest && _frame > 1 && gr_scene_needs_commit(_demo->scene))
+    if (_selftest && _frame > 1 && gr_scene_needs_commit(_example->scene))
         ++_coalesced;
 
     // Advance by display time, so animation speed is independent of refresh rate.
-    demo_update(_demo, link.targetTimestamp - _startTime);
+    example_update(_example, link.targetTimestamp - _startTime);
     _changedSinceIdle = true;
     if (_reportFPS)
         [self reportFrameRateAtTime:link.timestamp];
@@ -168,12 +168,12 @@ API_AVAILABLE(macos(14.0))
 
 @end
 
-gr_text_system *demo_platform_text_system(void)
+gr_text_system *example_platform_text_system(void)
 {
     return gr_macos_text_system_new();
 }
 
-int demo_platform_run(demo *d, bool selftest, bool fps)
+int example_platform_run(example *ex, bool selftest, bool fps)
 {
     @autoreleasepool
     {
@@ -181,18 +181,20 @@ int demo_platform_run(demo *d, bool selftest, bool fps)
         {
             NSApplication *application = [NSApplication sharedApplication];
             [application setActivationPolicy:NSApplicationActivationPolicyRegular];
-            gr_size size = demo_size(d->kind);
+            gr_size size = ex->desc->size;
             NSWindow *window = [[NSWindow alloc]
                 initWithContentRect:NSMakeRect(0, 0, size.width, size.height)
                           styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
                             backing:NSBackingStoreBuffered
                               defer:NO];
             window.releasedWhenClosed = NO;
-            window.title = @"graphite demo (Core Animation)";
-            GRDemoController *controller = [[GRDemoController alloc] initWithDemo:d selftest:selftest fps:fps];
+            window.title = [NSString stringWithFormat:@"graphite %s (Core Animation)", ex->desc->name];
+            GRExampleController *controller = [[GRExampleController alloc] initWithExample:ex
+                                                                                  selftest:selftest
+                                                                                       fps:fps];
             controller.window = window;
             window.delegate = controller;
-            gr_macos_host *host = gr_macos_attach_to_view(d->scene, (__bridge void *)window.contentView);
+            gr_macos_host *host = gr_macos_attach_to_view(ex->scene, (__bridge void *)window.contentView);
             if (!host)
             {
                 fprintf(stderr, "cannot attach macOS backend\n");
@@ -209,17 +211,17 @@ int demo_platform_run(demo *d, bool selftest, bool fps)
             gr_macos_host_unref(host);
             return controller.status;
         }
-        fprintf(stderr, "the display-linked demo requires macOS 14 or later\n");
+        fprintf(stderr, "the display-linked example requires macOS 14 or later\n");
         return 1;
     }
 }
 
-bool demo_platform_snapshot(demo *d, const char *path)
+bool example_platform_snapshot(example *ex, const char *path)
 {
     @autoreleasepool
     {
-        gr_size size = demo_size(d->kind);
-        gr_macos_host *host = gr_macos_offscreen_new(d->scene, size, 1);
+        gr_size size = ex->desc->size;
+        gr_macos_host *host = gr_macos_offscreen_new(ex->scene, size, 1);
         if (!host)
         {
             fprintf(stderr, "cannot attach offscreen backend\n");

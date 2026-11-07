@@ -9,7 +9,7 @@ are documented in `src/platforms/{macos,gtk,windows}/README.md`.
 |---|---|---|
 | `BUILD_SHARED_LIBS` | `OFF` | Build core and enabled native backends as shared libraries instead of static libraries. |
 | `BUILD_TESTING` | `ON` | Build/register tests and provide the `check` target. |
-| `GRAPHITE_BUILD_EXAMPLES` | `ON` | Build demo scenes and the available native demo. |
+| `GRAPHITE_BUILD_EXAMPLES` | `ON` | Build the example scenes, as executables where a native shell is available. |
 | `GRAPHITE_BUILD_CONFORMANCE` | `ON` | Build conformance helpers and native runners. |
 | `GRAPHITE_GTK` | `OFF` | Enable the GTK 4.22+ backend. |
 | `GRAPHITE_SANITIZERS` | `OFF` | Enable ASan/UBSan with Clang/GCC. |
@@ -41,7 +41,7 @@ prompt and a private writable prefix; multi-configuration generators also need
 `--config Release` for building/installing. No administrator privileges are needed.
 
 Installation includes public headers, libraries, and the versioned CMake config
-under `${CMAKE_INSTALL_LIBDIR}/cmake/graphite`. It does not install tests, demos,
+under `${CMAKE_INSTALL_LIBDIR}/cmake/graphite`. It does not install tests, examples,
 conformance tools, or third-party platform SDKs. GNUInstallDirs controls the
 include/library/runtime directories. No CMake user package registry is modified.
 

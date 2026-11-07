@@ -1,4 +1,4 @@
-#include "demo.h"
+#include "example.h"
 
 gr_color hex(uint32_t rgb)
 {
@@ -11,62 +11,62 @@ gr_color alpha(gr_color c, float a)
     return c;
 }
 
-gr_layer *new_layer(demo *d, gr_layer_kind kind)
+gr_layer *new_layer(example *ex, gr_layer_kind kind)
 {
-    if (d->layer_count == d->layer_capacity)
+    if (ex->layer_count == ex->layer_capacity)
     {
-        d->layer_capacity = d->layer_capacity ? d->layer_capacity * 2 : 64;
-        void *p = realloc(d->layers, d->layer_capacity * sizeof(*d->layers));
+        ex->layer_capacity = ex->layer_capacity ? ex->layer_capacity * 2 : 64;
+        void *p = realloc(ex->layers, ex->layer_capacity * sizeof(*ex->layers));
         if (!p)
             abort();
-        d->layers = p;
+        ex->layers = p;
     }
-    gr_layer *l = gr_layer_new(d->scene, kind);
+    gr_layer *l = gr_layer_new(ex->scene, kind);
     if (!l)
         abort();
-    d->layers[d->layer_count++] = l;
+    ex->layers[ex->layer_count++] = l;
     return l;
 }
 
-gr_layer *layer(demo *d, gr_layer *parent, gr_rect rect)
+gr_layer *layer(example *ex, gr_layer *parent, gr_rect rect)
 {
-    gr_layer *l = new_layer(d, GR_LAYER_CONTAINER);
-    D_OK(gr_layer_set_frame(l, rect));
-    D_OK(gr_layer_add_child(parent, l));
+    gr_layer *l = new_layer(ex, GR_LAYER_CONTAINER);
+    EX_OK(gr_layer_set_frame(l, rect));
+    EX_OK(gr_layer_add_child(parent, l));
     return l;
 }
 
-gr_layer *pill(demo *d, gr_layer *parent, gr_rect rect, gr_color color, double radius)
+gr_layer *pill(example *ex, gr_layer *parent, gr_rect rect, gr_color color, double radius)
 {
-    gr_layer *l = layer(d, parent, rect);
+    gr_layer *l = layer(ex, parent, rect);
     background(l, color);
-    D_OK(gr_layer_set_corner_radius(l, radius));
+    EX_OK(gr_layer_set_corner_radius(l, radius));
     return l;
 }
 
-gr_layer *shape(demo *d, gr_layer *parent, gr_rect rect)
+gr_layer *shape(example *ex, gr_layer *parent, gr_rect rect)
 {
-    gr_layer *l = new_layer(d, GR_LAYER_SHAPE);
-    D_OK(gr_layer_set_frame(l, rect));
-    D_OK(gr_layer_add_child(parent, l));
+    gr_layer *l = new_layer(ex, GR_LAYER_SHAPE);
+    EX_OK(gr_layer_set_frame(l, rect));
+    EX_OK(gr_layer_add_child(parent, l));
     return l;
 }
 
 void background(gr_layer *l, gr_color c)
 {
-    D_OK(gr_layer_set_background(l, &c));
+    EX_OK(gr_layer_set_background(l, &c));
 }
 
 void border(gr_layer *l, double width, gr_color c)
 {
     gr_border b = {width, c};
-    D_OK(gr_layer_set_border(l, &b));
+    EX_OK(gr_layer_set_border(l, &b));
 }
 
-void demo_shadow(gr_layer *l, gr_color c, double x, double y, double sigma, gr_path *p)
+void drop_shadow(gr_layer *l, gr_color c, double x, double y, double sigma, gr_path *p)
 {
     gr_shadow s = {.color = c, .offset = {x, y}, .blur_sigma = sigma, .path = p};
-    D_OK(gr_layer_set_shadow(l, &s));
+    EX_OK(gr_layer_set_shadow(l, &s));
 }
 
 gr_paint *paint(gr_color c)
@@ -78,7 +78,7 @@ gr_paint *paint(gr_color c)
 void fill(gr_layer *l, gr_color c)
 {
     gr_paint *p = paint(c);
-    D_OK(gr_shape_layer_set_fill(l, p));
+    EX_OK(gr_shape_layer_set_fill(l, p));
     gr_paint_unref(p);
 }
 
@@ -86,20 +86,20 @@ void set_path(gr_layer *l, gr_path *p)
 {
     if (!p)
         abort();
-    D_OK(gr_shape_layer_set_path(l, p));
+    EX_OK(gr_shape_layer_set_path(l, p));
     gr_path_unref(p);
 }
 
 void set_image(gr_layer *l, gr_image *image)
 {
-    D_OK(gr_content_layer_set_image(l, image));
+    EX_OK(gr_content_layer_set_image(l, image));
 }
 
 void set_gradient(gr_layer *l, gr_paint *p)
 {
     if (!p)
         abort();
-    D_OK(gr_gradient_layer_set_gradient(l, p));
+    EX_OK(gr_gradient_layer_set_gradient(l, p));
     gr_paint_unref(p);
 }
 
@@ -141,20 +141,20 @@ gr_stroke *stroke(gr_paint *p, double width, gr_line_cap cap, gr_line_join join,
 
 void shape_stroke(gr_layer *l, gr_stroke *s)
 {
-    D_OK(gr_shape_layer_set_stroke(l, s));
+    EX_OK(gr_shape_layer_set_stroke(l, s));
     gr_stroke_unref(s);
 }
 
 void draw_fill(gr_canvas *c, gr_path *p, gr_fill_rule rule, gr_paint *color)
 {
-    D_OK(gr_canvas_fill_path(c, p, rule, color));
+    EX_OK(gr_canvas_fill_path(c, p, rule, color));
     gr_path_unref(p);
     gr_paint_unref(color);
 }
 
 void draw_stroke(gr_canvas *c, gr_path *p, gr_stroke *s)
 {
-    D_OK(gr_canvas_stroke_path(c, p, s));
+    EX_OK(gr_canvas_stroke_path(c, p, s));
     gr_path_unref(p);
     gr_stroke_unref(s);
 }
@@ -162,32 +162,32 @@ void draw_stroke(gr_canvas *c, gr_path *p, gr_stroke *s)
 void draw_rect(gr_canvas *c, gr_rect rect, gr_color color)
 {
     gr_paint *p = paint(color);
-    D_OK(gr_canvas_fill_rect(c, rect, p));
+    EX_OK(gr_canvas_fill_rect(c, rect, p));
     gr_paint_unref(p);
 }
 
 void move_to(gr_path_builder *b, gr_point p)
 {
     gr_path_element e = {GR_PATH_MOVE, {p}};
-    D_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
+    EX_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
 }
 
 void line_to(gr_path_builder *b, gr_point p)
 {
     gr_path_element e = {GR_PATH_LINE, {p}};
-    D_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
+    EX_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
 }
 
 void curve_to(gr_path_builder *b, gr_point a, gr_point c, gr_point p)
 {
     gr_path_element e = {GR_PATH_CUBIC, {a, c, p}};
-    D_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
+    EX_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
 }
 
 void close_path(gr_path_builder *b)
 {
     gr_path_element e = {.verb = GR_PATH_CLOSE};
-    D_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
+    EX_OK(gr_path_builder_append(b, (gr_path_element_list){&e, 1}));
 }
 
 gr_path *finish_path(gr_path_builder *b)
@@ -200,14 +200,14 @@ gr_path *finish_path(gr_path_builder *b)
 gr_path *circle(gr_point center, double radius)
 {
     gr_path_builder *b = gr_path_builder_new();
-    D_OK(gr_path_builder_add_ellipse(b, D_RECT(center.x - radius, center.y - radius, 2 * radius, 2 * radius)));
+    EX_OK(gr_path_builder_add_ellipse(b, EX_RECT(center.x - radius, center.y - radius, 2 * radius, 2 * radius)));
     return finish_path(b);
 }
 
 gr_path *rounded(gr_rect r, double radius, gr_corners corners)
 {
     gr_path_builder *b = gr_path_builder_new();
-    D_OK(gr_path_builder_add_rounded_rect(b, r, radius, corners));
+    EX_OK(gr_path_builder_add_rounded_rect(b, r, radius, corners));
     return finish_path(b);
 }
 
@@ -216,7 +216,8 @@ gr_path *star_path(gr_point center, double outer, double inner, size_t points, d
     gr_path_builder *b = gr_path_builder_new();
     for (size_t i = 0; i < points * 2; ++i)
     {
-        double r = i % 2 == 0 ? outer : inner, a = rotation_angle - D_PI / 2 + (double)i * D_TAU / (double)(points * 2);
+        double r = i % 2 == 0 ? outer : inner,
+               a = rotation_angle - EX_PI / 2 + (double)i * EX_TAU / (double)(points * 2);
         gr_point p = {center.x + r * cos(a), center.y + r * sin(a)};
         if (i == 0)
             move_to(b, p);
@@ -232,7 +233,7 @@ gr_path *star_polygon(gr_point center, double radius, size_t points, size_t skip
     gr_path_builder *b = gr_path_builder_new();
     for (size_t i = 0; i < points; ++i)
     {
-        double a = rotation_angle - D_PI / 2 + (double)((i * skip) % points) * D_TAU / (double)points;
+        double a = rotation_angle - EX_PI / 2 + (double)((i * skip) % points) * EX_TAU / (double)points;
         gr_point p = {center.x + radius * cos(a), center.y + radius * sin(a)};
         if (i == 0)
             move_to(b, p);
@@ -266,54 +267,37 @@ double smooth(double x)
 
 double wave(double t, double period, double offset)
 {
-    return 0.5 - 0.5 * cos(D_TAU * (t / period + offset));
+    return 0.5 - 0.5 * cos(EX_TAU * (t / period + offset));
 }
 
-gr_size demo_size(demo_kind kind)
+example *example_new(const example_desc *desc, gr_text_system *text)
 {
-    if (kind == DEMO_STRESS)
-        return (gr_size){800, 800};
-    return kind == DEMO_UI ? (gr_size){1000, 600} : (gr_size){960, 640};
-}
-
-demo *demo_new(demo_kind kind, gr_text_system *text)
-{
-    demo *d = calloc(1, sizeof(*d));
-    if (!d)
+    example *ex = calloc(1, sizeof(*ex));
+    if (!ex)
         abort();
-    d->kind = kind;
-    d->text = gr_text_system_ref(text);
-    d->scene = gr_scene_new(demo_size(kind));
-    if (kind == DEMO_UI)
-        ui_build(d);
-    else if (kind == DEMO_STRESS)
-        stress_build(d);
-    else
-        showcase_build(d);
-    demo_update(d, 0);
-    return d;
+    ex->desc = desc;
+    ex->text = gr_text_system_ref(text);
+    ex->scene = gr_scene_new(desc->size);
+    if (!ex->scene)
+        abort();
+    ex->state = desc->build(ex);
+    example_update(ex, 0);
+    return ex;
 }
 
-void demo_update(demo *d, double t)
+void example_update(example *ex, double time)
 {
-    d->time = t;
-    if (d->kind == DEMO_UI)
-        ui_update(d, t);
-    else if (d->kind == DEMO_STRESS)
-        stress_update(d, t);
-    else
-        showcase_update(d, t);
+    ex->desc->update(ex->state, time);
 }
 
-void demo_free(demo *d)
+void example_free(example *ex)
 {
-    gr_scene_unref(d->scene);
-    for (size_t i = 0; i < d->layer_count; ++i)
-        gr_layer_unref(d->layers[i]);
-    gr_image_unref(d->drawing_picture);
-    free(d->layers);
-    if (d->stress_cells)
-        free(d->stress_cells);
-    gr_text_system_unref(d->text);
-    free(d);
+    gr_scene_unref(ex->scene);
+    for (size_t i = 0; i < ex->layer_count; ++i)
+        gr_layer_unref(ex->layers[i]);
+    free(ex->layers);
+    if (ex->desc->free)
+        ex->desc->free(ex->state);
+    gr_text_system_unref(ex->text);
+    free(ex);
 }

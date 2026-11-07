@@ -1,17 +1,17 @@
-#include "demo.h"
+#include "platform.h"
 
 #include <graphite/gtk.h>
 
 typedef struct
 {
-    demo *content;
+    example *content;
     GMainLoop *loop;
     guint tick_id;
     unsigned frame, fps_ticks, unflushed[60], unflushed_count;
     gint64 start_time, report_time;
     bool selftest, fps;
     int status;
-} demo_window;
+} example_window;
 
 static bool init(void)
 {
@@ -24,12 +24,12 @@ static bool init(void)
 static gboolean close_window(GtkWindow *window, gpointer userdata)
 {
     (void)window;
-    demo_window *state = userdata;
+    example_window *state = userdata;
     g_main_loop_quit(state->loop);
     return TRUE;
 }
 
-static void report_fps(demo_window *state, gint64 time)
+static void report_fps(example_window *state, gint64 time)
 {
     ++state->fps_ticks;
     double elapsed = (double)(time - state->report_time) / G_TIME_SPAN_SECOND;
@@ -41,7 +41,7 @@ static void report_fps(demo_window *state, gint64 time)
     state->fps_ticks = 0;
 }
 
-static void finish_selftest(demo_window *state)
+static void finish_selftest(example_window *state)
 {
     printf("selftest: frames=%u uncommitted=[", state->frame);
     for (unsigned i = 0; i < state->unflushed_count; ++i)
@@ -55,7 +55,7 @@ static void finish_selftest(demo_window *state)
 static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer userdata)
 {
     (void)widget;
-    demo_window *state = userdata;
+    example_window *state = userdata;
     gint64 time = gdk_frame_clock_get_frame_time(clock);
     if (state->frame == 0)
         state->start_time = state->report_time = time;
@@ -64,7 +64,7 @@ static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer userdata)
         state->unflushed[state->unflushed_count++] = state->frame;
 
     /* The backend commits in layout after this update-phase tick. */
-    demo_update(state->content, (double)(time - state->start_time) / G_TIME_SPAN_SECOND);
+    example_update(state->content, (double)(time - state->start_time) / G_TIME_SPAN_SECOND);
     if (state->fps)
         report_fps(state, time);
     if (state->selftest && state->frame == 60)
@@ -76,12 +76,12 @@ static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer userdata)
     return G_SOURCE_CONTINUE;
 }
 
-gr_text_system *demo_platform_text_system(void)
+gr_text_system *example_platform_text_system(void)
 {
     return gr_gtk_text_system_new();
 }
 
-int demo_platform_run(demo *content, bool selftest, bool fps)
+int example_platform_run(example *content, bool selftest, bool fps)
 {
     if (!init())
         return 1;
@@ -94,12 +94,14 @@ int demo_platform_run(demo *content, bool selftest, bool fps)
     GtkWidget *widget = gr_gtk_host_get_widget(host);
     GtkWindow *window = GTK_WINDOW(gtk_window_new());
     g_object_ref_sink(window);
-    gr_size size = demo_size(content->kind);
-    gtk_window_set_title(window, "graphite demo (GTK)");
+    gr_size size = content->desc->size;
+    char *title = g_strdup_printf("graphite %s (GTK)", content->desc->name);
+    gtk_window_set_title(window, title);
+    g_free(title);
     gtk_window_set_default_size(window, (int)size.width, (int)size.height);
     gtk_window_set_child(window, widget);
 
-    demo_window state = {.content = content, .loop = g_main_loop_new(NULL, FALSE), .selftest = selftest, .fps = fps};
+    example_window state = {.content = content, .loop = g_main_loop_new(NULL, FALSE), .selftest = selftest, .fps = fps};
     gulong close_handler = g_signal_connect(window, "close-request", G_CALLBACK(close_window), &state);
     state.tick_id = gtk_widget_add_tick_callback(widget, tick, &state, NULL);
     gtk_window_present(window);
@@ -144,7 +146,7 @@ static gr_gtk_renderer *snapshot_renderer(void)
     return renderer;
 }
 
-bool demo_platform_snapshot(demo *content, const char *path)
+bool example_platform_snapshot(example *content, const char *path)
 {
     if (!init())
         return false;

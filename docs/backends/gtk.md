@@ -44,7 +44,7 @@ Public declarations: [`gtk.h`](../../include/graphite/gtk.h).
   frames keep coming, so a missing `request_phase` still commits. The widget
   test waits for the clock to go idle before its second change.
 - **Tick callbacks run before the first layout phase.** On the first tick
-  the initial scene is not committed yet; the demo self-test starts checking
+  the initial scene is not committed yet; the example self-test starts checking
   from the second tick.
 - `gdk_texture_download` gives B8G8R8A8; use `GdkTextureDownloader` with
   `GDK_MEMORY_R8G8B8A8_PREMULTIPLIED`. Rows are top-down.

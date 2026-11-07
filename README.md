@@ -10,12 +10,12 @@ and Windows.UI.Composition on Windows 11.
 ```sh
 cmake -S . -B /tmp/graphite-build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/graphite-build --parallel
-/tmp/graphite-build/examples/demo/demo
-/tmp/graphite-build/examples/demo/demo --scene ui
+/tmp/graphite-build/examples/showcase/showcase
+/tmp/graphite-build/examples/ui/ui
 ```
 
 On Linux add `-DGRAPHITE_GTK=ON` and install GTK 4.22+ development headers. On
-Windows use a Visual Studio developer prompt; the demo is `demo.exe`. Shared
+Windows use a Visual Studio developer prompt; examples are `showcase.exe` etc. Shared
 Windows builds put executables and DLLs together in `build/bin`.
 
 `BUILD_SHARED_LIBS` selects static/shared libraries. `BUILD_TESTING`,
@@ -34,6 +34,6 @@ working graphical session. Core-only CI does not require a window server.
 
 - [Documentation](docs/README.md)
 - [Public API conventions](include/graphite/types.h)
-- [Demo](examples/demo/README.md)
+- [Examples](examples/README.md)
 - [Conformance](conformance/README.md)
 - [Benchmarks](benchmarks/README.md)

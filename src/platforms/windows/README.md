@@ -56,17 +56,17 @@ From an interactive Visual Studio developer prompt:
 cmake -S . -B C:\graphite-build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCLANG_FORMAT=C:/path/to/clang-format-18.exe
 cmake --build C:\graphite-build --target check
 C:\graphite-build\conformance\graphite_windows_conformance.exe
-C:\graphite-build\examples\demo\demo.exe --scene ui
+C:\graphite-build\examples\ui\ui.exe
 ```
 
 Use `Release` in a separate build directory for optimized validation. Windows
-builds enable this backend and the native demo automatically. The CMake sanitizer
+builds enable this backend and the native examples automatically. The CMake sanitizer
 option is not enabled for this MSVC ARM64 configuration; Debug runtime checks and
 Release execution are reported separately from macOS/Linux sanitizer evidence.
 
-## Demo clock
+## Example clock
 
-`examples/demo/platform/windows.cpp` waits for the Windows 11 compositor clock
+`examples/shared/platform/windows.cpp` waits for the Windows 11 compositor clock
 on a worker and posts at most one outstanding frame message to the window thread.
 Only that UI thread changes the Scene. Animation uses elapsed steady-clock time,
 not a fixed frame-count divisor. Closing the window signals/joins the clock worker
@@ -83,7 +83,7 @@ Native tests cover HWND placement, DPI, automatic/idle commits, movement,
 resizing, visual attachment/detachment, alpha readback and host/Scene lifetimes.
 Conformance covers 36 cases at three scales. Run these in an interactive desktop;
 SSH session 0 cannot provide rendering evidence. A temporarily awake display is
-required for compositor-clock demo selftests.
+required for compositor-clock example selftests.
 
 Device-loss recovery is not implemented, and shadow/drawing raster surfaces
 are per-layer. Effect LayerVisuals are re-measured on every batch, walking the

@@ -29,12 +29,12 @@ it is not peak transient heap or RSS. Allocation counts include successful
 malloc/realloc calls. `remaining_bytes` is the post-teardown heap delta, not a
 whole-application leak guarantee.
 
-## Native demo
+## Native examples
 
-Build the demo in Release, then run in a graphical session:
+Build the examples in Release, then run in a graphical session:
 
 ```sh
-python3 benchmarks/native.py /path/to/demo /tmp/graphite-native-perf
+python3 benchmarks/native.py /path/to/build/examples /tmp/graphite-native-perf
 ```
 
 Five processes per scene/mode write `native.csv` and complete logs, including

@@ -14,7 +14,7 @@ if(NOT result EQUAL 0 OR NOT version MATCHES "clang-format version 18\\.")
     message(FATAL_ERROR "Expected clang-format 18, got: ${version}")
 endif()
 set(sources)
-foreach(directory src include tests conformance examples/demo benchmarks)
+foreach(directory src include tests conformance examples benchmarks)
     file(GLOB_RECURSE files
         "${GRAPHITE_ROOT}/${directory}/*.c" "${GRAPHITE_ROOT}/${directory}/*.h"
         "${GRAPHITE_ROOT}/${directory}/*.hpp" "${GRAPHITE_ROOT}/${directory}/*.cpp" "${GRAPHITE_ROOT}/${directory}/*.m"
