@@ -41,14 +41,18 @@ conformance suite's text cases) lays text out with CoreText:
 - **Ellipses are built by hand**: the visible clusters plus a separate token
   line. `CTLineCreateTruncatedLine` maps the token run onto the elided string
   range and returns caret offset 0 for elided indices.
-- **Draw run by run.** After a run with its own color, `CTLineDraw` leaves
-  that color in the context, and later runs using
+- **Draw glyphs run by run.** After a run with its own color, `CTLineDraw`
+  leaves that color in the context, and later runs using
   `kCTForegroundColorFromContextAttributeName` inherit it. Replay resets the
   fill color before each context-colored run, flips the text matrix for the
   y-down CTM and turns off font smoothing (backing stores are transparent).
-- Underline and strikethrough are drawn as rectangles from the run's font
-  metrics: CoreText draws no strikethrough, and drawing both the same way
-  keeps them consistent.
+- **Underlines are CoreText's own, from a second `CTLineDraw` with invisible
+  glyphs.** Only `CTLineDraw` draws underlines (`CTRunDraw` never does), and
+  they skip descenders (g, y, p). For context-colored runs the underline takes
+  the context's **stroke** color, not its fill color, so both are set to the
+  draw color first; otherwise those underlines come out black.
+- CoreText draws no strikethrough, so it is a rectangle from the run's font
+  metrics. It does not skip glyphs (browsers do not either).
 - Selection rectangles come from `CTLineEnumerateCaretOffsets`, merged per
   line, so a range across a direction change yields one rectangle per visual
   piece. Carets use the same grapheme edges: `CTLineGetOffsetForStringIndex`'s

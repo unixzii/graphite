@@ -180,7 +180,14 @@ static void apply_style(NSMutableAttributedString *s, NSRange range, const gr_te
     if (fields & GR_TEXT_STYLE_SLANT)
         [s addAttribute:italic_key value:@(style->slant == GR_FONT_SLANT_ITALIC) range:range];
     if (fields & GR_TEXT_STYLE_DECORATIONS)
+    {
+        /* Underlines are CoreText's own (they skip descenders); strikethrough is drawn here. */
         [s addAttribute:decorations_key value:@(style->decorations) range:range];
+        bool underline = style->decorations & GR_TEXT_DECORATION_UNDERLINE;
+        [s addAttribute:CT_KEY(kCTUnderlineStyleAttributeName)
+                  value:@(underline ? kCTUnderlineStyleSingle : kCTUnderlineStyleNone)
+                  range:range];
+    }
     if (fields & GR_TEXT_STYLE_LETTER_SPACING)
         [s addAttribute:CT_KEY(kCTTrackingAttributeName) value:@(style->letter_spacing) range:range];
     if (fields & GR_TEXT_STYLE_COLOR)
@@ -753,7 +760,8 @@ const gr_text_layout_vtable gr_ct_layout_vtable = {
 
 /* Drawing */
 
-static void decorate(CGContextRef c, CTLineRef line, double x, double baseline, CGColorRef fallback)
+/* Draws strikethrough from the run's font metrics; CoreText draws none. */
+static void strike(CGContextRef c, CTLineRef line, double x, double baseline, CGColorRef fallback)
 {
     NSArray *runs = (__bridge NSArray *)CTLineGetGlyphRuns(line);
     for (id object in runs)
@@ -763,7 +771,7 @@ static void decorate(CGContextRef c, CTLineRef line, double x, double baseline, 
         unsigned decorations = [attributes[decorations_key] unsignedIntValue];
         CTFontRef font = (__bridge CTFontRef)attributes[CT_KEY(kCTFontAttributeName)];
         CFIndex count = CTRunGetGlyphCount(run);
-        if (!decorations || !font || !count)
+        if (!(decorations & GR_TEXT_DECORATION_STRIKETHROUGH) || !font || !count)
             continue;
         CGPoint *positions = zalloc((size_t)count, sizeof(*positions));
         CTRunGetPositions(run, CFRangeMake(0, 0), positions);
@@ -777,21 +785,24 @@ static void decorate(CGContextRef c, CTLineRef line, double x, double baseline, 
             from_context ? fallback : (__bridge CGColorRef)attributes[CT_KEY(kCTForegroundColorAttributeName)];
         CGContextSetFillColorWithColor(c, color ? color : fallback);
         double thickness = fmax(CTFontGetUnderlineThickness(font), 0.5);
-        if (decorations & GR_TEXT_DECORATION_UNDERLINE)
-        {
-            double y = baseline - CTFontGetUnderlinePosition(font);
-            CGContextFillRect(c, CGRectMake(x + left, y - thickness / 2, width, thickness));
-        }
-        if (decorations & GR_TEXT_DECORATION_STRIKETHROUGH)
-        {
-            double y = baseline - CTFontGetXHeight(font) / 2;
-            CGContextFillRect(c, CGRectMake(x + left, y - thickness / 2, width, thickness));
-        }
+        double y = baseline - CTFontGetXHeight(font) / 2;
+        CGContextFillRect(c, CGRectMake(x + left, y - thickness / 2, width, thickness));
     }
     CGContextSetFillColorWithColor(c, fallback);
 }
 
-/* Draws run by run: a colored run leaves its color in the context, which later context-colored runs would inherit. */
+static bool underlined(CTLineRef line)
+{
+    for (id object in (__bridge NSArray *)CTLineGetGlyphRuns(line))
+        if ([((__bridge NSDictionary *)CTRunGetAttributes(
+                (__bridge CTRunRef)object))[CT_KEY(kCTUnderlineStyleAttributeName)] intValue] != kCTUnderlineStyleNone)
+            return true;
+    return false;
+}
+
+/* Draws glyphs run by run: a colored run leaves its color in the context, which later context-colored runs would
+ * inherit. Underlines then come from CTLineDraw with invisible glyphs, which is the only CoreText path that draws
+ * them (skipping descenders). For context-colored runs it takes the stroke color, not the fill color. */
 static void draw_line(CGContextRef c, CTLineRef line, double x, double baseline, CGColorRef color)
 {
     NSArray *runs = (__bridge NSArray *)CTLineGetGlyphRuns(line);
@@ -804,7 +815,17 @@ static void draw_line(CGContextRef c, CTLineRef line, double x, double baseline,
         CGContextSetTextPosition(c, x, baseline);
         CTRunDraw(run, c, CFRangeMake(0, 0));
     }
-    decorate(c, line, x, baseline, color);
+    if (underlined(line))
+    {
+        CGContextSaveGState(c);
+        CGContextSetFillColorWithColor(c, color);
+        CGContextSetStrokeColorWithColor(c, color);
+        CGContextSetTextDrawingMode(c, kCGTextInvisible);
+        CGContextSetTextPosition(c, x, baseline);
+        CTLineDraw(line, c);
+        CGContextRestoreGState(c);
+    }
+    strike(c, line, x, baseline, color);
 }
 
 void gr_ct_draw_layout(CGContextRef c, gr_text_layout *layout, gr_point origin, gr_color color)
