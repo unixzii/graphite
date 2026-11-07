@@ -158,8 +158,9 @@ text system tests it. macOS provides a CoreText text system
     derive `SetMaxHeight` from a first pass and trim with an ellipsis sign.
     Per-run colors need a custom `IDWriteTextRenderer`, because D2D drawing
     effects must be device-bound brushes. Enable color fonts.
-- Demo scene with wrapped, truncated, bidi and emoji text. The demo needs a
-  platform hook to create its text system first.
+- Demo: the `ui` scene shows real labels and a wrapped, styled paragraph with
+  Chinese and emoji (done on macOS; other shells return no text system yet and
+  keep placeholder bars).
 
 ### M2: carets and hit testing
 

@@ -51,7 +51,9 @@ int main(int argc, char **argv)
                 error);
         return 2;
     }
-    demo *d = demo_new(kind);
+    gr_text_system *text = demo_platform_text_system();
+    demo *d = demo_new(kind, text);
+    gr_text_system_unref(text);
     int result;
     if (snapshot)
     {

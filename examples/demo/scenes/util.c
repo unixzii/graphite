@@ -276,12 +276,13 @@ gr_size demo_size(demo_kind kind)
     return kind == DEMO_UI ? (gr_size){1000, 600} : (gr_size){960, 640};
 }
 
-demo *demo_new(demo_kind kind)
+demo *demo_new(demo_kind kind, gr_text_system *text)
 {
     demo *d = calloc(1, sizeof(*d));
     if (!d)
         abort();
     d->kind = kind;
+    d->text = gr_text_system_ref(text);
     d->scene = gr_scene_new(demo_size(kind));
     d->front = SIZE_MAX;
     if (kind == DEMO_UI)
@@ -314,5 +315,6 @@ void demo_free(demo *d)
     free(d->layers);
     if (d->stress_cells)
         free(d->stress_cells);
+    gr_text_system_unref(d->text);
     free(d);
 }

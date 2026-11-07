@@ -44,6 +44,7 @@ typedef struct demo demo;
 struct demo
 {
     gr_scene *scene;
+    gr_text_system *text; /**< NULL where the platform has no text system yet. */
     demo_kind kind;
     double time;
     gr_layer **layers;
@@ -63,8 +64,9 @@ struct demo
 extern "C" {
 #endif
 
-/** Creates the selected scene and poses it at time zero. Owns all animation state. */
-demo *demo_new(demo_kind kind);
+/** Creates the selected scene and poses it at time zero. Owns all animation state. Refs text, which may be NULL;
+ * scenes then draw placeholder bars instead of text. */
+demo *demo_new(demo_kind kind, gr_text_system *text);
 /** Updates the scene to time in seconds; called on the Scene thread. */
 void demo_update(demo *d, double time);
 /** Destroys Scene before releasing callback state and external layer handles. */
@@ -75,6 +77,8 @@ gr_size demo_size(demo_kind kind);
 int demo_platform_run(demo *d, bool selftest, bool fps);
 /** Renders at 1x and writes raw premultiplied RGBA8 PNG pixels. */
 bool demo_platform_snapshot(demo *d, const char *path);
+/** Returns an owned native text system, or NULL where the platform has none yet. */
+gr_text_system *demo_platform_text_system(void);
 
 /* Scene construction helpers return borrowed layers held by demo. */
 gr_color hex(uint32_t rgb);

@@ -5,8 +5,13 @@ platform-specific macOS, GTK and Windows shells.
 
 - `showcase` (960 × 640): six animated cards covering transforms, Canvas paths and
   gradients, shape layers, masks, clipping/scrolling, compositing and images.
-- `ui` (1000 × 600): a control/gallery layout with placeholder text
-  bars, animated switch, slider, caret, spinner and progress bar.
+- `ui` (1000 × 600): a control/gallery layout with animated switch, slider,
+  caret, spinner and progress bar. Its labels, calendar and editor paragraph
+  are real text: English labels with emoji, and a wrapped paragraph with
+  styled spans, a line of Chinese and an ellipsis. Shells pass their platform
+  text system to `demo_new` (`demo_platform_text_system`); where a platform
+  has none yet (GTK and Windows today), the scene draws placeholder bars
+  instead.
 - `stress` (800 × 800): a 32 × 32 grid of independent square layers. Every three
   seconds, a ripple travels outward from the center, animating each cell's scale,
   radial displacement and color.
@@ -55,8 +60,9 @@ session with the selected renderer available is required. Format checks include 
 
 The demo holds references to constructed layers while animation state needs them.
 Scene destruction occurs before releasing these handles or callback state.
-Icon drawers own copied glyph descriptions; the animated Canvas drawer borrows
-its enclosing demo state, which outlives the Scene. Temporary paths/paints/strokes
+Icon drawers own copied glyph descriptions and label drawers own their text
+layouts; the demo holds its text system until it is freed. The animated Canvas
+drawer borrows its enclosing demo state, which outlives the Scene. Temporary paths/paints/strokes
 are released after recording or assignment; the public Graphite API retains them.
 
 ## Platform setup

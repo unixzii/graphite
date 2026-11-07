@@ -2,7 +2,7 @@
 
 #define LINE 0xD1D1D6
 #define FAINT 0xF2F2F4
-#define SELECT 0xE95420
+#define SELECT 0x007AFF
 
 typedef enum
 {
@@ -20,7 +20,6 @@ typedef enum
     GEAR,
     CHEVRON,
     CHECK_MARK,
-    CLOSE,
     LOCK
 } glyph_kind;
 
@@ -41,14 +40,174 @@ typedef struct
 #define ICONS(d, p, r, c, ...)                                                                                         \
     glyphs(d, p, r, c, (glyph_item[]){__VA_ARGS__}, sizeof((glyph_item[]){__VA_ARGS__}) / sizeof(glyph_item))
 
-static gr_layer *text(demo *d, gr_layer *parent, double x, double y, double width)
+#define INK alpha(hex(D_INK), 0.85f)
+#define MUTED alpha(hex(D_INK), 0.32f)
+
+typedef struct
 {
-    return pill(d, parent, D_RECT(x, y, width, 8), alpha(hex(0x3A3A3C), 0.85f), 4);
+    gr_text_layout *layout;
+    gr_point origin;
+    gr_color color;
+} label_data;
+
+/* Room around the layout box for glyph overhang (italics, emoji). */
+#define LABEL_PAD 4.0
+
+static void draw_label(void *userdata, gr_canvas *canvas, const gr_draw_info *info)
+{
+    (void)info;
+    const label_data *data = userdata;
+    D_OK(gr_canvas_draw_text_layout(canvas, data->layout, data->origin, data->color));
 }
 
-static gr_layer *muted_text(demo *d, gr_layer *parent, double x, double y, double width)
+static void free_label(void *userdata)
 {
-    return pill(d, parent, D_RECT(x, y, width, 8), alpha(hex(0x3A3A3C), 0.3f), 4);
+    label_data *data = userdata;
+    gr_text_layout_unref(data->layout);
+    free(data);
+}
+
+/* Shows an owned layout with its box at (x, y). */
+static gr_layer *text_layer(demo *d, gr_layer *parent, gr_text_layout *layout, double x, double y, gr_color color)
+{
+    gr_size size = gr_text_layout_get_metrics(layout).size;
+    label_data *data = malloc(sizeof(*data));
+    if (!data)
+        abort();
+    *data = (label_data){layout, {LABEL_PAD, LABEL_PAD}, color};
+    gr_layer *l = new_layer(d, GR_LAYER_CONTENT);
+    D_OK(gr_layer_set_frame(
+        l, D_RECT(x - LABEL_PAD, y - LABEL_PAD, size.width + 2 * LABEL_PAD, size.height + 2 * LABEL_PAD)));
+    gr_drawer drawer = {data, draw_label, free_label};
+    D_OK(gr_content_layer_set_drawer(l, &drawer));
+    D_OK(gr_layer_add_child(parent, l));
+    return l;
+}
+
+typedef enum
+{
+    TONE_INK,
+    TONE_MUTED,
+    TONE_WHITE
+} label_tone;
+
+/* Zero fields mean defaults: 13 pt, weight 400, ink. */
+typedef struct
+{
+    label_tone tone;
+    double size;
+    double width; /**< > 0 aligns the text inside this width, starting at x. */
+    gr_text_align align;
+    uint16_t weight;
+} label_style;
+
+#define LABEL(...) ((label_style){.tone = TONE_INK, __VA_ARGS__})
+
+static gr_text_layout *layout_text(demo *d, const char *utf8, const gr_text_style *base, gr_text_span_list spans,
+                                   const gr_text_layout_options *options)
+{
+    gr_attributed_text *text = gr_attributed_text_new((gr_string){utf8, strlen(utf8)}, base, spans);
+    if (!text)
+        abort();
+    gr_text_layout *layout = gr_text_system_layout(d->text, text, options);
+    if (!layout)
+        abort();
+    gr_attributed_text_unref(text);
+    return layout;
+}
+
+/* A single-line label vertically centered on cy. Without a text system it falls back to a placeholder bar. */
+static gr_layer *label(demo *d, gr_layer *parent, double x, double cy, const char *utf8, label_style s)
+{
+    if (!s.size)
+        s.size = 13;
+    if (!s.weight)
+        s.weight = 400;
+    gr_color color = s.tone == TONE_WHITE ? D_WHITE : s.tone == TONE_MUTED ? MUTED : INK;
+    if (!d->text)
+    {
+        size_t characters = 0;
+        for (const char *c = utf8; *c; ++c)
+            characters += ((unsigned char)*c & 0xC0) != 0x80;
+        double w = fmin((double)characters * 0.5 * s.size, s.width > 0 ? s.width - 8 : 400);
+        double left = s.width <= 0 || s.align == GR_TEXT_ALIGN_START ? x
+                      : s.align == GR_TEXT_ALIGN_CENTER              ? x + (s.width - w) / 2
+                                                                     : x + s.width - w;
+        return pill(d, parent, D_RECT(left, cy - 4, w, 8), color, 4);
+    }
+    gr_text_style base = gr_text_style_default();
+    base.size = s.size;
+    base.weight = s.weight;
+    gr_text_layout_options options = gr_text_layout_options_default();
+    options.wrap = GR_TEXT_WRAP_NONE;
+    if (s.width > 0)
+    {
+        options.has_max_width = true;
+        options.max_width = s.width;
+        options.align = s.align;
+        options.truncation = GR_TEXT_TRUNCATE_END;
+    }
+    gr_text_layout *layout = layout_text(d, utf8, &base, (gr_text_span_list){NULL, 0}, &options);
+    double height = gr_text_layout_get_metrics(layout).size.height;
+    return text_layer(d, parent, layout, x, cy - height / 2, color);
+}
+
+static size_t find(const char *haystack, const char *needle)
+{
+    const char *at = strstr(haystack, needle);
+    if (!at)
+        abort();
+    return (size_t)(at - haystack);
+}
+
+static gr_text_span span_of(const char *text, const char *word, gr_text_style_fields fields)
+{
+    size_t start = find(text, word);
+    return (gr_text_span){{start, start + strlen(word)}, fields, gr_text_style_default()};
+}
+
+static const char body[] =
+    "Graphite renders this text with the platform text stack: wrapping, bidi, fallback fonts and the ellipsis "
+    "at the end. Mixed scripts need no extra work either. "
+    "Emoji work as well \xF0\x9F\x8E\xA8\xF0\x9F\x9A\x80\xE2\x9C\xA8\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0"
+    "\x9F\x92\xBB\xF0\x9F\x87\xA8\xF0\x9F\x87\xB3\n"
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam fringilla, est ut feugiat ultrices, elit "
+    "lacus ultricies nibh, id commodo tortor nisi id elit.\n"
+    "春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。\n"
+    "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Morbi vel elit "
+    "erat. Maecenas dignissim, dui et pharetra rutrum, tellus lectus rutrum mi, a convallis libero nisi quis "
+    "tellus. Nulla facilisi. Nullam eleifend lobortis nisl, in porttitor tellus malesuada vitae. Aenean lacus "
+    "tellus, pellentesque quis molestie quis, fringilla in arcu.";
+
+/* The editor's wrapped, styled paragraph, clipped to max_lines with an ellipsis. */
+static void body_text(demo *d, gr_layer *editor)
+{
+    if (!d->text)
+    {
+        for (size_t i = 0; i < 10; ++i)
+            label(d, editor, 14, 142 + (double)i * 15.5, "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+                  LABEL());
+        return;
+    }
+    gr_text_span spans[4] = {
+        span_of(body, "Graphite", GR_TEXT_STYLE_WEIGHT),
+        span_of(body, "fallback fonts", GR_TEXT_STYLE_DECORATIONS),
+        span_of(body, "Lorem ipsum", GR_TEXT_STYLE_SLANT),
+        span_of(body, "春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。", GR_TEXT_STYLE_FAMILY | GR_TEXT_STYLE_COLOR),
+    };
+    spans[0].style.weight = 700;
+    spans[1].style.decorations = GR_TEXT_DECORATION_UNDERLINE;
+    spans[2].style.slant = GR_FONT_SLANT_ITALIC;
+    spans[3].style.family = (gr_string){"Songti SC", strlen("Songti SC")};
+    spans[3].style.color = hex(0x9B30B5);
+    gr_text_style base = gr_text_style_default();
+    base.size = 12.5;
+    gr_text_layout_options options = gr_text_layout_options_default();
+    options.has_max_width = true;
+    options.max_width = 436;
+    options.max_lines = 10;
+    options.truncation = GR_TEXT_TRUNCATE_END;
+    text_layer(d, editor, layout_text(d, body, &base, (gr_text_span_list){spans, 4}, &options), 14, 134, INK);
 }
 
 static gr_layer *panel(demo *d, gr_layer *parent, gr_rect rect)
@@ -163,10 +322,6 @@ static void draw_glyph(gr_canvas *cx, glyph_item item, gr_color color)
             SEG(-6, 0, -2, 4);
             SEG(-2, 4, 6, -5);
             break;
-        case CLOSE:
-            SEG(-4, -4, 4, 4);
-            SEG(4, -4, -4, 4);
-            break;
         case LOCK:
             draw_fill(cx, rounded(D_RECT(c.x - 6, c.y - 1, 12, 9), 2, GR_CORNERS_ALL), GR_FILL_NONZERO, paint(color));
             draw_stroke(cx, rounded(D_RECT(c.x - 4, c.y - 8, 8, 10), 4, GR_CORNER_TOP_LEFT | GR_CORNER_TOP_RIGHT),
@@ -201,12 +356,6 @@ static gr_layer *glyphs(demo *d, gr_layer *parent, gr_rect rect, gr_color color,
     return l;
 }
 
-static double width(size_t i, double min, double max)
-{
-    double x = sin(((double)i + 1) * 12.9898) * 43758.545;
-    return min + (x - floor(x)) * (max - min);
-}
-
 static gr_color mix(gr_color a, gr_color b, double t)
 {
     float v = (float)t;
@@ -226,23 +375,18 @@ void ui_build(demo *d)
     border(segments, 1, hex(0xC8C8CC));
     D_OK(gr_layer_set_masks_to_bounds(segments, true));
     background(layer(d, segments, D_RECT(96, 0, 96, 28)), hex(0xD9D9DD));
+    const char *pages[] = {"Page 1", "Page 2", "Page 3"};
     for (size_t i = 0; i < 3; ++i)
-        text(d, segments, (double)i * 96 + 28, 10, 40);
-    gr_layer *menu = button(d, header, D_RECT(864, 8, 34, 28));
+        label(d, segments, (double)i * 96, 14, pages[i], LABEL(.width = 96, .align = GR_TEXT_ALIGN_CENTER));
+    gr_layer *menu = button(d, header, D_RECT(954, 8, 34, 28));
     ICONS(d, menu, D_RECT(0, 0, 34, 28), ink, {LINES, {17, 14}, 0});
-    glyph_kind controls[] = {MINUS, SQUARE, CLOSE};
-    for (size_t i = 0; i < 3; ++i)
-    {
-        gr_layer *c = pill(d, header, D_RECT(910 + (double)i * 30, 11, 22, 22), hex(0xDCDCE0), 11);
-        ICONS(d, c, D_RECT(0, 0, 22, 22), ink, {controls[i], {11, 11}, 0});
-    }
     /* Left column. */
     for (size_t i = 0; i < 2; ++i)
     {
         gr_layer *spin = panel(d, root, D_RECT(12 + (double)i * 52, 56, 44, 120));
         hairline(d, spin, D_RECT(0, 40, 44, 1));
         hairline(d, spin, D_RECT(0, 80, 44, 1));
-        text(d, spin, 13, 56, 18);
+        label(d, spin, 0, 60, "50", LABEL(.width = 44, .align = GR_TEXT_ALIGN_CENTER));
         ICONS(d, spin, D_RECT(0, 0, 44, 120), ink, {PLUS, {22, 20}, 0}, {MINUS, {22, 100}, 0});
         if (i)
             D_OK(gr_layer_set_opacity(spin, 0.4f));
@@ -251,9 +395,11 @@ void ui_build(demo *d)
     gr_layer *list = panel(d, root, D_RECT(12, 188, 224, 198));
     gr_layer *rows = layer(d, list, D_RECT(0, 0, 224, 152));
     D_OK(gr_layer_set_masks_to_bounds(rows, true));
-    text(d, rows, 12, 10, 150);
+    label(d, rows, 12, 14, "* Translation updates:", LABEL());
+    const char *languages[] = {"Aragonese", "Basque", "Brazilian Portuguese", "Dutch", "German", "Hebrew",
+                               "Spanish",   "Swedish"};
     for (size_t i = 0; i < 8; ++i)
-        text(d, rows, 18, 28 + (double)i * 17, width(i, 50, 140));
+        label(d, rows, 18, 32 + (double)i * 17, languages[i], LABEL());
     hairline(d, list, D_RECT(0, 152, 224, 1));
     gr_layer *toggles = layer(d, list, D_RECT(76, 160, 72, 30));
     border(toggles, 1, hex(LINE));
@@ -264,12 +410,13 @@ void ui_build(demo *d)
     gr_layer *gear = button(d, list, D_RECT(180, 160, 32, 30));
     ICONS(d, gear, D_RECT(0, 0, 32, 30), ink, {GEAR, {16, 15}, 0});
     gr_layer *settings = panel(d, root, D_RECT(12, 398, 224, 190));
+    const char *settings_rows[] = {"Wi-Fi", "Volume", "Sync", "Count", "Privacy"};
     for (size_t i = 0; i < 5; ++i)
     {
         double y = (double)i * 38;
         if (i)
             hairline(d, settings, D_RECT(0, y, 224, 1));
-        text(d, settings, 14, y + 15, 38);
+        label(d, settings, 14, y + 19, settings_rows[i], LABEL());
     }
     d->switch_track = pill(d, settings, D_RECT(164, 9, 44, 24), hex(0xE0E0E4), 12);
     d->switch_knob = pill(d, settings, D_RECT(166, 11, 20, 20), D_WHITE, 10);
@@ -282,16 +429,16 @@ void ui_build(demo *d)
     gr_layer *spin = button(d, settings, D_RECT(116, 119, 96, 28));
     hairline(d, spin, D_RECT(40, 0, 1, 28));
     hairline(d, spin, D_RECT(68, 0, 1, 28));
-    text(d, spin, 10, 10, 16);
+    label(d, spin, 0, 14, "54", LABEL(.width = 40, .align = GR_TEXT_ALIGN_CENTER));
     gr_layer *lock = button(d, settings, D_RECT(180, 157, 32, 28));
     ICONS(d, lock, D_RECT(0, 0, 32, 28), ink, {LOCK, {16, 15}, 0});
     ICONS(d, settings, D_RECT(0, 0, 224, 190), ink, {CHECK_MARK, {200, 95}, 0}, {MINUS, {170, 133}, 0},
           {PLUS, {198, 133}, 0});
     /* Center column. */
     gr_layer *editor = panel(d, root, D_RECT(248, 56, 464, 330));
-    double widths[] = {26, 26, 30, 28};
+    const char *menus[] = {"File", "Edit", "View", "Help"};
     for (size_t i = 0; i < 4; ++i)
-        text(d, editor, 14 + (double)i * 52, 14, widths[i]);
+        label(d, editor, 14 + (double)i * 52, 18, menus[i], LABEL());
     ICONS(d, editor, D_RECT(0, 36, 220, 40), ink, {SQUARE, {24, 20}, 0}, {DOWNLOAD, {60, 20}, 0},
           {SEARCH, {110, 20}, 0}, {LINES, {146, 20}, 0});
     hairline(d, editor, D_RECT(86, 46, 1, 20));
@@ -300,22 +447,24 @@ void ui_build(demo *d)
     gr_layer *search = pill(d, editor, D_RECT(150, 88, 164, 30), D_WHITE, 7);
     border(search, 2, alpha(hex(SELECT), 0.8f));
     ICONS(d, search, D_RECT(0, 0, 30, 30), ink, {SEARCH, {15, 15}, 0});
-    d->caret = pill(d, search, D_RECT(30, 7, 1.5, 16), hex(D_INK), 0);
-    for (size_t i = 0; i < 10; ++i)
-        text(d, editor, 14, 138 + (double)i * 15.5, width(i + 20, 180, 430));
+    gr_layer *query = label(d, search, 30, 15, "Graphite text", LABEL());
+    gr_rect typed = gr_layer_get_frame(query);
+    double caret_x = typed.origin.x + typed.size.width + (d->text ? 1 - LABEL_PAD : 2);
+    d->caret = pill(d, search, D_RECT(caret_x, 7, 1.5, 16), hex(D_INK), 0);
+    body_text(d, editor);
     hairline(d, editor, D_RECT(0, 296, 464, 1));
     background(layer(d, editor, D_RECT(0, 297, 464, 33)), hex(FAINT));
-    text(d, editor, 14, 309, 170);
+    label(d, editor, 14, 313, "All systems are operating normally", LABEL(.size = 12));
     pill(d, editor, D_RECT(300, 310, 150, 6), hex(0xE0E0E4), 3);
     d->progress = pill(d, editor, D_RECT(300, 310, 0, 6), hex(SELECT), 3);
     gr_layer *left_right = panel(d, root, D_RECT(248, 398, 228, 190));
     hairline(d, left_right, D_RECT(114, 0, 1, 190));
-    text(d, left_right, 42, 91, 30);
-    text(d, left_right, 154, 91, 34);
+    label(d, left_right, 0, 95, "Left", LABEL(.width = 114, .align = GR_TEXT_ALIGN_CENTER));
+    label(d, left_right, 114, 95, "Right", LABEL(.width = 114, .align = GR_TEXT_ALIGN_CENTER));
     gr_layer *top_bottom = panel(d, root, D_RECT(488, 398, 224, 190));
     hairline(d, top_bottom, D_RECT(0, 95, 224, 1));
-    text(d, top_bottom, 96, 44, 28);
-    text(d, top_bottom, 90, 138, 40);
+    label(d, top_bottom, 0, 48, "Top", LABEL(.width = 224, .align = GR_TEXT_ALIGN_CENTER));
+    label(d, top_bottom, 0, 142, "Bottom", LABEL(.width = 224, .align = GR_TEXT_ALIGN_CENTER));
     d->spinner = shape(d, top_bottom, D_RECT(186, 154, 24, 24));
     set_path(d->spinner, circle(D_POINT(12, 12), 9));
     shape_stroke(d->spinner,
@@ -323,29 +472,36 @@ void ui_build(demo *d)
     D_OK(gr_shape_layer_set_stroke_end(d->spinner, 0.7));
     /* Right column. */
     gr_layer *calendar = panel(d, root, D_RECT(724, 56, 264, 204));
-    text(d, calendar, 34, 16, 62);
-    text(d, calendar, 176, 16, 34);
+    label(d, calendar, 26, 20, "November", LABEL(.width = 78, .align = GR_TEXT_ALIGN_CENTER));
+    label(d, calendar, 166, 20, "2026", LABEL(.width = 72, .align = GR_TEXT_ALIGN_CENTER));
+    const char *weekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     for (size_t i = 0; i < 7; ++i)
-        text(d, calendar, 18 + (double)i * 36, 42, 22);
+        label(d, calendar, 12 + (double)i * 36, 46, weekdays[i],
+              LABEL(.width = 32, .align = GR_TEXT_ALIGN_CENTER, .weight = 600));
     for (size_t row = 0; row < 6; ++row)
         for (size_t col = 0; col < 7; ++col)
         {
             double x = 12 + (double)col * 36, y = 66 + (double)row * 22;
             size_t n = row * 7 + col;
-            if (n == 11)
+            /* November 2026 starts on a Sunday, after a row of October, and has 30 days. */
+            int day = n < 7 ? 25 + (int)n : n < 37 ? (int)n - 6 : (int)n - 36;
+            char number[4];
+            snprintf(number, sizeof(number), "%d", day);
+            label_style style = LABEL(.size = 12, .width = 32, .align = GR_TEXT_ALIGN_CENTER);
+            if (n == 13)
             {
                 pill(d, calendar, D_RECT(x + 2, y - 4, 28, 18), hex(SELECT), 4);
-                pill(d, calendar, D_RECT(x + 10, y + 1, 12, 8), D_WHITE, 4);
+                style.tone = TONE_WHITE;
+                style.weight = 600;
             }
-            else if (n < 6 || n >= 36)
-                muted_text(d, calendar, x + 9, y + 1, 14);
-            else
-                text(d, calendar, x + 9, y + 1, n - 5 < 10 ? 8 : 14);
+            else if (n < 7 || n >= 37)
+                style.tone = TONE_MUTED;
+            label(d, calendar, x, y + 5, number, style);
         }
     ICONS(d, calendar, D_RECT(0, 0, 264, 40), ink, {CHEVRON, {18, 20}, D_PI}, {CHEVRON, {112, 20}, 0},
           {CHEVRON, {158, 20}, D_PI}, {CHEVRON, {246, 20}, 0});
     ICONS(d, root, D_RECT(724, 266, 20, 20), ink, {CHEVRON, {10, 10}, D_PI / 2});
-    text(d, root, 744, 272, 56);
+    label(d, root, 744, 276, "Expander", LABEL());
     gr_layer *icons = panel(d, root, D_RECT(724, 292, 264, 112));
     glyph_kind kinds[] = {RING, SPEAKER, DOT, SQUARE, LINES, PLAY, STAR, DOWNLOAD, SEARCH, GEAR, PLUS, LOCK};
     glyph_item items[21];
@@ -360,11 +516,11 @@ void ui_build(demo *d)
     hairline(d, group, D_RECT(36, 0, 1, 30));
     hairline(d, group, D_RECT(72, 0, 1, 30));
     ICONS(d, group, D_RECT(0, 0, 108, 30), ink, {MINUS, {18, 15}, 0}, {PLUS, {54, 15}, 0}, {DOT, {90, 15}, 0});
-    double labels[] = {44, 30, 62, 42};
+    const char *actions[] = {"Inform", "Act", "Configure", "Select"};
     for (size_t i = 0; i < 4; ++i)
     {
         gr_layer *b = button(d, root, D_RECT(724, 454 + (double)i * 34, 264, 28));
-        text(d, b, 132 - labels[i] / 2, 10, labels[i]);
+        label(d, b, 0, 14, actions[i], LABEL(.width = 264, .align = GR_TEXT_ALIGN_CENTER));
     }
 }
 

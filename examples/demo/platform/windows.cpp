@@ -186,6 +186,11 @@ bool save_png(const char *path, gr_windows_pixels const &pixels)
 }
 } // namespace
 
+gr_text_system *demo_platform_text_system(void)
+{
+    return nullptr; // DirectWrite text system not implemented yet.
+}
+
 int demo_platform_run(demo *content, bool selftest, bool fps)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

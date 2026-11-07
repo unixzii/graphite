@@ -168,6 +168,11 @@ API_AVAILABLE(macos(14.0))
 
 @end
 
+gr_text_system *demo_platform_text_system(void)
+{
+    return gr_macos_text_system_new();
+}
+
 int demo_platform_run(demo *d, bool selftest, bool fps)
 {
     @autoreleasepool
