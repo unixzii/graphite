@@ -48,6 +48,14 @@ including beneath transparent backgrounds. Blur uses Gaussian sigma. Spread
 expands/shrinks default bounds, growing rounded corners but preserving square
 ones; custom paths ignore spread.
 
+`gr_layer_set_blur` blurs the layer's whole rendering with a Gaussian σ in
+points: shadow, background, contents, sublayers, border, mask and clip. The mask
+and clip apply before the blur, so the blurred result bleeds past the bounds and
+softens the mask's edges. Zero removes the blur. Backends differ in where σ is
+measured: Core Animation scales it with the layer's and its ancestors'
+transforms (as CSS `filter: blur()` does), while GTK and Windows apply it in
+screen space, unaffected by scale transforms.
+
 ## Masks
 
 `gr_layer_set_mask` uses the mask subtree's alpha, positioned in the owner's local

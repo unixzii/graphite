@@ -52,6 +52,18 @@ void shadow_spread_moves_the_edge(ctx *c)
     }
 }
 
+void layer_blur_matches_sigma(ctx *c)
+{
+    gr_scene *s = new_scene(c);
+    gr_layer *l = solid(c, s, RECT(10, 10, 40, 80), WHITE);
+    API(gr_layer_set_blur(l, 4));
+    frame *f = render(c, s);
+    profile p = frame_profile(f, POINT(50, 50), POINT(95, 50));
+    expect_near(c, "distance to 15.87% alpha (= σ)", profile_crossing(p, 3, 0.1587), 4, 0.8);
+    expect_near(c, "distance to 2.28% alpha (= 2σ), halved", profile_crossing(p, 3, 0.0228) / 2, 4, 0.8);
+    free(p.data);
+}
+
 void linear_gradient_interpolates_monotonically(ctx *c)
 {
     gr_scene *s = new_scene(c);

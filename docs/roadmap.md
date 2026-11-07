@@ -20,7 +20,9 @@
   conformance suite and has a real-window test.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
   border widths snap to device pixels), shadow spread.
-- **Conformance suite**: 26 semantic, 7 measured and 18 text cases at 1×, 1.5×
+- **Layer blur** (`gr_layer_set_blur`) on all three backends. Core Animation
+  measures σ in layer space, GTK and Windows in screen space.
+- **Conformance suite**: 28 semantic, 8 measured and 18 text cases at 1×, 1.5×
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
@@ -49,7 +51,8 @@ roughly in priority order:
    on the layer and its ancestors, so zoom and scale animations blur them
    (GSK draws them as vector nodes and is not affected). Resolve an
    effective scale in core, or offer a `rasterization_scale` override like
-   `CALayer.rasterizationScale`.
+   `CALayer.rasterizationScale`. The same effective scale would let GTK and
+   Windows measure layer blur σ in layer space, as Core Animation does.
 2. **Image sampling.** A magnification/minification filter property:
    nearest for pixel art and QR codes, trilinear (mipmaps) for downscaled
    thumbnails and icons. Native on Core Animation, GSK and WinComp.
@@ -79,11 +82,11 @@ position of an animating layer would then live in the compositor (like
 ## Later
 
 - Headless Linux testing (for example `mutter --headless`) and CI.
-- Windows: device-loss recovery (`RenderingDeviceReplaced`), masks that
-  extend past the masked layer's box, and testing on x64 hardware.
+- Windows: device-loss recovery (`RenderingDeviceReplaced`) and testing on
+  x64 hardware.
 - A Web backend (DOM + Canvas2D), tier 2.
 - Optional capabilities with per-platform fallback: conic gradients,
-  content filters, blend modes, backdrop blur.
+  other content filters, blend modes, backdrop blur.
 - A compositor-driven keyframe animation primitive (Core Animation and
   WinComp run animations off the main thread).
 

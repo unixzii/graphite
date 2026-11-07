@@ -40,7 +40,7 @@ typedef struct
 /** Creates an owned detached layer of a fixed kind in a live Scene.
  * Returns NULL for an invalid kind. Defaults: zero bounds/position, anchor
  * (0.5,0.5), identity transform, opacity 1, visible, no clip/background/border/
- * shadow, radius 0 and all corners. Shapes have no path/fill/stroke, nonzero
+ * shadow/blur, radius 0 and all corners. Shapes have no path/fill/stroke, nonzero
  * fill rule and stroke range [0,1]. Content gravity defaults to resize. */
 gr_layer *gr_layer_new(gr_scene *scene, gr_layer_kind kind);
 
@@ -140,6 +140,14 @@ bool gr_layer_get_border(const gr_layer *layer, gr_border *out);
 
 /** Copies border, or clears it with NULL; rejects invalid numeric values. */
 gr_result gr_layer_set_border(gr_layer *layer, const gr_border *border);
+
+/** Returns the layer blur's Gaussian standard deviation in points; default is zero (no blur). */
+double gr_layer_get_blur(const gr_layer *layer);
+
+/** Blurs the layer's whole rendering, including its shadow, mask, clip and sublayers; the result bleeds past the
+ * bounds. Sets a finite nonnegative sigma; zero removes the blur. Core Animation scales sigma with the layer's and its
+ * ancestors' transforms; GTK and Windows apply it in screen space. */
+gr_result gr_layer_set_blur(gr_layer *layer, double sigma);
 
 /** Copies the optional shadow into required out; returns true if present.
  * If absent (including an inert layer), returns false and zeroes out. Any path in the copied value is borrowed

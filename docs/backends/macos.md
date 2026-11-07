@@ -14,6 +14,9 @@ Public declarations: [`macos.h`](../../include/graphite/macos.h).
   screen, so read-back flips rows.
 - **`shadowRadius` is the Gaussian σ.** This was measured by
   `shadow_blur_matches_sigma` at 3.93–4.02 for σ = 4.
+- **`CAFilter`'s `inputRadius` is the Gaussian σ in layer space.**
+  `layer_blur_matches_sigma` measures 3.67–3.85 for σ = 4; scale transforms
+  on the layer or its ancestors scale the blur.
 - **Fractional edges are anti-aliased by Core Animation.** Without pixel
   snapping, an edge at x = 10.3 covers about 70 % of a column.
 - Under geometry flipping, `CGImage` contents, `CAGradientLayer` unit space,

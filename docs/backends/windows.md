@@ -10,6 +10,15 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
   4.10–4.12 at the 1σ point and 3.78–3.81 (halved) at the 2σ point, at
   1×, 1.5× and 2×. The root scale scales the blur with everything else.
 - **A `ContainerVisual`'s opacity is group opacity.**
+- **A `LayerVisual` clips its subtree to its `Size`.** A plain
+  `ContainerVisual` never clips, but masks and blur render through a
+  LayerVisual, so the backend sizes each one to the subtree's extent
+  (`masks_keep_sublayers_outside_bounds`,
+  `blur_covers_sublayers_and_bleeds_past_bounds`).
+- **Direct2D's Gaussian blur σ is in device pixels**, even under the root
+  scale, unlike `DropShadow.BlurRadius`. `layer_blur_matches_sigma` measures
+  3.85–4.04 for σ = 4 at 1×, 1.5× and 2× once σ is multiplied by the backing
+  scale.
 - **`ShapeVisual` clips to its size**, including content at negative
   coordinates. Size it to the geometry.
 - **A brushless `SpriteVisual` still casts its `DropShadow`**, shaped by
@@ -103,10 +112,9 @@ factory and draws it with `ID2D1DeviceContext::DrawTextLayout`:
   and re-rasterize drawings, images and shadow masks. The backend keeps the
   batch's drawer provider so that drawings can be redrawn from that event without
   waiting for a commit.
-- **Masks only cover the masked layer's box**: content outside it is
-  hidden even where the mask layer extends. The mask's visual surface
-  renders at the visual's own units, so mask edges may be soft at high
-  scales.
+- The mask's visual surface renders at the visual's own units, so mask
+  edges may be soft at high scales.
+- Layer blur is in screen space: scale transforms do not scale σ.
 - Text: mixed-direction paragraphs share the reading direction of the first
   strong character (DirectWrite's direction is layout-wide).
 - Shadow masks and drawings are rasterized per layer; there is no

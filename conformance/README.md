@@ -1,6 +1,6 @@
 # Backend conformance
 
-The suite contains **26 semantic cases, 7 measured cases and 18 text cases**,
+The suite contains **28 semantic cases, 8 measured cases and 18 text cases**,
 each at **1×, 1.5× and 2×**.
 
 ## Organization
@@ -26,7 +26,7 @@ each at **1×, 1.5× and 2×**.
 All captures are top-row-first premultiplied RGBA8. The PNG writer deliberately
 stores these bytes unchanged; it uses uncompressed
 DEFLATE blocks and introduces no image-codec dependency. Compare decoded pixels,
-not compressed PNG files. Each suite run generates 129 PNGs when all cases run
+not compressed PNG files. Each suite run generates 138 PNGs when all cases run
 (six text cases render).
 
 ## Build and run

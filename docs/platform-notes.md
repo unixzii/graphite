@@ -32,9 +32,10 @@ and Homebrew ships 4.24.
 | Outer shadow | ✅ | ✅ `DropShadow` | ✅ shadow / outset shadow nodes | ✅ | core |
 | Linear and radial gradients | ✅ | ✅ | ✅ | ✅ | core |
 | Conic gradient | ✅ (CG: macOS 14) | ❌ (neither Composition nor D2D) | ✅ | ✅ | later, optional |
-| Content filters (blur, color matrix) | 🟡 CIFilter, forces in-process rendering | ✅ effects | ✅ | ✅ | later, optional |
+| Layer blur | ✅ private `CAFilter`, σ scales with transforms | ✅ `LayerVisual` effect, σ in device pixels | ✅ blur node, σ in device space | ✅ | core |
+| Other content filters (color matrix) | 🟡 CIFilter, forces in-process rendering | ✅ effects | ✅ | ✅ | later, optional |
 | Blend modes | 🟡 CIFilter, in-process | 🟡 21 of 26 modes | ✅ | ✅ | later, optional |
-| Backdrop blur inside the tree | ❌ no public layer API | ✅ `CompositionBackdropBrush` | ✅ copy/paste nodes (4.22) | ✅ | later, optional |
+| Backdrop blur inside the tree | ✅ private `CABackdropLayer` | ✅ `CompositionBackdropBrush` | 🟡 copy/paste nodes (4.22), stale damage before 4.25 | ✅ | later, optional |
 | preserve-3d | 🟡 `CATransformLayer` only | *(undocumented)* not flattened, no sorting | ❌ | ✅ | not supported |
 | Path boolean ops | ✅ (macOS 13) | ✅ D2D | ❌ | ❌ | to be done in core |
 | Animations off the main thread | ✅ out-of-process | ✅ DWM | ❌ | 🟡 transform/opacity only | deferred |
@@ -50,6 +51,10 @@ and Homebrew ships 4.24.
   `backgroundFilters` is ignored on the root layer. `NSVisualEffectView` and
   `NSGlassEffectView` are views and cannot live inside a layer-hosting view.
   `CABackdropLayer` is private.
+- The private `CAFilter` (`filterWithType:@"gaussianBlur"`, the mechanism
+  behind `NSVisualEffectView`) renders out of process and in `CARenderer`.
+  Its `inputRadius` is the Gaussian σ in layer space, so it grows with scale
+  transforms; it is animatable as `filters.gaussianBlur.inputRadius`.
 - `mask`: alpha only, no nesting, and the mask must have no superlayer.
 - With `masksToBounds`, a layer's own shadow is clipped; graphite's backend
   splits outer and body layers to avoid this.
@@ -76,6 +81,10 @@ and Homebrew ships 4.24.
 - `Visual.Clip` does not clip children to the parent's size implicitly.
   `RectangleClip` has per-corner radii and needs build 20348.
   `BorderMode::Soft` enables anti-aliased edges.
+- A `LayerVisual` renders its subtree into an intermediate surface of its own
+  `Size` and clips to it. Its `Effect` (an effect brush with a `source`
+  parameter) applies in screen space: Direct2D's Gaussian blur takes σ in
+  device pixels and ignores scale transforms.
 - `DropShadow` works on `SpriteVisual` and on `LayerVisual`, where it shadows
   the flattened subtree. Whether `BlurRadius` is σ is undocumented; calibrate
   it with the conformance suite (measured: 3σ).
@@ -127,7 +136,9 @@ and Homebrew ships 4.24.
   treats radius as 2σ, while the GPU shadow node appears to use σ.
   Calibrate with the conformance suite.
 - Backdrop effects: `CopyNode` and `PasteNode` (4.22) power CSS
-  `backdrop-filter`.
+  `backdrop-filter`. Before GTK 4.25 (GNOME/gtk!10571), damage diffing
+  misses changes under a reused paste node and leaves stale pixels.
+- Blur nodes blur in device space: transforms above them do not scale σ.
 - Scale: `gdk_surface_get_scale` (a double, 4.12) gives the fractional scale.
   Rasterize at logical size × scale and draw with `texture_scale` nodes. X11
   has integer scales only.

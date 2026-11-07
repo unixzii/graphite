@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <windows.graphics.effects.interop.h>
 #include <windows.graphics.interop.h>
@@ -87,6 +88,7 @@ std::optional<gr_rect> control_bounds(gr_path const *path);
 com_ptr<ID2D1PathGeometry> geometry(ID2D1Factory1 *factory, gr_path const *path, gr_fill_rule rule);
 CompositionPath composition_path(ID2D1Factory1 *factory, gr_path const *path, gr_fill_rule rule);
 winrt::Windows::Graphics::Effects::IGraphicsEffect alpha_mask();
+winrt::Windows::Graphics::Effects::IGraphicsEffect gaussian_blur();
 com_ptr<ID2D1Bitmap1> bitmap(ID2D1DeviceContext *dc, gr_image const *image);
 void replay(ID2D1DeviceContext *dc, ID2D1Factory1 *factory, gr_display_list const *list, gr_affine base);
 extern const gr_text_layout_vtable dwrite_layout_vtable;

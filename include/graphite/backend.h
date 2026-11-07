@@ -42,6 +42,7 @@ typedef struct
     gr_border border;
     bool has_shadow;
     gr_shadow shadow;
+    double blur_sigma;
 } gr_layer_props;
 
 typedef struct

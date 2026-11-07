@@ -152,6 +152,26 @@ void masks_clip_by_alpha(ctx *c)
     EXPECT("outside the mask", 30, 20, CLEAR);
 }
 
+void masks_keep_sublayers_outside_bounds(ctx *c)
+{
+    gr_scene *s = new_scene(c);
+    gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED), *mask = new_layer(c, s, GR_LAYER_CONTAINER);
+    gr_layer *inside = new_layer(c, s, GR_LAYER_CONTAINER), *outside = new_layer(c, s, GR_LAYER_CONTAINER);
+    FRAME(inside, 50, 0, 20, 20);
+    BACKGROUND(inside, BLUE);
+    ADD(l, inside);
+    FRAME(outside, 85, 0, 10, 10);
+    BACKGROUND(outside, BLUE);
+    ADD(l, outside);
+    FRAME(mask, 0, 0, 80, 40);
+    BACKGROUND(mask, WHITE);
+    API(gr_layer_set_mask(l, mask));
+    frame *f = render(c, s);
+    EXPECT("the layer", 10, 10, RED);
+    EXPECT("sublayer under the mask, past the bounds", 60, 10, BLUE);
+    EXPECT("sublayer outside the mask", 90, 5, CLEAR);
+}
+
 static void scroll_draw(void *data, gr_canvas *canvas, const gr_draw_info *info)
 {
     (void)data;
@@ -505,4 +525,34 @@ void updates_and_removals_reach_the_screen(ctx *c)
     f = render(c, s);
     EXPECT("cleared contents", 10, 2, CLEAR);
     EXPECT("removed layer", 65, 65, CLEAR);
+}
+
+static double alpha_at(const frame *f, gr_point point)
+{
+    rgba8 pixel;
+    return frame_at(f, point, &pixel) ? pixel.v[3] / 255.0 : NAN;
+}
+
+void blur_covers_sublayers_and_bleeds_past_bounds(ctx *c)
+{
+    gr_scene *s = new_scene(c);
+    for (size_t i = 0; i < 2; ++i)
+    {
+        double y = 10 + 50.0 * i;
+        gr_layer *l = solid(c, s, RECT(10, y, 30, 30), RED), *child = new_layer(c, s, GR_LAYER_CONTAINER);
+        FRAME(child, 30, 0, 30, 30);
+        BACKGROUND(child, BLUE);
+        ADD(l, child);
+        API(gr_layer_set_masks_to_bounds(l, i == 1));
+        API(gr_layer_set_blur(l, 2));
+    }
+    frame *f = render(c, s);
+    expect_color(c, f, "blurred layer", POINT(20, 25), RED, 24);
+    expect_color(c, f, "blurred sublayer past the bounds", POINT(60, 25), BLUE, 24);
+    double bleed = alpha_at(f, POINT(20, 42));
+    conf_check(c, bleed > 0.05 && bleed < 0.4, "blur should bleed one sigma below the layer (alpha %.3f)", bleed);
+    expect_color(c, f, "clipped layer", POINT(20, 75), RED, 24);
+    expect_color(c, f, "clipped sublayer", POINT(60, 75), CLEAR, 8);
+    bleed = alpha_at(f, POINT(20, 92));
+    conf_check(c, bleed > 0.05 && bleed < 0.4, "blur should bleed past a clip (alpha %.3f)", bleed);
 }

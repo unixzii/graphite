@@ -4,7 +4,8 @@
 Public hosting and readback functions are declared in `include/graphite/macos.h`.
 
 Each model layer maps to an outer CALayer and a kind-specific body. The outer
-owns transform, opacity, visibility and shadow; the body owns local bounds,
+owns transform, opacity, visibility, shadow and the blur filter (the private
+`CAFilter`); the body owns local bounds,
 clipping, background, border, contents and mask. Images use a dedicated first
 sublayer. Image CGImages are shared by resource identity with per-node usage
 counts. Shape gradient paints currently fall back to the first stop.

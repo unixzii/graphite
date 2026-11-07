@@ -540,6 +540,12 @@ static void property_dependencies(void)
     OK(gr_layer_set_corner_radius(l, 2));
     OK(gr_scene_commit(s));
     CHECK(update(&r, l)->changed == (GR_DIRTY_APPEARANCE | GR_DIRTY_SHADOW));
+    CHECK(gr_layer_get_blur(l) == 0);
+    OK(gr_layer_set_blur(l, 3));
+    OK(gr_scene_commit(s));
+    CHECK(update(&r, l)->changed == GR_DIRTY_APPEARANCE && update(&r, l)->resolved.props.blur_sigma == 3);
+    OK(gr_layer_set_blur(l, 3));
+    CHECK(!gr_scene_needs_commit(s) && gr_layer_get_blur(l) == 3);
     OK(gr_scene_set_pixel_snapping(s, false));
     OK(gr_scene_commit(s));
     OK(gr_scene_set_backing_scale(s, 2));
@@ -755,12 +761,14 @@ static void rejected_mutations_stay_clean(void)
     CHECK(gr_layer_set_mask(a, child) == GR_ERROR_STATE);
     CHECK(gr_layer_set_position(a, (gr_point){NAN, 0}) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_corner_radius(a, -1) == GR_ERROR_ARGUMENT);
+    CHECK(gr_layer_set_blur(a, -1) == GR_ERROR_ARGUMENT && gr_layer_set_blur(a, INFINITY) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_masked_corners(a, (gr_corners)0x80) == GR_ERROR_ARGUMENT);
     CHECK(gr_scene_set_backing_scale(s, 0) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_get_parent(child) == a && gr_layer_get_parent(a) == root);
     CHECK(gr_layer_get_child_count(a) == 1 && gr_layer_get_mask(a) == mask);
     CHECK(gr_layer_get_position(a).x == 12 && gr_layer_get_position(a).y == 34);
     CHECK(gr_layer_get_corner_radius(a) == 0 && gr_layer_get_masked_corners(a) == GR_CORNERS_ALL);
+    CHECK(gr_layer_get_blur(a) == 0);
     CHECK(gr_scene_get_backing_scale(s) == 1);
     CHECK(!gr_scene_needs_commit(s) && r.requests == requests);
     OK(gr_scene_commit(s));

@@ -292,6 +292,25 @@ gr_result gr_layer_set_border(gr_layer *l, const gr_border *value)
     return changed(l, GR_DIRTY_APPEARANCE);
 }
 
+double gr_layer_get_blur(const gr_layer *l)
+{
+    return l->scene ? l->props.blur_sigma : 0;
+}
+
+gr_result gr_layer_set_blur(gr_layer *l, double value)
+{
+    if (!l->scene)
+        return GR_OK;
+    if (gr_model_writable(l->scene) != GR_OK)
+        return GR_ERROR_REENTRANT;
+    if (!(isfinite(value) && value >= 0))
+        return GR_ERROR_ARGUMENT;
+    if (l->props.blur_sigma == value)
+        return GR_OK;
+    l->props.blur_sigma = value;
+    return changed(l, GR_DIRTY_APPEARANCE);
+}
+
 bool gr_layer_get_shadow(const gr_layer *l, gr_shadow *out)
 {
     bool present = l->scene && l->props.has_shadow;

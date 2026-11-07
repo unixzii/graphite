@@ -394,9 +394,12 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
     gtk_snapshot_transform(s, transform);
     if (transform)
         gsk_transform_unref(transform);
-    bool faded = p->opacity < 1;
+    bool faded = p->opacity < 1, blurred = p->blur_sigma > 0;
     if (faded)
         gtk_snapshot_push_opacity(s, p->opacity);
+    /* GSK blur radius is 2 sigma, applied in device space. */
+    if (blurred)
+        gtk_snapshot_push_blur(s, p->blur_sigma * 2);
     if (p->has_shadow && r->has_shadow)
     {
         const gr_shadow *shadow = &p->shadow;
@@ -512,6 +515,8 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
     if (p->masks_to_bounds)
         gtk_snapshot_pop(s);
     if (n->mask)
+        gtk_snapshot_pop(s);
+    if (blurred)
         gtk_snapshot_pop(s);
     if (faded)
         gtk_snapshot_pop(s);

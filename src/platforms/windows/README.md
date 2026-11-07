@@ -19,6 +19,12 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   Linear/radial brushes preserve absolute shape and relative layer coordinates.
 - Alpha masks use a VisualSurface and a custom `IGraphicsEffectD2D1Interop`
   description of Direct2D's alpha-mask effect, avoiding a Win2D dependency.
+- Layer blur wraps the outer's contents in a LayerVisual whose effect is
+  Direct2D's Gaussian blur (σ times the backing scale, in device pixels).
+- LayerVisuals clip to their size, so after each batch the backend resizes
+  every mask and blur LayerVisual to cover what its subtree draws: contents,
+  sublayers, shadows, and for blur a 3σ margin divided by the smallest scale of
+  the transforms above it.
 - Images share drawing surfaces by resource ID. Drawers are recorded only when
   version/bounds/scale changes and released after Direct2D replay. Stroke replay
   widens paths and fills the resulting outline, avoiding aliased native strokes on affected VM GPUs.
@@ -75,11 +81,12 @@ condition. See Microsoft's [compositor clock documentation](https://learn.micros
 
 Native tests cover HWND placement, DPI, automatic/idle commits, movement,
 resizing, visual attachment/detachment, alpha readback and host/Scene lifetimes.
-Conformance covers 33 cases at three scales. Run these in an interactive desktop;
+Conformance covers 36 cases at three scales. Run these in an interactive desktop;
 SSH session 0 cannot provide rendering evidence. A temporarily awake display is
 required for compositor-clock demo selftests.
 
-Device-loss recovery is not implemented. Masks cover the owner's box, and
-shadow/drawing raster surfaces are per-layer. Validate edge quality and monitor
+Device-loss recovery is not implemented, and shadow/drawing raster surfaces
+are per-layer. Effect LayerVisuals are re-measured on every batch, walking the
+subtrees of masked and blurred layers. Validate edge quality and monitor
 DPI transitions on the target hardware. The per-thread context lifetime policy
 is intentional; whole-process leak counts require accounting for it.

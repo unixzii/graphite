@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#import <objc/message.h>
+
 static NSValue *key(gr_layer *layer)
 {
     return [NSValue valueWithPointer:layer];
@@ -51,6 +53,7 @@ static NSValue *key(gr_layer *layer)
 @property(nonatomic, strong) NSMutableArray<NSValue *> *children;
 @property(nonatomic) gr_layer *mask;
 @property(nonatomic) gr_layer *maskOwner;
+@property(nonatomic) double blur;
 @end
 @implementation GRNode
 @end
@@ -173,6 +176,21 @@ static void apply_gradient(CAGradientLayer *layer, gr_paint *paint)
     }
     layer.colors = colors;
     layer.locations = locations;
+}
+
+/* Private CAFilter, the filter behind NSVisualEffectView; inputRadius is the Gaussian sigma in layer space. */
+static NSArray *blur_filters(double sigma)
+{
+    if (!(sigma > 0))
+        return nil;
+    Class type = NSClassFromString(@"CAFilter");
+    SEL make = NSSelectorFromString(@"filterWithType:");
+    if (![type respondsToSelector:make])
+        return nil;
+    id filter = ((id(*)(id, SEL, NSString *))objc_msgSend)(type, make, @"gaussianBlur");
+    [filter setValue:@"gaussianBlur" forKey:@"name"];
+    [filter setValue:@(sigma) forKey:@"inputRadius"];
+    return filter ? @[ filter ] : nil;
 }
 
 @implementation GRBackend
@@ -403,6 +421,11 @@ static void apply_gradient(CAGradientLayer *layer, gr_paint *paint)
         if (color)
             CGColorRelease(color);
         node.body.borderWidth = r->has_border ? r->border.width : 0;
+        if (node.blur != p->blur_sigma)
+        {
+            node.blur = p->blur_sigma;
+            node.outer.filters = blur_filters(p->blur_sigma);
+        }
     }
     if (dirty & GR_DIRTY_SHADOW)
     {

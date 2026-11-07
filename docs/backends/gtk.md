@@ -11,6 +11,9 @@ Public declarations: [`gtk.h`](../../include/graphite/gtk.h).
   `shadow_blur_matches_sigma` (outset: σ measured 4.03 for σ = 4) and
   `shadow_blur_matches_sigma_without_background` (blur: 3.8 at the 1σ point
   and 3.5 at the 2σ point; GSK's blur kernel has slightly short tails).
+- **Layer blur uses a blur node with radius 2σ**, measured by
+  `layer_blur_matches_sigma` at 3.8 (GL, Vulkan) and 4.5 (Cairo) for σ = 4.
+  It is in device space, so scale transforms do not scale it.
 - **virgl breaks GSK's GL blur node.** In the QEMU/virgl VM the GL renderer
   draws blur nodes wrongly. At 1× and 2× the child comes out unblurred and
   hard-edged; at the desktop's 1.333 it is spread far too wide and cut off
