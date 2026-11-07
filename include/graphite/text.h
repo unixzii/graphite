@@ -252,7 +252,8 @@ size_t gr_text_layout_next_caret_stop(const gr_text_layout *layout, size_t index
 size_t gr_text_layout_previous_caret_stop(const gr_text_layout *layout, size_t index);
 
 /** Returns the caret position nearest to point in layout coordinates; points outside the box clamp to the nearest
- * line and its nearest end. A nonfinite point returns {0, downstream}. */
+ * line and its nearest end. Points on an ellipsis return the position where the elided text starts, and elided
+ * positions share its caret. A nonfinite point returns {0, downstream}. */
 gr_text_position gr_text_layout_hit_test(const gr_text_layout *layout, gr_point point);
 
 /** Stores a zero-width caret rectangle spanning the line height in *out; out is required. In bidirectional text an

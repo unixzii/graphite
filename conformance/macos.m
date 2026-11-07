@@ -44,12 +44,18 @@ static void destroy(void *userdata)
     free(capture);
 }
 
+static gr_text_system *text_system(void *userdata)
+{
+    (void)userdata;
+    return gr_macos_text_system_new();
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool
     {
         [NSApplication sharedApplication];
-        gr_conf_harness harness = {"macos", NULL, attach, capture, destroy};
+        gr_conf_harness harness = {"macos", NULL, attach, capture, destroy, text_system};
         return gr_conf_run_main(&harness, 1, argc, argv);
     }
 }

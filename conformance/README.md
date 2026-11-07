@@ -1,7 +1,7 @@
 # Backend conformance
 
-The suite contains **26 semantic cases and 7 measured cases**, each at
-**1×, 1.5× and 2×**.
+The suite contains **26 semantic cases, 7 measured cases and 8 text cases**,
+each at **1×, 1.5× and 2×**.
 
 ## Organization
 
@@ -10,6 +10,11 @@ The suite contains **26 semantic cases and 7 measured cases**, each at
 - `frame.c`: pixel probes, profiles, threshold crossings and integrated coverage.
 - `cases.def`: shared registry; `cases.c` constructs the runtime case table.
 - `semantic.c` / `measured.c`: rendering cases.
+- `text.c`: text layout and rendering through the harness's native text
+  system (metrics, line breaking, truncation, alignment, carets, threading and
+  drawing). Fonts differ per platform, so these assert relations and
+  invariants rather than exact metrics. A harness without `text_system`
+  (Windows today) reports them as skipped.
 - `macos.m`: Core Animation host adapter; executes on the main thread.
 - `tests.c`: crossing/coverage and unique-name unit tests plus frame
   probe/profile and context-storage growth checks, using the shared test harness.
@@ -18,7 +23,8 @@ The suite contains **26 semantic cases and 7 measured cases**, each at
 All captures are top-row-first premultiplied RGBA8. The PNG writer deliberately
 stores these bytes unchanged; it uses uncompressed
 DEFLATE blocks and introduces no image-codec dependency. Compare decoded pixels,
-not compressed PNG files. Each suite run generates 111 PNGs when all cases run.
+not compressed PNG files. Each suite run generates 114 PNGs when all cases run
+(only one text case renders).
 
 ## Build and run
 

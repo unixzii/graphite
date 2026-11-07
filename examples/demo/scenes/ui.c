@@ -207,7 +207,17 @@ static void body_text(demo *d, gr_layer *editor)
     options.max_width = 436;
     options.max_lines = 10;
     options.truncation = GR_TEXT_TRUNCATE_END;
-    text_layer(d, editor, layout_text(d, body, &base, (gr_text_span_list){spans, 4}, &options), 14, 134, INK);
+    gr_text_layout *layout = layout_text(d, body, &base, (gr_text_span_list){spans, 4}, &options);
+    /* Line heights differ per platform (Pango's are taller); keep the paragraph above the status bar. */
+    const double room = 158;
+    gr_text_layout_metrics m = gr_text_layout_get_metrics(layout);
+    if (m.size.height > room)
+    {
+        options.max_lines = (uint32_t)floor(room / (m.size.height / (double)m.line_count));
+        gr_text_layout_unref(layout);
+        layout = layout_text(d, body, &base, (gr_text_span_list){spans, 4}, &options);
+    }
+    text_layer(d, editor, layout, 14, 134, INK);
 }
 
 static gr_layer *panel(demo *d, gr_layer *parent, gr_rect rect)

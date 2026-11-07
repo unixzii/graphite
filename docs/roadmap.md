@@ -21,8 +21,9 @@
   started, like on the other backends.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
   border widths snap to device pixels), shadow spread.
-- **Conformance suite**: 26 semantic and 7 measured cases at 1×, 1.5× and 2×;
-  macOS, GTK and Windows pass all of them. Shadow σ is calibrated for all
+- **Conformance suite**: 26 semantic, 7 measured and 8 text cases at 1×, 1.5×
+  and 2×; macOS, GTK and Windows pass all of them (Windows skips the text
+  cases until it has a text system). Shadow σ is calibrated for all
   three backends.
   The runner executes on the platform-required thread.
 - **Platform-neutral demo** with two scenes (`showcase`, `ui`), `--selftest`,
@@ -97,8 +98,9 @@ position of an animating layer would then live in the compositor (like
 The API is [text.h](../include/graphite/text.h). Core implements it (attributed
 text, the text system and layout wrappers, and Canvas recording), and a fake
 text system tests it. macOS provides a CoreText text system
-(`gr_macos_text_system_new`) covering M1 and M2 below; GTK and Windows skip
-`GR_DRAW_TEXT_LAYOUT` ops until theirs land.
+(`gr_macos_text_system_new`) and GTK provides a Pango one
+(`gr_gtk_text_system_new`), both covering M1 and M2 below; Windows skips
+`GR_DRAW_TEXT_LAYOUT` ops until its DirectWrite text system lands.
 
 ### Design
 
@@ -150,22 +152,19 @@ text system tests it. macOS provides a CoreText text system
   truncated) and per-line range, bounds, baseline, ascent and descent.
 - Native work per platform:
   - **macOS** (done): see [the Core Animation backend notes](backends/macos.md#text).
-  - **GTK**: lay out with Pango and draw with `gtk_snapshot_append_layout`.
-    Turn off metric hinting and glyph position rounding so layouts do not
-    depend on scale. Use `pango_layout_set_height(-max_lines)` with ellipsize.
-    `PangoLayout` is not thread-safe, so lock it.
+  - **GTK** (done): see [the GTK backend notes](backends/gtk.md#text).
   - **Windows**: lay out with `IDWriteTextLayout`, which has no line limit:
     derive `SetMaxHeight` from a first pass and trim with an ellipsis sign.
     Per-run colors need a custom `IDWriteTextRenderer`, because D2D drawing
     effects must be device-bound brushes. Enable color fonts.
 - Demo: the `ui` scene shows real labels and a wrapped, styled paragraph with
-  Chinese and emoji (done on macOS; other shells return no text system yet and
-  keep placeholder bars).
+  Chinese and emoji (done on macOS and GTK; the Windows shell returns no text
+  system yet and keeps placeholder bars).
 
 ### M2: carets and hit testing
 
 - Caret stops (next/previous), hit testing, caret rectangles with affinity, and
-  range rectangles for selections (done on macOS). Bidirectional text is the hard part: split
+  range rectangles for selections (done on macOS and GTK). Bidirectional text is the hard part: split
   carets and visual-order range rectangles need care on every platform.
 - Native APIs:
   - CoreText: `CTLineGetStringIndexForPosition` and
@@ -176,16 +175,17 @@ text system tests it. macOS provides a CoreText text system
 
 ### Testing
 
-Fonts differ per platform, so rendering is not compared across backends.
-Semantic cases instead:
-- narrower widths never produce fewer lines
-- `max_lines` and the truncated/visible metrics hold
-- hit testing is monotonic within a line
-- caret positions round-trip through hit testing
-- paint-only color changes keep the same layout
+The conformance suite's `text` cases (`conformance/text.c`) run against every
+backend that provides a text system. Fonts differ per platform, so they assert
+relations and invariants rather than exact metrics: wrapping inside the width,
+line ranges covering the text, `max_lines` with the truncated/visible metrics,
+ellipsis hit testing, alignment by paragraph direction, monotonic carets that
+round-trip through hit testing, grapheme cluster stops, bidi selection pieces,
+concurrent queries, and drawing (upright, inside its box, no color leaks,
+underline). Still missing: paint-only color changes keeping the same layout.
 
 Register a bundled test font internally to reduce variance. Use same-backend
-golden snapshots for rasterization. See also [testing](testing.md#future-text-tests).
+golden snapshots for rasterization. See also [testing](testing.md#text-tests).
 
 ### Later
 

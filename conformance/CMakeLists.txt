@@ -1,5 +1,6 @@
-add_library(graphite_conformance STATIC cases.c context.c frame.c semantic.c measured.c)
-target_link_libraries(graphite_conformance PUBLIC graphite)
+find_package(Threads REQUIRED)
+add_library(graphite_conformance STATIC cases.c context.c frame.c semantic.c measured.c text.c)
+target_link_libraries(graphite_conformance PUBLIC graphite Threads::Threads)
 target_include_directories(graphite_conformance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(graphite_conformance PRIVATE GRAPHITE_CONFORMANCE_OUT="${PROJECT_SOURCE_DIR}/target/conformance")
 if(NOT MSVC)

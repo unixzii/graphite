@@ -37,6 +37,8 @@ GdkTexture *gr_gdk_texture(const gr_image *image);
 void gr_gsk_paint(GtkSnapshot *snapshot, gr_paint *paint, const graphene_rect_t *bounds, gr_size units);
 void gr_gsk_paint_path(GtkSnapshot *snapshot, GskPath *path, gr_fill_rule rule, GskStroke *stroke, gr_paint *paint);
 GskRenderNode *gr_gsk_recording(const gr_display_list *list);
+extern const gr_text_layout_vtable gr_pango_layout_vtable;
+void gr_pango_draw_layout(GtkSnapshot *snapshot, gr_text_layout *layout, gr_point origin, gr_color color);
 
 gr_gtk_shared *gr_gtk_shared_new(gr_scene *scene);
 gr_gtk_shared *gr_gtk_shared_ref(gr_gtk_shared *shared);

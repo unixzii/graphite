@@ -57,6 +57,11 @@ bool gr_gtk_renderer_render(gr_gtk_renderer *renderer, gr_gtk_host *host, double
 /** Frees pixel storage and zeros the result; NULL is accepted. */
 void gr_gtk_pixels_clear(gr_gtk_pixels *pixels);
 
+/** Creates an owned Pango text system; its layouts are drawn by the GTK backend. Unlike the rest of this header,
+ * layouts may be created, queried and released on any thread (a mutex serializes Pango). "system-ui" maps to GTK's
+ * interface font when GTK is initialized; other generic families go to fontconfig. */
+gr_text_system *gr_gtk_text_system_new(void);
+
 #ifdef __cplusplus
 }
 #endif

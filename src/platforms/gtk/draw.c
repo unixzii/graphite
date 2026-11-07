@@ -121,7 +121,14 @@ GskRenderNode *gr_gsk_recording(const gr_display_list *list)
                 break;
             }
             case GR_DRAW_TEXT_LAYOUT:
-                /* Native text drawing lands with the Pango text system. */
+                if (gr_text_layout_get_vtable(op->value.text_layout.layout) != &gr_pango_layout_vtable)
+                    break;
+                if (top->alpha < 1)
+                    gtk_snapshot_push_opacity(s, top->alpha);
+                gr_pango_draw_layout(s, op->value.text_layout.layout, op->value.text_layout.origin,
+                                     op->value.text_layout.color);
+                if (top->alpha < 1)
+                    gtk_snapshot_pop(s);
                 break;
             case GR_DRAW_FILL_PATH:
             case GR_DRAW_STROKE_PATH:

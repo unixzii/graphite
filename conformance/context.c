@@ -43,6 +43,7 @@ void context_clear(ctx *c)
         gr_layer_unref(c->layers[i]);
     for (size_t i = 0; i < c->scene_count; ++i)
         gr_scene_unref(c->scenes[i]);
+    gr_text_system_unref(c->text);
     free(c->frames);
     free(c->hosts);
     free(c->layers);
@@ -158,6 +159,15 @@ static bool save_png(const char *path, const gr_conf_pixels *pixels)
     free(raw);
     free(z);
     return ok;
+}
+
+gr_text_system *text_system(ctx *c)
+{
+    if (!c->text && c->harness->text_system)
+        c->text = c->harness->text_system(c->harness->userdata);
+    if (!c->text)
+        c->skipped = true;
+    return c->text;
 }
 
 void conf_check(ctx *c, bool ok, const char *format, ...)
@@ -355,7 +365,7 @@ void set_shadow(gr_layer *l, double x, double y, double sigma, double spread)
 
 int gr_conf_run_main(const gr_conf_harness *harnesses, size_t count, int argc, char **argv)
 {
-    size_t selected = 0, failed = 0;
+    size_t selected = 0, failed = 0, skipped = 0;
     for (size_t h = 0; h < count; ++h)
         for (size_t i = 0; i < gr_conf_case_count; ++i)
         {
@@ -373,20 +383,24 @@ int gr_conf_run_main(const gr_conf_harness *harnesses, size_t count, int argc, c
                 continue;
             ++selected;
             size_t failures = 0;
+            bool skip = false;
             printf("[ RUN      ] %s (%s)\n", full, test->tier);
             fflush(stdout);
             const double scales[] = {1, 1.5, 2};
-            for (size_t scale = 0; scale < 3; ++scale)
+            for (size_t scale = 0; scale < 3 && !skip; ++scale)
             {
                 ctx c = {.harness = &harnesses[h], .name = test->name, .scale = scales[scale]};
                 test->run(&c);
                 failures += c.failures;
+                skip = c.skipped;
                 context_clear(&c);
             }
-            printf("test %s ... %s\n", full, failures ? "FAILED" : "ok");
+            printf("test %s ... %s\n", full, failures ? "FAILED" : skip ? "skipped" : "ok");
             fflush(stdout);
             failed += failures != 0;
+            skipped += skip && !failures;
         }
-    printf("\ntest result: %s. %zu passed; %zu failed\n", failed ? "FAILED" : "ok", selected - failed, failed);
+    printf("\ntest result: %s. %zu passed; %zu failed; %zu skipped\n", failed ? "FAILED" : "ok",
+           selected - failed - skipped, failed, skipped);
     return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }

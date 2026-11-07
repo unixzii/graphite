@@ -33,7 +33,7 @@ owns that container for callers.
 
 `graphite_macos_tests` covers raw readback orientation, scale, real NSView hosting
 and resizing, host/model lifetime, and repeated complete Graphite offscreen
-captures. `graphite_macos_text_tests` covers text metrics, wrapping, truncation,
-alignment, carets, selection, concurrent queries and rendering. These tests require a normal macOS GUI/Metal session; a sandbox may
+captures; text is covered by the conformance suite's text cases. These tests
+require a normal macOS GUI/Metal session; a sandbox may
 hide the Metal device or deny WindowServer access. Native conformance is provided
 by the repository-level `conformance/` target.

@@ -50,7 +50,9 @@ typedef struct
     size_t layer_count, layer_capacity;
     frame **frames;
     size_t frame_count, frame_capacity;
+    gr_text_system *text;
     size_t failures;
+    bool skipped;
 } ctx;
 
 typedef struct
@@ -88,6 +90,8 @@ profile frame_profile(const frame *f, gr_point from, gr_point to);
 double profile_crossing(profile p, size_t channel, double threshold);
 double profile_coverage(profile p, size_t channel, double scale);
 gr_scene *new_scene(ctx *c);
+/** Returns the borrowed text system of the harness, or NULL after marking the case skipped. */
+gr_text_system *text_system(ctx *c);
 gr_layer *new_layer(ctx *c, gr_scene *s, gr_layer_kind kind);
 gr_color color(rgba8 value);
 gr_layer *solid(ctx *c, gr_scene *s, gr_rect rect, rgba8 value);

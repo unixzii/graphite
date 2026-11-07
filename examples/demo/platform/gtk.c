@@ -78,7 +78,7 @@ static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer userdata)
 
 gr_text_system *demo_platform_text_system(void)
 {
-    return NULL; /* Pango text system not implemented yet. */
+    return gr_gtk_text_system_new();
 }
 
 int demo_platform_run(demo *content, bool selftest, bool fps)

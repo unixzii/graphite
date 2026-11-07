@@ -22,6 +22,9 @@ No additional container dependency is introduced: GTK already supplies GLib.
   Commits run in frame-clock **layout**, after tick callbacks and before paint.
   Surface `notify::scale` follows fractional scale. Realize/unrealize connects and
   disconnects clock/surface handlers; callbacks use a weak Scene link.
+- `text.c`: the Pango text system (`gr_gtk_text_system_new`); `draw.c` replays
+  its layouts with `gtk_snapshot_append_layout`. See the
+  [backend notes](../../../docs/backends/gtk.md#text).
 - `offscreen.c`: reusable GL, Vulkan or Cairo renderers, explicit premultiplied
   RGBA8 download, row-stride handling, and renderer unrealization after readback.
 
@@ -62,7 +65,8 @@ Use separate reference/candidate output directories when comparing captures.
 
 `tests/gtk.c` covers real-window rendering/idle wakeup, natural size, fractional
 scale, unparent/reparent, 60 frame-clock ticks, node/drawer reuse, empty output
-and host/Scene lifetimes. Native tests require a live graphical session.
+and host/Scene lifetimes. Text is covered by the conformance suite's text cases.
+Native tests require a live graphical session.
 
 Virtual GPU drivers can produce stale captures or incorrect blur output. Use
 software GL (`LIBGL_ALWAYS_SOFTWARE=1`) or lavapipe where needed; renderer

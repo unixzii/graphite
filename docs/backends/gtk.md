@@ -47,8 +47,48 @@ Public declarations: [`gtk.h`](../../include/graphite/gtk.h).
   `GDK_MEMORY_R8G8B8A8_PREMULTIPLIED`. Rows are top-down.
 - GTK operations must run on its main thread after initialization.
 
+## Text
+
+`gr_gtk_text_system_new` (`src/platforms/gtk/text.c`, tested by the
+conformance suite's text cases) lays text out with Pango and draws it with
+`gtk_snapshot_append_layout`:
+
+- **Pango picks the attribute with the latest start index**, not the one
+  inserted last, so spans are resolved here into disjoint segments (base, then
+  each span's selected fields in order) before becoming attributes.
+- Each layout gets its own `PangoContext` from the system's
+  `pango_cairo_font_map_new`, because base direction is a context property.
+  Metric hinting and glyph position rounding are off, so layouts do not depend
+  on the output scale. Sizes are absolute (logical pixels).
+- With `auto_dir` off, Pango does not flip `LEFT`/`RIGHT` for right-to-left
+  text, so start and end alignment are mapped for explicit directions.
+- **Line limits:** a negative `pango_layout_set_height` limits lines per
+  *paragraph*. A positive height with end ellipsization limits the whole
+  layout and ellipsizes the last line, which then holds the rest of its
+  paragraph; the height is set halfway into the first hidden line. Without an
+  ellipsis, the extra lines are hidden by a clip when drawing.
+- Pango wraps whenever a width is set, so unwrapped text without an ellipsis
+  is laid out without a width and shifted to align inside `max_width`. Unwrapped
+  text with an ellipsis uses per-paragraph ellipsization.
+- **Pango stops at NUL**, so embedded NULs become spaces (same byte length).
+- Hit testing past a wrapped line's end returns the trailing space, not the
+  line end, so points outside a line are resolved from its direction.
+- Pango maps the ellipsis onto the elided range; its run is found through
+  `PANGO_ANALYSIS_FLAG_IS_ELLIPSIS`, and positions inside it collapse onto the
+  elision start like on CoreText.
+- Pango line lengths exclude paragraph separators; line ranges extend to the
+  next line's start to include them.
+- Pango is not thread-safe: a mutex per text system serializes layout,
+  queries and drawing. GSK still renders the resulting text nodes later on
+  GTK's main thread, sharing fonts with any concurrent layout.
+- Line heights are taller than CoreText's (about 17 pt vs 15.5 pt at 12.5 pt
+  sans), so layouts that budget height by line count should measure first.
+
 ## Known gaps
 
+- Text: unwrapped text with an ellipsis and a line limit hides extra
+  paragraphs without an ellipsis on the last line; mixed-direction paragraphs
+  in unwrapped text without an ellipsis share one alignment shift.
 - Shadows that can show under their layer are a blur of the filled shape,
   re-rendered whenever their region is damaged.
 - No headless setup yet (for example `mutter --headless`); the tests need a

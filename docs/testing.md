@@ -57,9 +57,11 @@ Run against both static/shared packages and relocated installation prefixes.
 [Benchmarks](../benchmarks/README.md) measure core work and native demo processes;
 keep timing runs separate from instrumented allocation runs and builds.
 
-## Future text tests
+## Text tests
 
-When text support is added, cover wrapping, line limits, ellipsis, bidi,
-grapheme boundaries, caret/selection queries, layout lifetime and paint-only
-changes. Use semantic assertions across platforms and native reference captures
-for platform-specific rasterization.
+`tests/text.c` drives the core text API through a fake text system. Native text
+systems are tested by the conformance suite's `text` cases, which every
+backend with a text system runs: wrapping, line limits, ellipsis, bidi,
+grapheme boundaries, caret and selection queries, concurrency and drawing.
+They assert relations across platforms; captures cover rasterization per
+platform. Paint-only changes are not covered yet.

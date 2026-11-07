@@ -10,7 +10,7 @@ platform-specific macOS, GTK and Windows shells.
   are real text: English labels with emoji, and a wrapped paragraph with
   styled spans, a line of Chinese and an ellipsis. Shells pass their platform
   text system to `demo_new` (`demo_platform_text_system`); where a platform
-  has none yet (GTK and Windows today), the scene draws placeholder bars
+  has none yet (Windows today), the scene draws placeholder bars
   instead.
 - `stress` (800 × 800): a 32 × 32 grid of independent square layers. Every three
   seconds, a ripple travels outward from the center, animating each cell's scale,

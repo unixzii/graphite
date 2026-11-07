@@ -11,7 +11,9 @@ typedef struct
 } gr_conf_pixels;
 
 /** Backend adapter. Attach once per Scene; capture reads committed state.
- * The context keeps Scene alive until after destroy. Name is borrowed for the run. */
+ * The context keeps Scene alive until after destroy. Name is borrowed for the run.
+ * text_system is optional and returns an owned text system whose layouts the backend draws, or NULL; text cases
+ * are skipped without one. */
 typedef struct
 {
     const char *name;
@@ -19,6 +21,7 @@ typedef struct
     void *(*attach)(void *userdata, gr_scene *scene, double scale);
     bool (*capture)(void *host, gr_conf_pixels *pixels);
     void (*destroy)(void *host);
+    gr_text_system *(*text_system)(void *userdata);
 } gr_conf_harness;
 
 /** Runs all cases at 1, 1.5 and 2x. Positional arguments filter full case names

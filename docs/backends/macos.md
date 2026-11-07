@@ -22,8 +22,8 @@ Public declarations: [`macos.h`](../../include/graphite/macos.h).
 
 ## Text
 
-`gr_macos_text_system_new` (`src/platforms/macos/text.m`, tested by
-`tests/macos_text.m`) lays text out with CoreText:
+`gr_macos_text_system_new` (`src/platforms/macos/text.m`, tested by the
+conformance suite's text cases) lays text out with CoreText:
 
 - Styles become private per-field attributes on a `CFAttributedString`, in span
   order, so later spans win; each attribute run then gets the `CTFont` its

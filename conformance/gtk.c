@@ -47,6 +47,12 @@ static void destroy(void *userdata)
     g_free(c);
 }
 
+static gr_text_system *text_system(void *userdata)
+{
+    (void)userdata;
+    return gr_gtk_text_system_new();
+}
+
 int main(int argc, char **argv)
 {
     if (!gtk_init_check())
@@ -97,7 +103,8 @@ int main(int argc, char **argv)
                                          .userdata = renderer,
                                          .attach = attach,
                                          .capture = capture,
-                                         .destroy = destroy};
+                                         .destroy = destroy,
+                                         .text_system = text_system};
         ++ready;
     }
     if (!status)
