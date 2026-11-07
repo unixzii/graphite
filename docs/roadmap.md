@@ -33,8 +33,9 @@
    keyed by resource identity. All backends currently share image textures
    through per-layer reference counts. Caching paths or drawings across
    layers would need explicit notifications.
-2. **Text**: the API is in [text.h](../include/graphite/text.h) and its core
-   is implemented; native text systems are next. See [Text](#text) below.
+2. **Text**: layout, measurement, drawing, carets and selection work on all
+   three backends (M1 and M2 below). Remaining text work is under
+   [Text](#text): consistency gaps between backends, then the "Later" list.
 3. **Tier C review**: generate a side-by-side page from
    `target/conformance/*`, and keep same-backend golden snapshots.
 
