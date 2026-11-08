@@ -14,8 +14,8 @@ headers in `include/graphite`, and backend-independent rendering tests in
 ## Ownership
 
 `gr_scene *` and `gr_layer *` are stable opaque handles. `new` returns one owned
-reference; `ref` acquires one and `unref` releases one. Parents own children,
-mask owners own masks, and the Scene owns its root. The tree keeps a child alive
+reference; `ref` acquires one and `unref` releases one. Parents own children
+and the Scene owns its root. The tree keeps a child alive
 after the caller releases its local reference.
 
 Layer back-pointers do not own the Scene. Final Scene release invalidates
@@ -87,7 +87,7 @@ deferred drawing; it safely becomes inactive when its Scene disappears.
 Backends cache native rendering using display version, bounds and scale. They
 can drop the recording after replay. macOS uses a CALayer delegate/backing store;
 Windows uses composition drawing surfaces; GTK caches immutable GSK nodes and
-invalidates ancestors of changed children or masks. Scene mutation and nested
+invalidates ancestors of changed children. Scene mutation and nested
 drawing are rejected while a drawer runs.
 
 ## Text

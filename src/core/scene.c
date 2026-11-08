@@ -66,8 +66,6 @@ void gr_model_attach(gr_layer *l, bool attached)
         stack = data;
         for (size_t i = 0; i < node->child_count; ++i)
             stack[count++] = node->children[i];
-        if (node->mask)
-            stack[count++] = node->mask;
     }
     free(stack);
 }
@@ -77,6 +75,8 @@ void gr_model_drop_content(gr_layer *l)
     gr_drawer drawer = l->drawer;
     l->drawer = (gr_drawer){0};
     gr_path *shadow = l->props.has_shadow ? l->props.shadow.path : NULL;
+    bool masked = l->props.has_mask;
+    gr_mask mask = l->props.mask;
     l->props = gr_model_defaults();
     gr_shape_props shape = l->shape;
     l->shape = (gr_shape_props){.stroke_end = 1};
@@ -86,6 +86,8 @@ void gr_model_drop_content(gr_layer *l)
     l->gradient = NULL;
     l->gravity = GR_GRAVITY_RESIZE;
     gr_path_unref(shadow);
+    if (masked)
+        gr_model_mask_refs(&mask, false);
     gr_path_unref(shape.path);
     gr_paint_unref(shape.fill);
     gr_stroke_unref(shape.stroke);
@@ -99,21 +101,12 @@ static void clear_edges(gr_layer *l)
 {
     gr_layer **children = l->children;
     size_t count = l->child_count;
-    gr_layer *mask = l->mask;
     l->children = NULL;
     l->child_count = l->child_capacity = 0;
-    l->mask = NULL;
     for (size_t i = 0; i < count; ++i)
     {
         children[i]->parent = NULL;
-        children[i]->mask_parent = false;
         gr_layer_unref(children[i]);
-    }
-    if (mask)
-    {
-        mask->parent = NULL;
-        mask->mask_parent = false;
-        gr_layer_unref(mask);
     }
     free(children);
 }
@@ -208,7 +201,6 @@ void gr_scene_unref(gr_scene *s)
         ++l->refs;
         l->scene = NULL;
         l->parent = NULL;
-        l->mask_parent = false;
     }
     if (s->has_backend)
         s->vtable.destroy(s->backend);

@@ -17,13 +17,15 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   above children. Rounded clipping uses opaque-border midline insets.
 - Native shape geometry and trimming use separate fill/stroke sprite shapes.
   Linear/radial brushes preserve absolute shape and relative layer coordinates.
-- Alpha masks use a VisualSurface and a custom `IGraphicsEffectD2D1Interop`
-  description of Direct2D's alpha-mask effect, avoiding a Win2D dependency.
+- Masks run the body through a LayerVisual whose effect is Direct2D's alpha-mask
+  effect (a custom `IGraphicsEffectD2D1Interop` description, avoiding a Win2D
+  dependency) over a VisualSurface of the mask: a filled ShapeVisual for a path
+  mask, a gradient SpriteVisual over the box for a gradient mask.
 - Layer blur wraps the outer's contents in a LayerVisual whose effect is
   Direct2D's Gaussian blur (σ times the backing scale, in device pixels).
 - LayerVisuals clip to their size, so after each batch the backend resizes
-  every mask and blur LayerVisual to cover what its subtree draws: contents,
-  sublayers, shadows, and for blur a 3σ margin divided by the smallest scale of
+  every mask and blur LayerVisual to cover what its subtree draws (contents,
+  sublayers and shadows, within the mask's bounds), and for blur a 3σ margin divided by the smallest scale of
   the transforms above it.
 - Images share drawing surfaces by resource ID. Drawers are recorded only when
   version/bounds/scale changes and released after Direct2D replay. Stroke replay

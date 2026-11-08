@@ -13,12 +13,13 @@ addToLibrary({
 
     /* A realized layer:
      *   el            transform, opacity, blur
-     *   ├ shadow      an svg, only while the layer has a shadow; outside the clip
-     *   ├ body        the masks_to_bounds clip
-     *   │ ├ background an svg, only while the layer has one
-     *   │ ├ content   the image, shape, gradient or drawing, when there is one
-     *   │ └ sublayers, in local space (translated by the bounds offset)
-     *   └ border      an svg, only while the layer has one; above contents and sublayers
+     *   ├ shadow      an svg, only while the layer has a shadow; outside the clip and mask
+     *   └ group       the mask
+     *     ├ body      the masks_to_bounds clip
+     *     │ ├ background an svg, only while the layer has one
+     *     │ ├ content the image, shape, gradient or drawing, when there is one
+     *     │ └ sublayers, in local space (translated by the bounds offset)
+     *     └ border    an svg, only while the layer has one; above contents and sublayers
      * Everything painted is SVG geometry or transformed, never CSS box sizes: browsers store those in fixed point
      * (1/64 px in Chromium), which puts snapped edges off the device-pixel grid at fractional scales. */
     node(id) {
@@ -26,13 +27,15 @@ addToLibrary({
       el.className = 'gr-layer';
       el.style.transformOrigin = '0 0';
       el.grId = id;
+      const group = GRWeb.box('div');
       const body = GRWeb.box('div');
       const sublayers = GRWeb.box('div');
       sublayers.className = 'gr-sublayers';
       body.append(sublayers);
-      el.append(body);
+      group.append(body);
+      el.append(group);
       return {
-        el, body, sublayers, shadow: null, background: null, border: null, content: null, image: 0,
+        el, group, body, sublayers, shadow: null, background: null, border: null, content: null, image: 0,
         size: [0, 0], offset: [0, 0], radius: 0, corners: 15, fill: '', stroke: null, masks: false,
       };
     },
@@ -67,7 +70,7 @@ addToLibrary({
         const inner = GRWeb.roundedRect(bw, bw, Math.max(0, w - 2 * bw), Math.max(0, h - 2 * bw), radii.map((r) => r - bw));
         node.border = GRWeb.canvasSvg();
         GRWeb.svg(node.border, 'path', { d: outline + inner, fill: color, 'fill-rule': 'evenodd' });
-        node.el.append(node.border);
+        node.group.append(node.border);
       }
     },
 
@@ -366,6 +369,29 @@ addToLibrary({
       GRWeb.svg(s, 'path', { d, fill: color });
       node.shadow = s;
       node.el.prepend(s);
+    },
+
+    /* A path mask is a clip. A gradient mask is an SVG image of the gradient over the box, transparent outside it; the
+     * group takes the box's size for it, because Chromium ignores masks on empty elements and WebKit clips to the
+     * border box. */
+    mask(R, node) {
+      const kind = R.next(), style = node.group.style;
+      Object.assign(style, { clipPath: '', maskImage: '', maskSize: '', maskRepeat: '', width: '', height: '' });
+      if (kind === 1) {
+        const evenOdd = R.next();
+        style.clipPath = `path(${evenOdd ? 'evenodd, ' : ''}'${R.path()}')`;
+      } else if (kind === 2) {
+        const paint = R.paint(), [w, h] = node.size;
+        const svg = document.createElementNS(GRWeb.SVG, 'svg');
+        svg.setAttribute('width', w);
+        svg.setAttribute('height', h);
+        GRWeb.svg(svg, 'rect', { width: w, height: h, fill: GRWeb.fill(svg, paint, 'objectBoundingBox') });
+        const data = encodeURIComponent(new XMLSerializer().serializeToString(svg));
+        Object.assign(style, {
+          maskImage: `url("data:image/svg+xml,${data}")`, maskSize: '100% 100%', maskRepeat: 'no-repeat',
+          width: `${w}px`, height: `${h}px`,
+        });
+      }
     },
 
     appearance(R, node) {
@@ -758,6 +784,7 @@ addToLibrary({
         case 6: GRWeb.appearance(R, nodes.get(R.next())); break;
         case 7: GRWeb.shadow(R, nodes.get(R.next())); break;
         case 8: GRWeb.content(R, nodes.get(R.next())); break;
+        case 9: GRWeb.mask(R, nodes.get(R.next())); break;
         default:
           throw new Error('graphite: bad command ' + op);
       }

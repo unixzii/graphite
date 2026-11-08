@@ -10,8 +10,8 @@ coverage figures; they exercise additional core paths separately.
 |---|---|
 | First realization, clean commits, coalescing, detached changes | `basics`; covers attachment and commit behavior. |
 | Reparenting, reorder, parent ownership | `tree` plus `borrowed_reparent_and_reorder`; checks both model and committed backend order, including transfer without an external owning reference. |
-| Cycles, cross-Scene/root/mask restrictions | `tree` plus `rejected_mutations_stay_clean`; rejected calls preserve hierarchy, values, mask ownership, request count, and clean status. |
-| Mask realization and retirement | `tree` plus `mask_replacement_lifetime`; replacement/removal check realization/release counts, resolved mask references, same-mask no-op, and owner-only lifetime. |
+| Cycles, cross-Scene/root restrictions, invalid masks | `tree` plus `rejected_mutations_stay_clean`; rejected calls preserve hierarchy, values, the mask, request count, and clean status. |
+| Mask property | `mask_property`; path and gradient masks reach the snapshot with `GR_DIRTY_MASK`, equal values coalesce, clearing works, and the layer owns the mask's resources until replacement or teardown. |
 | Deferred drawing, stale versions, read-only callbacks | `drawers`; covers deferred execution, reentry rejection, backing scale, version invalidation and inactive providers. |
 | Drawer cleanup and ownership | `drawers`, `cascade`, `teardown_reentry`, plus `rejected_drawer_preserves_ownership`; invalid and wrong-kind installation retain the old drawer and leave rejected userdata owned by its caller. |
 | Scene teardown and backend reentry | `deferred_release`, `teardown_reentry`, `unavailable_backend`, `deep_tree`, lifecycle example; includes callback-driven final releases and deep iterative destruction. |

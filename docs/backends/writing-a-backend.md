@@ -23,7 +23,8 @@ the documented provider interface.
 
 Use resolved transforms, size, border, bounds offsets, shadows and image placement.
 Set all native properties explicitly on realization. Keep box and local spaces
-separate, and support rehoming between mask and child use within one batch.
+separate: a path mask is in local space, a gradient mask covers the box, and
+both change with geometry as well as with `GR_DIRTY_MASK`.
 
 ## Drawing and caching
 

@@ -13,7 +13,7 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
 - **A `LayerVisual` clips its subtree to its `Size`.** A plain
   `ContainerVisual` never clips, but masks and blur render through a
   LayerVisual, so the backend sizes each one to the subtree's extent
-  (`masks_keep_sublayers_outside_bounds`,
+  (`path_masks_clip_contents_and_sublayers`,
   `blur_covers_sublayers_and_bleeds_past_bounds`).
 - **Direct2D's Gaussian blur σ is in device pixels**, even under the root
   scale, unlike `DropShadow.BlurRadius`. `layer_blur_matches_sigma` measures

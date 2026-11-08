@@ -71,7 +71,7 @@ int main(int argc, char **argv)
     setenv("GRAPHITE_CONFORMANCE_OUT", WEB_CONF_OUT, 0);
     /* Masks are a known gap (docs/backends/web.md). The build is single-threaded, and the Web text system works on
      * the main thread only. */
-    gr_conf_harness harness = {"web", NULL, attach, capture, destroy, text_system, GR_CONF_MASKS | GR_CONF_THREADS};
+    gr_conf_harness harness = {"web", NULL, attach, capture, destroy, text_system, GR_CONF_THREADS};
     int status = gr_conf_run_main(&harness, 1, argc, argv);
     web_conf_export(getenv("GRAPHITE_CONFORMANCE_OUT"));
     emscripten_runtime_keepalive_pop();

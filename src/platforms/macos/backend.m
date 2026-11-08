@@ -51,8 +51,6 @@ static NSValue *key(gr_layer *layer)
 @property(nonatomic) double displayScale;
 @property(nonatomic) gr_layer *parent;
 @property(nonatomic, strong) NSMutableArray<NSValue *> *children;
-@property(nonatomic) gr_layer *mask;
-@property(nonatomic) gr_layer *maskOwner;
 @property(nonatomic) double blur;
 @end
 @implementation GRNode
@@ -193,6 +191,39 @@ static NSArray *blur_filters(double sigma)
     return filter ? @[ filter ] : nil;
 }
 
+/* The mask layer shares the body's local coordinates and covers its box. */
+static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, double scale)
+{
+    if (!p->has_mask)
+    {
+        body.mask = nil;
+        return;
+    }
+    const gr_mask *m = &p->mask;
+    Class type = m->kind == GR_MASK_PATH ? [CAShapeLayer class] : [CAGradientLayer class];
+    CALayer *mask = body.mask;
+    if (![mask isMemberOfClass:type])
+    {
+        mask = [type layer];
+        mask.anchorPoint = CGPointZero;
+        body.mask = mask;
+    }
+    mask.bounds = local;
+    mask.position = local.origin;
+    mask.contentsScale = scale;
+    if (m->kind == GR_MASK_PATH)
+    {
+        CAShapeLayer *shape = (CAShapeLayer *)mask;
+        CGPathRef path = gr_cg_path(m->value.path.path);
+        shape.path = path;
+        CGPathRelease(path);
+        shape.fillColor = CGColorGetConstantColor(kCGColorBlack);
+        shape.fillRule = m->value.path.rule == GR_FILL_EVEN_ODD ? kCAFillRuleEvenOdd : kCAFillRuleNonZero;
+    }
+    else
+        apply_gradient((CAGradientLayer *)mask, m->value.gradient);
+}
+
 @implementation GRBackend
 
 - (instancetype)init
@@ -278,18 +309,6 @@ static NSArray *blur_filters(double sigma)
     for (NSValue *child in node.children)
         [layers addObject:[self node:child.pointerValue].outer];
     node.body.sublayers = layers;
-}
-
-- (void)clearMaskOwner:(gr_layer *)identity
-{
-    GRNode *node = [self node:identity];
-    if (node.maskOwner)
-    {
-        GRNode *owner = [self node:node.maskOwner];
-        owner.mask = NULL;
-        owner.body.mask = nil;
-        node.maskOwner = NULL;
-    }
 }
 
 - (void)releaseImage:(uint64_t)identity
@@ -452,21 +471,8 @@ static NSArray *blur_filters(double sigma)
             node.outer.shadowPath = NULL;
         }
     }
-    if ((dirty & GR_DIRTY_MASK) && node.mask != r->mask)
-    {
-        if (node.mask)
-            [self node:node.mask].maskOwner = NULL;
-        if (r->mask)
-        {
-            [self clearMaskOwner:r->mask];
-            GRNode *mask = [self node:r->mask];
-            [mask.outer removeFromSuperlayer];
-            mask.parent = NULL;
-            mask.maskOwner = identity;
-        }
-        node.mask = r->mask;
-        node.body.mask = r->mask ? [self node:r->mask].outer : nil;
-    }
+    if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_MASK))
+        apply_mask(node.body, p, local, _scale);
     if (dirty & GR_DIRTY_CONTENT)
         [self content:&r->content identity:identity];
     if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT))
@@ -505,14 +511,6 @@ static NSArray *blur_filters(double sigma)
     node.body.delegate = nil;
     if (node.imageID)
         [self releaseImage:node.imageID];
-    GRNode *owner = node.maskOwner ? _nodes[key(node.maskOwner)] : nil;
-    if (owner && owner.mask == identity)
-    {
-        owner.mask = NULL;
-        owner.body.mask = nil;
-    }
-    if (node.mask)
-        _nodes[key(node.mask)].maskOwner = NULL;
     if (node.parent)
         [_nodes[key(node.parent)].children removeObject:key(identity)];
     for (NSValue *childID in node.children)
@@ -539,6 +537,7 @@ static NSArray *blur_filters(double sigma)
         {
             node.outer.contentsScale = _scale;
             node.body.contentsScale = _scale;
+            node.body.mask.contentsScale = _scale;
         }
     }
     for (size_t i = 0; i < batch->realized.count; ++i)
@@ -593,7 +592,6 @@ static NSArray *blur_filters(double sigma)
         for (size_t j = 0; j < u->children.count; ++j)
         {
             gr_layer *identity = u->children.data[j];
-            [self clearMaskOwner:identity];
             GRNode *child = [self node:identity];
             if (child.parent && child.parent != u->parent)
                 [_nodes[key(child.parent)].children removeObject:key(identity)];

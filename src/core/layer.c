@@ -342,6 +342,72 @@ gr_result gr_layer_set_shadow(gr_layer *l, const gr_shadow *value)
     return changed(l, GR_DIRTY_SHADOW);
 }
 
+bool gr_layer_get_mask(const gr_layer *l, gr_mask *out)
+{
+    bool present = l->scene && l->props.has_mask;
+    *out = present ? l->props.mask : (gr_mask){0};
+    return present;
+}
+
+static bool valid_mask(const gr_mask *m)
+{
+    switch (m->kind)
+    {
+        case GR_MASK_PATH:
+            return m->value.path.path && gr_valid_rule(m->value.path.rule);
+        case GR_MASK_GRADIENT:
+            return m->value.gradient && gr_paint_get_desc(m->value.gradient).kind != GR_PAINT_SOLID;
+    }
+    return false;
+}
+
+static bool paint_equal(gr_paint *a, gr_paint *b);
+
+static bool same_mask(const gr_mask *a, const gr_mask *b)
+{
+    if (a->kind != b->kind)
+        return false;
+    if (a->kind == GR_MASK_PATH)
+        return a->value.path.path == b->value.path.path && a->value.path.rule == b->value.path.rule;
+    return paint_equal(a->value.gradient, b->value.gradient);
+}
+
+void gr_model_mask_refs(const gr_mask *m, bool acquire)
+{
+    if (m->kind == GR_MASK_PATH)
+    {
+        if (acquire)
+            gr_path_ref(m->value.path.path);
+        else
+            gr_path_unref(m->value.path.path);
+    }
+    else if (acquire)
+        gr_paint_ref(m->value.gradient);
+    else
+        gr_paint_unref(m->value.gradient);
+}
+
+gr_result gr_layer_set_mask(gr_layer *l, const gr_mask *value)
+{
+    if (!l->scene)
+        return GR_OK;
+    if (gr_model_writable(l->scene) != GR_OK)
+        return GR_ERROR_REENTRANT;
+    if (value && !valid_mask(value))
+        return GR_ERROR_ARGUMENT;
+    if (l->props.has_mask == (value != NULL) && (!value || same_mask(&l->props.mask, value)))
+        return GR_OK;
+    gr_mask old = l->props.mask;
+    bool had = l->props.has_mask;
+    if (value)
+        gr_model_mask_refs(value, true);
+    l->props.has_mask = value != NULL;
+    l->props.mask = value ? *value : (gr_mask){0};
+    if (had)
+        gr_model_mask_refs(&old, false);
+    return changed(l, GR_DIRTY_MASK);
+}
+
 static bool ancestor(gr_layer *node, gr_layer *candidate)
 {
     for (; node; node = node->parent)
@@ -355,25 +421,15 @@ static void detach(gr_layer *l)
     gr_layer *parent = l->parent;
     if (!parent)
         return;
-    if (l->mask_parent)
-    {
-        parent->mask = NULL;
-        gr_model_mark(parent, GR_DIRTY_MASK);
-    }
-    else
-    {
-        size_t i = 0;
-        while (i < parent->child_count && parent->children[i] != l)
-            ++i;
-        if (i == parent->child_count)
-            abort();
-        memmove(parent->children + i, parent->children + i + 1,
-                (parent->child_count - i - 1) * sizeof(*parent->children));
-        --parent->child_count;
-        gr_model_mark(parent, GR_DIRTY_CHILDREN);
-    }
+    size_t i = 0;
+    while (i < parent->child_count && parent->children[i] != l)
+        ++i;
+    if (i == parent->child_count)
+        abort();
+    memmove(parent->children + i, parent->children + i + 1, (parent->child_count - i - 1) * sizeof(*parent->children));
+    --parent->child_count;
+    gr_model_mark(parent, GR_DIRTY_CHILDREN);
     l->parent = NULL;
-    l->mask_parent = false;
     if (l->attached)
         gr_model_attach(l, false);
     gr_layer_unref(l);
@@ -391,12 +447,7 @@ gr_layer *gr_layer_get_child(const gr_layer *l, size_t index)
 
 gr_layer *gr_layer_get_parent(const gr_layer *l)
 {
-    return l->scene && !l->mask_parent ? l->parent : NULL;
-}
-
-gr_layer *gr_layer_get_mask(const gr_layer *l)
-{
-    return l->scene ? l->mask : NULL;
+    return l->scene ? l->parent : NULL;
 }
 
 gr_result gr_layer_insert_child(gr_layer *parent, gr_layer *child, size_t index)
@@ -408,7 +459,7 @@ gr_result gr_layer_insert_child(gr_layer *parent, gr_layer *child, size_t index)
         return GR_ERROR_REENTRANT;
     if (child->scene != s)
         return GR_ERROR_SCENE;
-    if (child == s->root || child->mask_parent)
+    if (child == s->root)
         return GR_ERROR_STATE;
     if (ancestor(parent, child))
         return GR_ERROR_CYCLE;
@@ -450,49 +501,6 @@ gr_result gr_layer_remove_from_parent(gr_layer *l)
     gr_layer_ref(l);
     detach(l);
     gr_layer_unref(l);
-    gr_model_flush(s);
-    gr_scene_unref(s);
-    return GR_OK;
-}
-
-gr_result gr_layer_set_mask(gr_layer *l, gr_layer *mask)
-{
-    gr_scene *s = l->scene;
-    if (!s || (mask && !mask->scene))
-        return GR_OK;
-    if (gr_model_writable(s) != GR_OK)
-        return GR_ERROR_REENTRANT;
-    if (mask && mask->scene != s)
-        return GR_ERROR_SCENE;
-    if (l->mask == mask)
-        return GR_OK;
-    if (mask)
-    {
-        if (ancestor(l, mask))
-            return GR_ERROR_CYCLE;
-        if (mask == s->root || mask->parent || mask->mask || l->mask_parent)
-            return GR_ERROR_STATE;
-    }
-    gr_layer *old = l->mask;
-    gr_layer_ref(mask);
-    l->mask = mask;
-    if (old)
-    {
-        old->parent = NULL;
-        old->mask_parent = false;
-        if (old->attached)
-            gr_model_attach(old, false);
-    }
-    if (mask)
-    {
-        mask->parent = l;
-        mask->mask_parent = true;
-        if (l->attached)
-            gr_model_attach(mask, true);
-    }
-    gr_model_mark(l, GR_DIRTY_MASK);
-    gr_scene_ref(s);
-    gr_layer_unref(old);
     gr_model_flush(s);
     gr_scene_unref(s);
     return GR_OK;

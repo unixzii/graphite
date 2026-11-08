@@ -12,7 +12,7 @@ static void crossing_interpolates(void)
 
 static void names_are_unique(void)
 {
-    CHECK(gr_conf_case_count == 54);
+    CHECK(gr_conf_case_count == 55);
     for (size_t i = 0; i < gr_conf_case_count; ++i)
         for (size_t j = 0; j < i; ++j)
             CHECK(strcmp(gr_conf_cases[i].name, gr_conf_cases[j].name) != 0);

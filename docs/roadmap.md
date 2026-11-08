@@ -22,7 +22,7 @@
   border widths snap to device pixels), shadow spread.
 - **Layer blur** (`gr_layer_set_blur`) on all three backends. Core Animation
   measures σ in layer space, GTK and Windows in screen space.
-- **Conformance suite**: 28 semantic, 8 measured and 18 text cases at 1×, 1.5×
+- **Conformance suite**: 29 semantic, 8 measured and 18 text cases at 1×, 1.5×
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
@@ -89,7 +89,7 @@ position of an animating layer would then live in the compositor (like
 - Windows: device-loss recovery (`RenderingDeviceReplaced`) and testing on
   x64 hardware.
 - A Web backend (DOM, CSS and SVG), tier 2: in progress. Layers, drawings,
-  text and events work and every example runs in the browser; masks, IME and
+  masks, text and events work and every example runs in the browser; IME and
   touch remain. See the [design](backends/web.md).
 - Optional capabilities with per-platform fallback: conic gradients,
   other content filters, blend modes, backdrop blur.

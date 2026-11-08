@@ -78,7 +78,6 @@ gr_resolved gr_model_resolve(const gr_layer *l)
                      .size = p->bounds.size,
                      .has_border = p->has_border,
                      .border = p->border,
-                     .mask = l->mask,
                      .bounds_offset = {-p->bounds.origin.x, -p->bounds.origin.y},
                      .has_shadow = p->has_shadow};
     if (snapping && axis_aligned)

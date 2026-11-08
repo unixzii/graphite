@@ -62,7 +62,7 @@ static void push_rect(gr_web_backend *b, gr_rect r)
     push(b, r.size.height);
 }
 
-static void push_path(gr_web_backend *b, const gr_path *path)
+static void push_path_at(gr_web_backend *b, const gr_path *path, gr_point offset)
 {
     gr_path_element_list elements = gr_path_get_elements(path);
     push(b, (double)elements.count);
@@ -73,10 +73,15 @@ static void push_path(gr_web_backend *b, const gr_path *path)
         push(b, e->verb);
         for (size_t j = 0; j < points; ++j)
         {
-            push(b, e->p[j].x);
-            push(b, e->p[j].y);
+            push(b, e->p[j].x + offset.x);
+            push(b, e->p[j].y + offset.y);
         }
     }
+}
+
+static void push_path(gr_web_backend *b, const gr_path *path)
+{
+    push_path_at(b, path, (gr_point){0, 0});
 }
 
 static void push_stops(gr_web_backend *b, gr_gradient_stop_list stops)
@@ -370,7 +375,20 @@ static void push_update(gr_web_backend *b, const gr_commit_batch *batch, const g
             gr_path_unref(outline);
         }
     }
-    /* TODO: masks (GR_DIRTY_MASK) are ignored; see docs/backends/web.md. */
+    /* A path mask moves with the bounds origin and a gradient mask stretches over the box. */
+    if (u->changed & (GR_DIRTY_GEOMETRY | GR_DIRTY_MASK))
+    {
+        push(b, GR_WEB_MASK);
+        push_id(b, u->layer);
+        push(b, p->has_mask ? (p->mask.kind == GR_MASK_PATH ? 1 : 2) : 0);
+        if (p->has_mask && p->mask.kind == GR_MASK_PATH)
+        {
+            push(b, p->mask.value.path.rule == GR_FILL_EVEN_ODD);
+            push_path_at(b, p->mask.value.path.path, r->bounds_offset);
+        }
+        else if (p->has_mask)
+            push_paint(b, p->mask.value.gradient);
+    }
     /* Image placement and drawing bounds follow geometry; shapes (local space) and gradients (unit space) do not. */
     bool sized = r->content.kind == GR_CONTENT_IMAGE || r->content.kind == GR_CONTENT_DRAWN;
     if (u->changed & GR_DIRTY_CONTENT || (u->changed & GR_DIRTY_GEOMETRY && sized))

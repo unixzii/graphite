@@ -170,11 +170,14 @@ struct ShadowParts
     }
 };
 
+/* The body goes through a LayerVisual whose effect multiplies it by the alpha of a visual surface of host, in local
+ * space, holding the mask: a filled ShapeVisual for a path, a SpriteVisual over the box for a gradient. */
 struct Masking
 {
     LayerVisual layer{nullptr};
     ContainerVisual host{nullptr};
     CompositionVisualSurface surface{nullptr};
+    gr_rect area{}; /**< Box-space bounds of the mask. */
 };
 
 /* The layer's whole rendering goes through a LayerVisual whose effect is the blur. */
@@ -206,7 +209,7 @@ struct Node
     std::unique_ptr<Blurring> blurring;
     std::unique_ptr<Drawing> drawing;
     uint64_t image = 0;
-    gr_layer *parent = nullptr, *mask = nullptr, *mask_owner = nullptr;
+    gr_layer *parent = nullptr;
     std::vector<gr_layer *> children;
     /* Snapshot for sizing LayerVisuals, which clip to their size, over the whole subtree. */
     gr_affine transform{1, 0, 0, 1, 0, 0};
@@ -323,25 +326,12 @@ struct Backend
         n.masking.reset();
     }
 
-    void clear_mask_owner(gr_layer *id)
-    {
-        auto &n = node(id);
-        if (n.mask_owner)
-        {
-            auto &owner = node(n.mask_owner);
-            owner.mask = nullptr;
-            unmask(owner);
-            n.mask_owner = nullptr;
-        }
-        detach(n.outer);
-    }
-
     CompositionBrush paint_brush(gr_paint *p, bool relative);
     CompositionClip rounded_clip(gr_rect r, double radius, gr_corners corners);
     void decoration(Node &n, gr_resolved const &r);
     void shadow(Node &n, gr_resolved const &r);
     void raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offset);
-    void apply_mask(gr_layer *id, gr_resolved const &r);
+    void apply_mask(gr_layer *id, Node &n, gr_resolved const &r);
     void apply_blur(gr_layer *id, double sigma);
     double effective_scale(gr_layer *id);
     Measured const &measure(gr_layer *id, std::unordered_map<gr_layer *, Measured> &memo);
@@ -540,30 +530,14 @@ void Backend::shadow(Node &n, gr_resolved const &r)
     raster_shadow(n, r.shadow_shape, r.bounds_offset);
 }
 
-void Backend::apply_mask(gr_layer *id, gr_resolved const &r)
+void Backend::apply_mask(gr_layer *id, Node &n, gr_resolved const &r)
 {
-    auto &n = node(id);
-    if (n.mask == r.mask)
-        return;
-    if (n.mask)
-    {
-        auto it = nodes.find(n.mask);
-        if (it != nodes.end())
-        {
-            it->second->mask_owner = nullptr;
-            detach(it->second->outer);
-        }
-    }
-    n.mask = r.mask;
-    if (!r.mask)
+    auto &p = r.props;
+    if (!p.has_mask)
     {
         unmask(n);
         return;
     }
-    clear_mask_owner(r.mask);
-    auto &mask = node(r.mask);
-    mask.parent = nullptr;
-    mask.mask_owner = id;
     if (!n.masking)
     {
         n.masking = std::make_unique<Masking>();
@@ -582,8 +556,34 @@ void Backend::apply_mask(gr_layer *id, gr_resolved const &r)
         n.group().Children().InsertAtTop(m.layer);
         effects.insert(id);
     }
-    n.masking->host.Children().RemoveAll();
-    n.masking->host.Children().InsertAtTop(mask.outer);
+    auto &m = *n.masking;
+    m.host.Children().RemoveAll();
+    if (p.mask.kind == GR_MASK_PATH)
+    {
+        auto bounds = control_bounds(p.mask.value.path.path);
+        auto e = bounds ? inset(*bounds, -1) : gr_rect{};
+        auto shape = comp().CreateSpriteShape(comp().CreatePathGeometry(
+            composition_path(ctx.factory.get(), p.mask.value.path.path, p.mask.value.path.rule)));
+        shape.FillBrush(comp().CreateColorBrush(color({1, 1, 1, 1})));
+        auto container = comp().CreateContainerShape();
+        container.Shapes().Append(shape);
+        container.Offset(vec(-e.origin.x, -e.origin.y));
+        auto visual = comp().CreateShapeVisual();
+        visual.Shapes().Append(container);
+        visual.Offset({static_cast<float>(e.origin.x), static_cast<float>(e.origin.y), 0});
+        visual.Size(vec(e.size.width, e.size.height));
+        m.host.Children().InsertAtTop(visual);
+        m.area = {{e.origin.x + r.bounds_offset.x, e.origin.y + r.bounds_offset.y}, e.size};
+    }
+    else
+    {
+        auto sprite = comp().CreateSpriteVisual();
+        sprite.Brush(paint_brush(p.mask.value.gradient, true));
+        sprite.Offset({static_cast<float>(-r.bounds_offset.x), static_cast<float>(-r.bounds_offset.y), 0});
+        sprite.Size(vec(r.size.width, r.size.height));
+        m.host.Children().InsertAtTop(sprite);
+        m.area = {{0, 0}, r.size};
+    }
 }
 
 void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &r, bool changed)
@@ -815,8 +815,7 @@ double Backend::effective_scale(gr_layer *id)
     {
         auto &n = *it->second;
         factor *= min_scale(n.transform);
-        auto up = n.parent ? n.parent : n.mask_owner;
-        it = up ? nodes.find(up) : nodes.end();
+        it = n.parent ? nodes.find(n.parent) : nodes.end();
     }
     return std::max(factor, 1e-3);
 }
@@ -838,11 +837,8 @@ Measured const &Backend::measure(gr_layer *id, std::unordered_map<gr_layer *, Me
     }
     if (n.clips)
         m.body.intersect(bounds);
-    if (n.mask)
-    {
-        auto &mask = node(n.mask);
-        m.body.intersect(mask.hidden ? Extent{} : measure(n.mask, memo).all.mapped(mask.transform, n.bounds_offset));
-    }
+    if (n.masking)
+        m.body.intersect(extent_of(n.masking->area));
     m.all = m.body;
     if (n.shadow)
     {
@@ -915,8 +911,8 @@ void Backend::update(gr_layer_update const &u)
         decoration(n, r);
     if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW))
         shadow(n, r);
-    if (bits & GR_DIRTY_MASK)
-        apply_mask(u.layer, r);
+    if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_MASK))
+        apply_mask(u.layer, n, r);
     if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT))
     {
         content(u.layer, r, (bits & GR_DIRTY_CONTENT) != 0);
@@ -942,16 +938,6 @@ void Backend::release(gr_layer *id)
     detach(n->outer);
     if (n->image)
         release_image(n->image);
-    if (auto owner = nodes.find(n->mask_owner); owner != nodes.end() && owner->second->mask == id)
-    {
-        owner->second->mask = nullptr;
-        unmask(*owner->second);
-    }
-    if (auto mask = nodes.find(n->mask); mask != nodes.end())
-    {
-        mask->second->mask_owner = nullptr;
-        detach(mask->second->outer);
-    }
     if (auto parent = nodes.find(n->parent); parent != nodes.end())
         std::erase(parent->second->children, id);
     for (auto c : n->children)
@@ -1018,7 +1004,6 @@ void Backend::apply(gr_commit_batch const &b)
         for (size_t j = 0; j < u.children.count; ++j)
         {
             auto id = u.children.data[j];
-            clear_mask_owner(id);
             auto &child = node(id);
             if (child.parent && child.parent != u.parent)
             {

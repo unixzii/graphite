@@ -42,6 +42,8 @@ typedef struct
     gr_border border;
     bool has_shadow;
     gr_shadow shadow;
+    bool has_mask;
+    gr_mask mask;
     double blur_sigma;
 } gr_layer_props;
 
@@ -113,7 +115,6 @@ typedef struct
     gr_size size; /**< Resolved size, not raw props.bounds.size. */
     bool has_border;
     gr_border border; /**< Snapped width. */
-    gr_layer *mask;   /**< Nullable. */
     bool has_shadow;
     gr_shadow_shape shadow_shape;
     gr_resolved_content content;

@@ -27,7 +27,8 @@ and Homebrew ships 4.24.
 | Uniform corner radius + masked corners + clip | ✅ | ✅ `RectangleClip` (build 20348) | ✅ rounded clip | ✅ | core |
 | Per-corner radii | ❌ | ✅ | ✅ (elliptical) | ✅ | not supported |
 | Continuous ("squircle") corners | ✅ | ❌ | ❌ | ❌ | not supported |
-| Alpha mask of a subtree (not nested) | ✅ | ✅ `VisualSurface` + `MaskBrush`, costly | ✅ mask node | 🟡 | core |
+| Alpha mask of a subtree (not nested) | ✅ | ✅ `VisualSurface` + `MaskBrush`, costly | ✅ mask node | 🟡 | not supported |
+| Path and gradient alpha masks | ✅ shape / gradient mask layer | ✅ LayerVisual alpha-mask effect | ✅ mask node | ✅ `clip-path` / `mask-image` | core |
 | Luminance mask | ❌ | 🟡 effect | ✅ | ✅ | not supported |
 | Outer shadow | ✅ | ✅ `DropShadow` | ✅ shadow / outset shadow nodes | ✅ | core |
 | Linear and radial gradients | ✅ | ✅ | ✅ | ✅ | core |

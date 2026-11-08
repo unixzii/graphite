@@ -140,26 +140,22 @@ void opacity_is_group_opacity(ctx *c)
     conf_check(c, a == b && (!a || memcmp(single.v, overlap.v, 4) == 0), "overlap differs from a single square");
 }
 
-void masks_clip_by_alpha(ctx *c)
+static void set_path_mask(gr_layer *l, gr_rect a, gr_rect b)
 {
-    if (!supports(c, GR_CONF_MASKS))
-        return;
-    gr_scene *s = new_scene(c);
-    gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED), *mask = new_layer(c, s, GR_LAYER_CONTAINER);
-    FRAME(mask, 0, 0, 20, 40);
-    BACKGROUND(mask, WHITE);
-    API(gr_layer_set_mask(l, mask));
-    frame *f = render(c, s);
-    EXPECT("under the mask", 10, 20, RED);
-    EXPECT("outside the mask", 30, 20, CLEAR);
+    gr_path_builder *builder = gr_path_builder_new();
+    API(gr_path_builder_add_rect(builder, a));
+    API(gr_path_builder_add_rect(builder, b));
+    gr_path *path = gr_path_builder_finish(builder);
+    gr_path_builder_unref(builder);
+    gr_mask mask = {.kind = GR_MASK_PATH, .value.path = {path, GR_FILL_NONZERO}};
+    API(gr_layer_set_mask(l, &mask));
+    gr_path_unref(path);
 }
 
-void masks_keep_sublayers_outside_bounds(ctx *c)
+void path_masks_clip_contents_and_sublayers(ctx *c)
 {
-    if (!supports(c, GR_CONF_MASKS))
-        return;
     gr_scene *s = new_scene(c);
-    gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED), *mask = new_layer(c, s, GR_LAYER_CONTAINER);
+    gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED);
     gr_layer *inside = new_layer(c, s, GR_LAYER_CONTAINER), *outside = new_layer(c, s, GR_LAYER_CONTAINER);
     FRAME(inside, 50, 0, 20, 20);
     BACKGROUND(inside, BLUE);
@@ -167,13 +163,57 @@ void masks_keep_sublayers_outside_bounds(ctx *c)
     FRAME(outside, 85, 0, 10, 10);
     BACKGROUND(outside, BLUE);
     ADD(l, outside);
-    FRAME(mask, 0, 0, 80, 40);
-    BACKGROUND(mask, WHITE);
-    API(gr_layer_set_mask(l, mask));
+    set_path_mask(l, RECT(0, 0, 20, 40), RECT(50, 0, 30, 40));
+    /* The path is in local space, so it moves with the bounds origin. */
+    gr_layer *shifted = solid(c, s, RECT(0, 50, 40, 40), RED);
+    API(gr_layer_set_bounds(shifted, RECT(10, 0, 40, 40)));
+    set_path_mask(shifted, RECT(10, 0, 20, 40), RECT(0, 0, 0, 0));
     frame *f = render(c, s);
-    EXPECT("the layer", 10, 10, RED);
-    EXPECT("sublayer under the mask, past the bounds", 60, 10, BLUE);
-    EXPECT("sublayer outside the mask", 90, 5, CLEAR);
+    EXPECT("inside the path", 10, 20, RED);
+    EXPECT("outside the path", 30, 20, CLEAR);
+    EXPECT("sublayer inside the path, past the bounds", 60, 10, BLUE);
+    EXPECT("sublayer outside the path", 90, 5, CLEAR);
+    EXPECT("local-space path", 10, 70, RED);
+    EXPECT("past the local-space path", 30, 70, CLEAR);
+}
+
+void masks_leave_the_shadow(ctx *c)
+{
+    gr_scene *s = new_scene(c);
+    gr_layer *l = solid(c, s, RECT(10, 10, 40, 30), RED);
+    set_shadow(l, 0, 40, 0, 0);
+    set_path_mask(l, RECT(0, 0, 20, 30), RECT(0, 0, 0, 0));
+    frame *f = render(c, s);
+    EXPECT("masked body", 20, 25, RED);
+    EXPECT("masked out body", 40, 25, CLEAR);
+    EXPECT("shadow under the masked out half", 40, 65, BLACK);
+}
+
+void gradient_masks_fade_by_alpha(ctx *c)
+{
+    gr_scene *s = new_scene(c);
+    gr_layer *l = solid(c, s, RECT(0, 0, 80, 40), RED), *past = new_layer(c, s, GR_LAYER_CONTAINER);
+    FRAME(past, 85, 0, 10, 10);
+    BACKGROUND(past, BLUE);
+    ADD(l, past);
+    gr_gradient_stop stops[] = {{0, color(CLEAR)}, {1, color(BLUE)}};
+    gr_paint_desc d = {.kind = GR_PAINT_LINEAR};
+    d.value.linear.end = POINT(1, 0);
+    d.value.linear.stops = (gr_gradient_stop_list){stops, 2};
+    gr_paint *fade = gr_paint_new(&d);
+    gr_mask mask = {.kind = GR_MASK_GRADIENT, .value.gradient = fade};
+    API(gr_layer_set_mask(l, &mask));
+    gr_paint_unref(fade);
+    frame *f = render(c, s);
+    rgba8 left = {0}, middle = {0}, right = {0};
+    bool ok =
+        frame_at(f, POINT(2, 20), &left) && frame_at(f, POINT(40, 20), &middle) && frame_at(f, POINT(78, 20), &right);
+    conf_check(c, ok, "probes are outside the frame");
+    conf_check(c, left.v[3] < 30, "the transparent end is not faded out (alpha %u)", left.v[3]);
+    conf_check(c, middle.v[3] > 100 && middle.v[3] < 155, "the middle is not half faded (alpha %u)", middle.v[3]);
+    conf_check(c, right.v[3] > 225 && right.v[0] > 225 && right.v[2] < 30,
+               "the opaque end is not the layer's red (%u %u %u %u)", right.v[0], right.v[1], right.v[2], right.v[3]);
+    EXPECT("sublayer past the bounds", 90, 5, CLEAR);
 }
 
 static void scroll_draw(void *data, gr_canvas *canvas, const gr_draw_info *info)

@@ -25,9 +25,9 @@ struct gr_layer
     gr_layer *previous, *next;
     gr_layer *dirty_previous, *dirty_next;
     gr_layer *pending_next;
-    bool queued, attached, realized, mask_parent;
+    bool queued, attached, realized;
     gr_dirty_bits dirty;
-    gr_layer *parent, *mask;
+    gr_layer *parent;
     gr_layer **children;
     size_t child_count, child_capacity;
     gr_layer_props props;
@@ -62,6 +62,7 @@ void gr_model_attach(gr_layer *layer, bool attached);
 gr_dirty_bits gr_model_size_bits(const gr_layer *layer);
 gr_dirty_bits gr_model_corner_bits(const gr_layer *layer);
 void gr_model_drop_content(gr_layer *layer);
+void gr_model_mask_refs(const gr_mask *mask, bool acquire);
 gr_resolved gr_model_resolve(const gr_layer *layer);
 gr_affine gr_model_transform(const gr_layer_props *props, gr_size size);
 
