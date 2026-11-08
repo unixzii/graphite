@@ -128,10 +128,12 @@ GskStroke *gr_gsk_stroke(const gr_stroke_style *st)
     return s;
 }
 
-GdkTexture *gr_gdk_texture(const gr_image *image)
+/* Images are immutable, so the texture borrows their pixels and holds a reference instead of copying them. */
+GdkTexture *gr_gdk_texture(gr_image *image)
 {
     gr_bytes pixels = gr_image_get_pixels(image);
-    GBytes *bytes = g_bytes_new(pixels.data, pixels.count);
+    GBytes *bytes =
+        g_bytes_new_with_free_func(pixels.data, pixels.count, (GDestroyNotify)gr_image_unref, gr_image_ref(image));
     GdkTexture *texture =
         gdk_memory_texture_new((int)gr_image_get_width(image), (int)gr_image_get_height(image),
                                GDK_MEMORY_R8G8B8A8_PREMULTIPLIED, bytes, (size_t)gr_image_get_width(image) * 4);

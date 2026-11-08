@@ -68,16 +68,24 @@ CGPathRef gr_cg_path(const gr_path *path)
     return p;
 }
 
-CGImageRef gr_cg_image(const gr_image *image)
+static void release_pixels(void *image, const void *data, size_t size)
+{
+    (void)data;
+    (void)size;
+    gr_image_unref(image);
+}
+
+/* Images are immutable, so the CGImage borrows their pixels and holds a reference instead of copying them. */
+CGImageRef gr_cg_image(gr_image *image)
 {
     gr_bytes pixels = gr_image_get_pixels(image);
-    CFDataRef data = CFDataCreate(NULL, pixels.data, (CFIndex)pixels.count);
-    if (!data)
-        return NULL;
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
-    CFRelease(data);
+    CGDataProviderRef provider =
+        CGDataProviderCreateWithData(gr_image_ref(image), pixels.data, pixels.count, release_pixels);
     if (!provider)
+    {
+        gr_image_unref(image);
         return NULL;
+    }
     CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     size_t w = gr_image_get_width(image), h = gr_image_get_height(image);
     CGImageRef result =
