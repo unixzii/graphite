@@ -435,13 +435,17 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     bool split = node.outer != node.body;
     if (dirty & GR_DIRTY_GEOMETRY)
     {
-        /* The resolved transform already places the box, so anchor points and positions stay zero. A single layer's
-         * bounds start at the bounds origin, which the transform maps to the box's corner just the same. */
-        CATransform3D transform = CATransform3DMakeAffineTransform(gr_cg_affine(r->transform));
+        /* The resolved transform places the box with anchor points at zero: its translation becomes the position and
+         * only the linear part stays a transform, so translated layers keep an identity transform, which Core Animation
+         * stores and commits more cheaply. A single layer's bounds start at the bounds origin, which lands on the box's
+         * corner just the same. */
+        CGAffineTransform m = gr_cg_affine(r->transform);
         node.body.bounds = local;
         if (split)
             node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
-        node.outer.transform = transform;
+        node.outer.position = CGPointMake(m.tx, m.ty);
+        m.tx = m.ty = 0;
+        node.outer.transform = CATransform3DMakeAffineTransform(m);
     }
     if (dirty & GR_DIRTY_APPEARANCE)
     {

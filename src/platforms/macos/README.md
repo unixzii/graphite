@@ -4,7 +4,7 @@
 Public hosting and readback functions are declared in `include/graphite/macos.h`.
 
 Each model layer maps to one kind-specific CALayer with local bounds, the
-resolved transform (anchor point and position zero), opacity, visibility,
+resolved transform (anchor point zero, translation as the position), opacity, visibility,
 shadow, the blur filter (the private `CAFilter`), clipping, background, border,
 contents and mask. A clip or mask would also clip the layer's own shadow and
 blur, so a layer with both moves transform, opacity, visibility, shadow and blur

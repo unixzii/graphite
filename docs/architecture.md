@@ -113,7 +113,9 @@ custom shadows and path masks; translate it by `-bounds.origin` into box space.
 
 The resolved transform is `T(position) * transform * T(-anchor * size)` with its
 translation snapped; the root uses identity. Every backend places layers with
-it, Core Animation included (its anchor point and position stay zero). Image
+it. Core Animation keeps the anchor point at zero, puts the translation in
+`position` and only the linear part in `transform`, so translated layers keep
+the cheaper identity transform. Image
 placement is computed centrally, and `gr_resolved_new_shadow_path` builds the
 box-space shadow outline.
 
