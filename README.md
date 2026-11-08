@@ -2,6 +2,8 @@
 
 ![Screenshot](./docs/screenshot.png)
 
+[Live Demo](https://graphite-mines.vercel.app/)
+
 A cross-platform, retained-mode 2D compositing library with an immediate-mode
 drawing API, written in C11. You build a tree of layers, and Graphite realizes
 them onto the platform compositor: Core Animation on macOS, GTK / GSK on Linux,
