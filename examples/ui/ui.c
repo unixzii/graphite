@@ -597,6 +597,6 @@ static void focus(void *state, bool focused)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"ui", {1000, 600}, build, update, free, focus, NULL};
+    static const example_desc desc = {"ui", {1000, 600}, build, update, free, focus, NULL, NULL};
     return example_main(argc, argv, &desc);
 }

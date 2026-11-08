@@ -301,6 +301,12 @@ bool example_input(example *ex, const gr_event *event)
     return ex->desc->input && ex->desc->input(ex->state, event);
 }
 
+void example_viewport(example *ex, gr_size size)
+{
+    if (ex->desc->viewport)
+        ex->desc->viewport(ex->state, size);
+}
+
 void example_free(example *ex)
 {
     gr_scene_unref(ex->scene);

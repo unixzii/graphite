@@ -57,6 +57,8 @@ static bool handle(void *userdata, const gr_event *event)
             example_focus(f->content, event->type == GR_EVENT_FOCUS_IN);
             return true;
         case GR_EVENT_VIEWPORT:
+            f->changed_between_frames = true;
+            example_viewport(f->content, event->value.viewport.size);
             return false;
         default:
             f->changed_between_frames = true;
@@ -73,6 +75,9 @@ bool example_frames_start(example_frames *f)
         fprintf(stderr, "the host does not deliver frames\n");
         return false;
     }
+    gr_viewport_event viewport;
+    if (gr_scene_host_get_viewport(f->host, &viewport))
+        example_viewport(f->content, viewport.size);
     gr_scene_host_request_focus(f->host);
     /* Scenes start focused; catch up if the host has no focus (yet). */
     if (!gr_scene_host_has_focus(f->host))

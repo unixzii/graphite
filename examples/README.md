@@ -69,13 +69,15 @@ Create `examples/<name>/` with a source file that defines its state, build and
 update callbacks, and `main`:
 
 ```c
-static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL, NULL};
+static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL, NULL, NULL};
 return example_main(argc, argv, &desc);
 ```
 
-The last two fields are optional focus and input callbacks: the shells pass
-keyboard focus changes and pointer, scroll and key events to them (`ui` grays
-its accent color while the window is unfocused; `input` visualizes input).
+The last three fields are optional focus, input and viewport callbacks: the
+shells pass keyboard focus changes, pointer, scroll and key events, and the
+window's size to them (`ui` grays its accent color while the window is
+unfocused; `input` visualizes input). The root keeps its build size unless the
+scene resizes it.
 Scenes start focused, which is how snapshots render. While a window runs,
 `ex->host` is its interactive host, for setting cursors.
 

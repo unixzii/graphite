@@ -52,6 +52,9 @@ typedef struct
     /** Handles pointer, scroll and key input; returns whether it was consumed (false lets the platform have it).
      * Called on the Scene thread; ex->host can set the cursor. May be NULL. */
     bool (*input)(void *state, const gr_event *event);
+    /** Reports the window's size in logical points once it is known and whenever it changes; called on the Scene
+     * thread. The root keeps the size it was built with unless the scene resizes it. May be NULL. */
+    void (*viewport)(void *state, gr_size size);
 } example_desc;
 
 struct example
@@ -81,6 +84,8 @@ void example_update(example *ex, double time);
 void example_focus(example *ex, bool focused);
 /** Passes an input event to the scene; returns whether it was consumed. */
 bool example_input(example *ex, const gr_event *event);
+/** Tells the scene the window's size in logical points. */
+void example_viewport(example *ex, gr_size size);
 /** Destroys the Scene before releasing tracked layers and scene state. */
 void example_free(example *ex);
 

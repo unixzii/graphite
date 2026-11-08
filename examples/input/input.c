@@ -574,6 +574,6 @@ static bool input(void *state, const gr_event *e)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"input", {900, 560}, build, update, free, NULL, input};
+    static const example_desc desc = {"input", {900, 560}, build, update, free, NULL, input, NULL};
     return example_main(argc, argv, &desc);
 }
