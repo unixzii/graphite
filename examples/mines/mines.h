@@ -175,7 +175,7 @@ typedef struct
     bool active, first_boom;
     uint16_t rank;                                             /**< Explosion order; later explosions hit softer. */
     double intro_at, reset_at, reveal_at, explode_at, wave_at; /**< Scheduled times, or -1. */
-    spring hover, pop, open, boom, gscale, galpha, kx, ky;
+    spring hover, pop, open, boom, gscale, galpha, kx, ky, peek;
 } cell;
 
 typedef struct
@@ -209,6 +209,10 @@ struct game_page
     double pitch, tile;
     int hover;
     bool pressing;
+    /* Holding a button on an opened number previews its closed neighbors until the button comes up. */
+    int peek;              /**< The number being previewed, or -1. */
+    gr_button peek_button; /**< The button holding the preview; NONE when there is none. */
+    bool peek_opens;       /**< Release opens the neighbors: double click, right, Control- or middle click. */
     spring depth, cx, cy;
     double shake;
     ring rings[RINGS];

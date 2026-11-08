@@ -9,6 +9,7 @@ static const uint32_t tints[9] = {C_OPEN,   0xE1EED8, 0xEEEACF, 0xF3E0CE, 0xF0D8
 static const uint32_t inks[9] = {C_INK, 0x4E7F4A, 0x86733A, 0xAA6540, 0xA24C62, 0x6D58A0, 0x3E7D80, 0x4C4C4C, 0x7A7A78};
 static const uint32_t confetti[] = {0x9CC59A, 0xE8D48A, 0xF0B48E, 0xE9A1AE, 0xB7A6DA, 0x8CC7C9, C_ACCENT, C_FLAG};
 
+static const spring_params PEEK_IN = {0.16, 1}, PEEK_OUT = {0.42, 0.42};
 static const spring_params HOVER = {0.22, 1}, POP = {0.42, 0.46}, OPENING = {0.26, 1}, BOOM = {0.9, 1},
                            GLYPH = {0.36, 0.52}, FADE = {0.2, 1}, KICK = {0.46, 0.3}, DEPTH_IN = {0.14, 1},
                            DEPTH_OUT = {0.5, 0.34}, FOLLOW = {0.1, 1}, CARD = {0.42, 0.78}, CHIP = {0.32, 0.36};
@@ -215,7 +216,7 @@ static void apply(game_page *g, int i)
     cell *k = &g->cells[i];
     /* Opened tiles are solid ground: they don't sink with the dent. */
     double x = cell_x(g, i), y = cell_y(g, i), pf = press_factor(g, x, y) * (1 - clampd(k->open.value, 0, 1));
-    double s = fmax(0, k->pop.value * (1 + 0.07 * k->hover.value) * (1 - 0.2 * pf));
+    double s = fmax(0, k->pop.value * (1 + 0.07 * k->hover.value) * (1 - 0.2 * pf) * (1 - 0.13 * k->peek.value));
     gr_affine t = scaling(s);
     /* Tiles in the dent lean toward its center, as if the surface sank under the finger. */
     t.tx = k->kx.value + (g->cx.value - x) * 0.11 * pf;
@@ -224,7 +225,7 @@ static void apply(game_page *g, int i)
     gr_color c = mix(hex(C_HIDDEN), hex(C_HIDDEN_HOVER), k->hover.value);
     c = mix(c, hex(k->mine ? C_MINE_OPEN : tints[k->adjacent]), k->open.value);
     c = mix(c, hex(C_BOOM), k->boom.value);
-    c = mix(c, hex(0x949C92), 0.3 * fmax(0, pf));
+    c = mix(c, hex(0x949C92), 0.3 * fmax(0, pf) + 0.28 * fmax(0, k->peek.value));
     background(k->tile, c);
     if (k->glyph)
     {
@@ -452,6 +453,31 @@ static void check_win(game_page *g, int origin)
 }
 
 /* Opens the closed neighbors of an opened number once its flags match the number, or nudges them when they don't. */
+/* Sinks the closed neighbors of number i (flags stay up) and presses the number lightly; amount 0 lets them up. */
+static void peek_around(game_page *g, int i, double amount)
+{
+    int around[8], n_around = neighbors(g, i, around);
+    for (int q = 0; q < n_around; ++q)
+    {
+        cell *n = &g->cells[around[q]];
+        spring_to(&n->peek, n->state == HIDDEN ? amount : 0);
+        activate(g, around[q]);
+    }
+    spring_to(&g->cells[i].peek, 0.4 * amount);
+    activate(g, i);
+}
+
+static void set_peek(game_page *g, int i)
+{
+    if (i == g->peek)
+        return;
+    if (g->peek >= 0)
+        peek_around(g, g->peek, 0);
+    g->peek = i;
+    if (i >= 0)
+        peek_around(g, i, 1);
+}
+
 static void chord(game_page *g, int i)
 {
     cell *k = &g->cells[i];
@@ -580,7 +606,7 @@ void game_build(mines *m)
     if (!g->cells || !g->active || !g->queue)
         abort();
     g->seed = 0x9E3779B97F4A7C15ull ^ (uint64_t)(uintptr_t)g ^ (uint64_t)time(NULL);
-    g->hover = g->last = -1;
+    g->hover = g->last = g->peek = -1;
     g->card_at = -1;
     gr_layer *root = gr_scene_get_root(ex->scene);
     g->page = layer(ex, root, EX_RECT(0, 0, m->view.width, m->view.height));
@@ -729,7 +755,8 @@ void game_new(mines *m, int cols, int rows, int count, bool intro)
     ensure_pool(g, cols * rows);
     g->play = PLAY_READY;
     g->flags = g->opened = 0;
-    g->hover = g->last = -1;
+    g->hover = g->last = g->peek = -1;
+    g->peek_button = GR_BUTTON_NONE;
     g->card_at = -1;
     spring_to(&g->card_t, 0);
     game_layout(m);
@@ -746,6 +773,7 @@ void game_new(mines *m, int cols, int rows, int count, bool intro)
         k->intro_at = k->reset_at = k->reveal_at = k->explode_at = k->wave_at = -1;
         double d = hypot(i % cols - mc, i / cols - mr);
         spring_to(&k->hover, 0);
+        spring_to(&k->peek, 0);
         if (intro)
         {
             /* Tiles bloom in from the middle. */
@@ -923,11 +951,12 @@ void game_update(mines *m, int steps)
         spring_run(&k->galpha, FADE, steps);
         spring_run(&k->kx, KICK, steps);
         spring_run(&k->ky, KICK, steps);
+        spring_run(&k->peek, k->peek.target > 0 ? PEEK_IN : PEEK_OUT, steps);
         apply(g, i);
         bool pending =
             k->intro_at >= 0 || k->reset_at >= 0 || k->reveal_at >= 0 || k->explode_at >= 0 || k->wave_at >= 0;
         bool moving = k->hover.active || k->pop.active || k->open.active || k->boom.active || k->gscale.active ||
-                      k->galpha.active || k->kx.active || k->ky.active;
+                      k->galpha.active || k->kx.active || k->ky.active || k->peek.active;
         if (!pending && !moving && press_factor(g, cell_x(g, i), cell_y(g, i)) == 0)
         {
             k->active = false;
@@ -983,6 +1012,8 @@ void game_reset_pointer(mines *m)
     g->pressing = false;
     spring_to(&g->depth, 0);
     set_hover(g, -1);
+    set_peek(g, -1);
+    g->peek_button = GR_BUTTON_NONE;
     button *buttons[4] = {&g->back, &g->restart, &g->again, &g->sizes};
     for (int i = 0; i < 4; ++i)
     {
@@ -1023,7 +1054,8 @@ static bool pointer(mines *m, const gr_event *e)
     int i = !gone && !card && playing && hit < 0 ? cell_at(g, p->position) : -1;
     set_hover(g, i >= 0 && g->cells[i].state != OPEN ? i : -1);
     bool clickable = i >= 0 && g->cells[i].state != OPEN;
-    set_cursor(m, hit >= 0 || clickable ? GR_CURSOR_POINTER : GR_CURSOR_DEFAULT);
+    bool number = i >= 0 && g->cells[i].state == OPEN && g->cells[i].adjacent;
+    set_cursor(m, hit >= 0 || clickable || number ? GR_CURSOR_POINTER : GR_CURSOR_DEFAULT);
     gr_point local = {clampd(p->position.x - g->board_rect.origin.x, 0, g->board_rect.size.width),
                       clampd(p->position.y - g->board_rect.origin.y, 0, g->board_rect.size.height)};
 
@@ -1038,9 +1070,14 @@ static bool pointer(mines *m, const gr_event *e)
         }
         else if (clickable && flagging)
             flag(g, i);
-        /* Right click (Control-click on a Mac trackpad) or middle click on an opened number opens its neighbors. */
-        else if (i >= 0 && !clickable && (flagging || p->button == GR_BUTTON_MIDDLE))
-            chord(g, i);
+        /* Any button held on a number previews its neighbors; a double click, right click (Control-click on a Mac
+         * trackpad) or middle click also opens them on release. */
+        else if (number && g->peek_button == GR_BUTTON_NONE)
+        {
+            g->peek_button = p->button;
+            g->peek_opens = flagging || p->button == GR_BUTTON_MIDDLE || p->click_count >= 2;
+            set_peek(g, i);
+        }
         else if (clickable && p->button == GR_BUTTON_PRIMARY)
         {
             g->pressing = true;
@@ -1057,6 +1094,8 @@ static bool pointer(mines *m, const gr_event *e)
             spring_to(&g->depth, 1);
         }
     }
+    if (e->type == GR_EVENT_POINTER_MOVE && g->peek_button != GR_BUTTON_NONE)
+        set_peek(g, number ? i : -1);
     if (e->type == GR_EVENT_POINTER_MOVE && g->pressing)
     {
         spring_to(&g->cx, local.x);
@@ -1072,6 +1111,14 @@ static bool pointer(mines *m, const gr_event *e)
             spring_to(&buttons[b]->press, 0);
             if (e->type == GR_EVENT_POINTER_UP && b == hit)
                 press_button(m, b);
+        }
+        if (g->peek_button != GR_BUTTON_NONE && (gone || p->button == g->peek_button))
+        {
+            int target = g->peek;
+            set_peek(g, -1);
+            g->peek_button = GR_BUTTON_NONE;
+            if (e->type == GR_EVENT_POINTER_UP && target >= 0 && target == i && (g->peek_opens || p->click_count >= 2))
+                chord(g, target);
         }
         if (g->pressing && (gone || p->button == GR_BUTTON_PRIMARY))
         {
