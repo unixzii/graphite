@@ -373,6 +373,7 @@ __attribute__((objc_direct_members))
 - (void)content:(const gr_resolved_content *)content identity:(gr_layer *)identity
 {
     GRNode *node = [self node:identity];
+    CALayer *body = node.body;
     gr_image *image = content->kind == GR_CONTENT_IMAGE ? content->value.image.image : NULL;
     uint64_t wanted = image ? gr_image_get_id(image) : 0;
     if (node.imageID != wanted)
@@ -400,16 +401,15 @@ __attribute__((objc_direct_members))
     }
     if (image)
         node.imageLayer.contentsScale = gr_image_get_scale(image);
-    node.body.contentsScale = _scale;
-    if ([node.body isKindOfClass:[CAShapeLayer class]])
+    body.contentsScale = _scale;
+    if ([body isKindOfClass:[CAShapeLayer class]])
     {
         if (content->kind == GR_CONTENT_SHAPE)
-            apply_shape((CAShapeLayer *)node.body, &content->value.shape);
+            apply_shape((CAShapeLayer *)body, &content->value.shape);
     }
-    else if ([node.body isKindOfClass:[CAGradientLayer class]])
+    else if ([body isKindOfClass:[CAGradientLayer class]])
     {
-        apply_gradient((CAGradientLayer *)node.body,
-                       content->kind == GR_CONTENT_GRADIENT ? content->value.gradient : NULL);
+        apply_gradient((CAGradientLayer *)body, content->kind == GR_CONTENT_GRADIENT ? content->value.gradient : NULL);
     }
     else if (content->kind == GR_CONTENT_DRAWN)
     {
@@ -418,15 +418,15 @@ __attribute__((objc_direct_members))
             node.drawing = [GRDrawingDelegate new];
             node.drawing.provider = gr_drawer_provider_ref(_drawers);
             node.drawing.identity = identity;
-            node.body.delegate = node.drawing;
+            body.delegate = node.drawing;
             node.hasDisplayKey = false;
         }
         node.drawing.version = content->value.display_version;
     }
     else
     {
-        node.body.delegate = nil;
-        node.body.contents = nil;
+        body.delegate = nil;
+        body.contents = nil;
         node.drawing = nil;
         node.hasDisplayKey = false;
     }
@@ -436,18 +436,19 @@ __attribute__((objc_direct_members))
 {
     gr_layer *identity = update->layer;
     GRNode *node = [self node:identity];
+    CALayer *body = node.body;
     const gr_resolved *r = &update->resolved;
     const gr_layer_props *p = &r->props;
     gr_dirty_bits dirty = update->changed;
     CGRect local = gr_cg_rect(p->bounds);
     /* Clips and masks would clip the layer's own shadow and blur, so such a layer moves its shadow, transform,
      * opacity and blur to an outer layer, once and for good. */
-    if ((p->has_shadow || p->blur_sigma > 0) && (p->masks_to_bounds || p->has_mask) && node.outer == node.body)
+    if ((p->has_shadow || p->blur_sigma > 0) && (p->masks_to_bounds || p->has_mask) && node.outer == body)
     {
         [self split:node];
         dirty |= GR_DIRTY_GEOMETRY | GR_DIRTY_APPEARANCE | GR_DIRTY_SHADOW;
     }
-    bool split = node.outer != node.body;
+    bool split = node.outer != body;
     if (dirty & GR_DIRTY_GEOMETRY)
     {
         /* The resolved transform places the box with anchor points at zero: its translation becomes the position and
@@ -455,7 +456,7 @@ __attribute__((objc_direct_members))
          * stores and commits more cheaply. A single layer's bounds start at the bounds origin, which lands on the box's
          * corner just the same. */
         CGAffineTransform m = gr_cg_affine(r->transform);
-        node.body.bounds = local;
+        body.bounds = local;
         if (split)
             node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
         node.outer.position = CGPointMake(m.tx, m.ty);
@@ -466,18 +467,18 @@ __attribute__((objc_direct_members))
     {
         node.outer.opacity = p->opacity;
         node.outer.hidden = p->hidden;
-        node.body.masksToBounds = p->masks_to_bounds;
-        node.body.cornerRadius = p->corner_radius;
-        node.body.maskedCorners = gr_ca_corners(p->masked_corners);
+        body.masksToBounds = p->masks_to_bounds;
+        body.cornerRadius = p->corner_radius;
+        body.maskedCorners = gr_ca_corners(p->masked_corners);
         CGColorRef color = p->has_background ? gr_cg_color(p->background) : NULL;
-        node.body.backgroundColor = color;
+        body.backgroundColor = color;
         if (color)
             CGColorRelease(color);
         color = p->has_border ? gr_cg_color(p->border.color) : NULL;
-        node.body.borderColor = color;
+        body.borderColor = color;
         if (color)
             CGColorRelease(color);
-        node.body.borderWidth = p->has_border ? p->border.width : 0;
+        body.borderWidth = p->has_border ? p->border.width : 0;
         if (node.blur != p->blur_sigma)
         {
             node.blur = p->blur_sigma;
@@ -518,7 +519,7 @@ __attribute__((objc_direct_members))
         }
     }
     if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_MASK))
-        apply_mask(node.body, p, local, _scale);
+        apply_mask(body, p, local, _scale);
     if (dirty & GR_DIRTY_CONTENT)
         [self content:&r->content identity:identity];
     if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT))
@@ -541,7 +542,7 @@ __attribute__((objc_direct_members))
                 node.version = version;
                 node.displayBounds = local;
                 node.displayScale = _scale;
-                [node.body setNeedsDisplay];
+                [body setNeedsDisplay];
             }
         }
     }
@@ -591,15 +592,16 @@ __attribute__((objc_direct_members))
         GRNode *node = [GRNode new];
         node.identity = value.layer;
         /* One layer until a shadow needs an outer layer (see split:). */
-        node.body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
-                    : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
-                                                      : [CALayer layer];
-        node.outer = node.body;
+        CALayer *body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
+                        : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
+                                                          : [CALayer layer];
+        body.allowsGroupOpacity = YES;
+        body.allowsEdgeAntialiasing = YES;
+        body.contentsScale = _scale;
+        body.anchorPoint = CGPointZero;
+        node.body = body;
+        node.outer = body;
         node.children = [NSMutableArray array];
-        node.body.allowsGroupOpacity = YES;
-        node.body.allowsEdgeAntialiasing = YES;
-        node.body.contentsScale = _scale;
-        node.body.anchorPoint = CGPointZero;
         CFDictionarySetValue(_nodes, value.layer, (__bridge const void *)node);
     }
     if (batch->root)
