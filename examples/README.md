@@ -18,6 +18,7 @@ They share one layer in `shared/`:
 | `stress` | 800 × 800 | An 80 × 80 grid of independent square layers. Every three seconds, a ripple travels outward from the center, animating each cell's scale, radial displacement and color. |
 | `glyphs` | 960 × 600 | Per-glyph text transitions in four looping labels: a clock, a price counter that rolls up or down, swapping phrases (CJK and emoji included) and a wrapped paragraph that reflows as words are inserted and removed. Every glyph is its own content layer drawn with `gr_canvas_draw_text_glyphs`; glyphs that stay glide to their new place while the others scale, slide, fade and blur (layer blur) in or out, driven by springs. Needs a platform text system. |
 | `input` | 900 × 560 | Shows what the interactive host reports: a pointer pad with a crosshair, a dot colored by the pressed button and click ripples; cursor tiles that change the cursor on hover; a list that scrolls by wheel lines or touchpad points; and the last key's name, physical code and modifiers. Shortcuts with Alt or Super are left to the platform. |
+| `mines` | 920 × 720 | A minesweeper in two pages that cross-fade. The size picker has numeric fields for columns and rows (1–64) and the mine count, which follows a suggested density until it is typed in and always leaves the first click a free 3 × 3 opening (digits only; Tab, clicks, arrows or the scroll wheel move between and adjust them, Shift-arrows by 10) with a focus ring that glides between controls (buttons take it only from the keyboard; a click just takes focus off the fields), a live preview of the field and three classic presets. On the board, which fits the window as it resizes, tiles lift on hover and the board dents around a press; opened regions ripple out by distance, and a mine sets off the rest nearest first, one by one and then faster and faster: the first sends out a shockwave ring, and each throws debris and shakes the board. Opened tiles stay flat and ignore left clicks. Right click, Control-click or Space flags a closed tile; right, Control- or middle click on an opened number whose flags all stand opens its other neighbors. A win fires confetti across the whole window. Small windows get a compact board header and a scaled-down size picker and result card. All motion is springs and schedules stepped at 240 Hz. |
 
 The executables support macOS 14+, Linux with GTK 4.22+, and Windows 11. Where
 no native shell is available, the scene sources still compile but no executable
@@ -25,11 +26,12 @@ is linked.
 
 ```sh
 cmake -S . -B /tmp/graphite-c -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/graphite-c --target graphite_example_showcase graphite_example_ui graphite_example_stress graphite_example_glyphs
+cmake --build /tmp/graphite-c --target graphite_example_showcase graphite_example_ui graphite_example_stress graphite_example_glyphs graphite_example_mines
 /tmp/graphite-c/examples/showcase/showcase
 /tmp/graphite-c/examples/ui/ui --fps
 /tmp/graphite-c/examples/stress/stress --fps
 /tmp/graphite-c/examples/glyphs/glyphs
+/tmp/graphite-c/examples/mines/mines
 /tmp/graphite-c/examples/showcase/showcase --selftest
 /tmp/graphite-c/examples/ui/ui --snapshot ui.png
 ```
@@ -76,8 +78,8 @@ return example_main(argc, argv, &desc);
 The last three fields are optional focus, input and viewport callbacks: the
 shells pass keyboard focus changes, pointer, scroll and key events, and the
 window's size to them (`ui` grays its accent color while the window is
-unfocused; `input` visualizes input). The root keeps its build size unless the
-scene resizes it.
+unfocused; `input` visualizes input; `mines` resizes its root and lays out
+again). The root keeps its build size unless the scene resizes it.
 Scenes start focused, which is how snapshots render. While a window runs,
 `ex->host` is its interactive host, for setting cursors.
 
