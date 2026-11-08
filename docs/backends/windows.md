@@ -10,6 +10,10 @@ Public declarations: [`windows.h`](../../include/graphite/windows.h).
   4.10–4.12 at the 1σ point and 3.78–3.81 (halved) at the 2σ point, at
   1×, 1.5× and 2×. The root scale scales the blur with everything else.
 - **A `ContainerVisual`'s opacity is group opacity.**
+- **A `SpriteVisual` is a `ContainerVisual`.** Its brush paints below its
+  children and its clip covers both, so a plain layer needs only one visual:
+  10,000 layers with backgrounds went from 50,407 visuals to 10,104, with the
+  first commit 62% faster and process memory 30% lower on the development VM.
 - **A `LayerVisual` clips its subtree to its `Size`.** A plain
   `ContainerVisual` never clips, but masks and blur render through a
   LayerVisual, so the backend sizes each one to the subtree's extent
