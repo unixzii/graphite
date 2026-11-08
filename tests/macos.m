@@ -115,7 +115,8 @@ static void view_hosting(void)
         spin();
         CALayer *flipped = (__bridge CALayer *)gr_macos_host_get_layer(h), *parent = flipped.superlayer;
         CHECK(flipped.geometryFlipped && !parent.geometryFlipped);
-        CALayer *outer = flipped.sublayers[0].sublayers[0].sublayers[0];
+        /* The root and its child are single layers (no shadow or blur needs an outer one). */
+        CALayer *outer = flipped.sublayers[0].sublayers[0];
         CGRect inHost = [outer convertRect:outer.bounds toLayer:parent];
         CHECK_NEAR(inHost.origin.x, 0);
         CHECK_NEAR(inHost.origin.y, parent.bounds.size.height - 10);

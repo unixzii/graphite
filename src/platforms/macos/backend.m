@@ -297,6 +297,27 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     return node;
 }
 
+/* Wraps the body in a new outer layer that takes over its place in the tree; update reapplies the outer properties. */
+- (void)split:(GRNode *)node
+{
+    CALayer *body = node.body, *outer = [CALayer layer];
+    outer.allowsGroupOpacity = YES;
+    outer.allowsEdgeAntialiasing = YES;
+    outer.contentsScale = _scale;
+    outer.anchorPoint = CGPointZero;
+    if (body.superlayer)
+        [body.superlayer replaceSublayer:body with:outer];
+    body.transform = CATransform3DIdentity;
+    body.opacity = 1;
+    body.hidden = NO;
+    body.filters = nil;
+    body.shadowOpacity = 0;
+    body.shadowPath = NULL;
+    [outer addSublayer:body];
+    node.outer = outer;
+    node.blur = 0;
+}
+
 - (void)syncChildren:(gr_layer *)identity
 {
     GRNode *node = [self node:identity];
@@ -404,12 +425,23 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     const gr_layer_props *p = &r->props;
     gr_dirty_bits dirty = update->changed;
     CGRect local = gr_cg_rect(p->bounds);
+    /* Clips and masks would clip the layer's own shadow and blur, so such a layer moves its shadow, transform,
+     * opacity and blur to an outer layer, once and for good. */
+    if ((p->has_shadow || p->blur_sigma > 0) && (p->masks_to_bounds || p->has_mask) && node.outer == node.body)
+    {
+        [self split:node];
+        dirty |= GR_DIRTY_GEOMETRY | GR_DIRTY_APPEARANCE | GR_DIRTY_SHADOW;
+    }
+    bool split = node.outer != node.body;
     if (dirty & GR_DIRTY_GEOMETRY)
     {
-        /* The resolved transform already places the box, so the outer layer's own anchor and position stay zero. */
-        node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
-        node.outer.transform = CATransform3DMakeAffineTransform(gr_cg_affine(r->transform));
+        /* The resolved transform already places the box, so anchor points and positions stay zero. A single layer's
+         * bounds start at the bounds origin, which the transform maps to the box's corner just the same. */
+        CATransform3D transform = CATransform3DMakeAffineTransform(gr_cg_affine(r->transform));
         node.body.bounds = local;
+        if (split)
+            node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
+        node.outer.transform = transform;
     }
     if (dirty & GR_DIRTY_APPEARANCE)
     {
@@ -433,7 +465,8 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
             node.outer.filters = blur_filters(p->blur_sigma);
         }
     }
-    if (dirty & GR_DIRTY_SHADOW)
+    /* A single layer's shadow path is in local space, so it also follows the bounds origin. */
+    if (dirty & (GR_DIRTY_SHADOW | (split ? 0 : GR_DIRTY_GEOMETRY)))
     {
         if (p->has_shadow)
         {
@@ -447,6 +480,13 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
             node.outer.shadowRadius = p->shadow.blur_sigma;
             gr_path *outline = gr_resolved_new_shadow_path(r);
             CGPathRef path = outline ? gr_cg_path(outline) : NULL;
+            if (path && !split)
+            {
+                CGAffineTransform shift = CGAffineTransformMakeTranslation(local.origin.x, local.origin.y);
+                CGPathRef moved = CGPathCreateCopyByTransformingPath(path, &shift);
+                CGPathRelease(path);
+                path = moved;
+            }
             node.outer.shadowPath = path;
             if (path)
                 CGPathRelease(path);
@@ -531,21 +571,16 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     {
         gr_realized_layer value = batch->realized.data[i];
         GRNode *node = [GRNode new];
-        node.outer = [CALayer layer];
+        /* One layer until a shadow needs an outer layer (see split:). */
         node.body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
                     : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
                                                       : [CALayer layer];
+        node.outer = node.body;
         node.children = [NSMutableArray array];
-        for (CALayer *layer in @[ node.outer, node.body ])
-        {
-            layer.allowsGroupOpacity = YES;
-            layer.allowsEdgeAntialiasing = YES;
-            layer.contentsScale = _scale;
-        }
-        node.outer.anchorPoint = CGPointZero;
+        node.body.allowsGroupOpacity = YES;
+        node.body.allowsEdgeAntialiasing = YES;
+        node.body.contentsScale = _scale;
         node.body.anchorPoint = CGPointZero;
-        node.body.position = CGPointZero;
-        [node.outer addSublayer:node.body];
         _nodes[key(value.layer)] = node;
     }
     if (batch->root)

@@ -3,10 +3,12 @@
 `graphite::macos` / `graphite_macos` is an Objective-C ARC backend for the C core.
 Public hosting and readback functions are declared in `include/graphite/macos.h`.
 
-Each model layer maps to an outer CALayer and a kind-specific body. The outer
-owns transform, opacity, visibility, shadow and the blur filter (the private
-`CAFilter`); the body owns local bounds,
-clipping, background, border, contents and mask. Images use a dedicated first
+Each model layer maps to one kind-specific CALayer with local bounds, the
+resolved transform (anchor point and position zero), opacity, visibility,
+shadow, the blur filter (the private `CAFilter`), clipping, background, border,
+contents and mask. A clip or mask would also clip the layer's own shadow and
+blur, so a layer with both moves transform, opacity, visibility, shadow and blur
+to an outer CALayer around that body, once and for good. Images use a dedicated first
 sublayer. Image CGImages are shared by resource identity with per-node usage
 counts.
 

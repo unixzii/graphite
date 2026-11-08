@@ -57,8 +57,8 @@ and Homebrew ships 4.24.
   Its `inputRadius` is the Gaussian σ in layer space, so it grows with scale
   transforms; it is animatable as `filters.gaussianBlur.inputRadius`.
 - `mask`: alpha only, no nesting, and the mask must have no superlayer.
-- With `masksToBounds`, a layer's own shadow is clipped; graphite's backend
-  splits outer and body layers to avoid this.
+- With `masksToBounds` or a mask, a layer's own shadow and filters are clipped;
+  graphite's backend then splits the layer into outer and body layers.
 - `render(in:)` ignores 3D, filters and masks. Use `CARenderer` with a Metal
   texture for tests. `CGWindowListCreateImage` is obsolete since macOS 15.
 - CoreText has no max-lines API and supports COLR v0, sbix and SVG color
