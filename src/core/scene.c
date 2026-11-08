@@ -370,13 +370,6 @@ gr_dirty_bits gr_model_size_bits(const gr_layer *l)
     return gr_model_corner_bits(l) | (size_content(l) ? GR_DIRTY_CONTENT : 0);
 }
 
-static gr_dirty_bits snap_bits(const gr_layer *l)
-{
-    const gr_layer_extras *e = gr_model_extras(l);
-    return GR_DIRTY_GEOMETRY | (e->has_border ? GR_DIRTY_APPEARANCE : 0) | (e->has_shadow ? GR_DIRTY_SHADOW : 0) |
-           (size_content(l) ? GR_DIRTY_CONTENT : 0);
-}
-
 gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
 {
     if (gr_model_writable(s) != GR_OK)
@@ -386,8 +379,10 @@ gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
     if (s->scale == scale)
         return GR_OK;
     s->scale = scale;
+    /* Resolved geometry does not depend on the scale; contents are rasterized at it. */
     for (gr_layer *l = s->layers; l; l = l->next)
-        gr_model_mark(l, snap_bits(l) | (l->kind != GR_LAYER_CONTAINER ? GR_DIRTY_CONTENT : 0));
+        if (l->kind != GR_LAYER_CONTAINER)
+            gr_model_mark(l, GR_DIRTY_CONTENT);
     gr_model_flush(s);
     return GR_OK;
 }

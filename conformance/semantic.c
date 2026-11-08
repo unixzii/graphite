@@ -448,39 +448,44 @@ void shadow_is_drawn_under_layers_without_background(ctx *c)
     EXPECT("outside the shadow", 50, 20, CLEAR);
 }
 
-void fractional_positions_snap_to_device_pixels(ctx *c)
+/* Geometry is rendered where it is set: an edge half a device pixel off the grid half covers its column. */
+void fractional_positions_are_not_moved(ctx *c)
 {
-    double scale = c->scale, px = 1 / scale;
+    double px = 1 / c->scale;
     gr_scene *s = new_scene(c);
-    solid(c, s, RECT(10.3, 10, 20, 20), RED);
-    gr_layer *parent = new_layer(c, s, GR_LAYER_CONTAINER), *child = new_layer(c, s, GR_LAYER_CONTAINER);
-    FRAME(parent, 0, 40.3, 60, 50);
-    API(gr_layer_set_bounds(parent, RECT(0, 0.4, 60, 50)));
-    FRAME(child, 10, 0.2, 20, 20);
-    BACKGROUND(child, BLUE);
-    ADD(parent, child);
-    ADD(gr_scene_get_root(s), parent);
+    solid(c, s, RECT(10 + px / 2, 10, 20, 20), RED);
     frame *f = render(c, s);
-    double left = round(10.3 * scale) / scale,
-           top = round(40.3 * scale) / scale - round(0.4 * scale) / scale + round(0.2 * scale) / scale;
-    expect_color(c, f, "first column", POINT(left + px / 2, 20), RED, 3);
-    expect_color(c, f, "column before", POINT(left - px / 2, 20), CLEAR, 3);
-    expect_color(c, f, "last column", POINT(left + 20 - px / 2, 20), RED, 3);
-    expect_color(c, f, "column after", POINT(left + 20 + px / 2, 20), CLEAR, 3);
-    expect_color(c, f, "nested first row", POINT(20, top + px / 2), BLUE, 3);
-    expect_color(c, f, "nested row before", POINT(20, top - px / 2), CLEAR, 3);
+
+    const struct
+    {
+        const char *label;
+        double x;
+    } edges[] = {{"left edge column", 10 + px / 2}, {"right edge column", 30 + px / 2}};
+
+    for (size_t i = 0; i < 2; ++i)
+    {
+        rgba8 v;
+        conf_check(c, frame_at(f, POINT(edges[i].x, 20), &v), "%s: inside the frame", edges[i].label);
+        conf_check(c, v.v[3] >= 64 && v.v[3] <= 192, "%s: alpha %u, expected about half", edges[i].label, v.v[3]);
+    }
+    EXPECT("inside", 20, 20, RED);
+    EXPECT("before", 10 - px / 2, 20, CLEAR);
+    EXPECT("after", 30 + 3 * px / 2, 20, CLEAR);
 }
 
-void edges_and_borders_are_crisp(ctx *c)
+/* Geometry an application aligns to device pixels (point × scale whole) renders without partly covered pixels. */
+void aligned_edges_and_borders_are_crisp(ctx *c)
 {
+#define ALIGN(v) (round((v) * c->scale) / c->scale)
     gr_scene *s = new_scene(c);
-    gr_layer *boxed = solid(c, s, RECT(10.3, 10.6, 40.45, 20.7), RED);
-    gr_border border = {1, color(BLACK)};
+    gr_layer *boxed = solid(c, s, RECT(ALIGN(10.3), ALIGN(10.6), ALIGN(40.45), ALIGN(20.7)), RED);
+    gr_border border = {ALIGN(1), color(BLACK)};
     API(gr_layer_set_border(boxed, &border));
     gr_layer *parent = new_layer(c, s, GR_LAYER_CONTAINER), *child = new_layer(c, s, GR_LAYER_CONTAINER);
-    FRAME(parent, 5.2, 50.4, 80, 40);
+    FRAME(parent, ALIGN(5.2), ALIGN(50.4), 80, 40);
     ADD(gr_scene_get_root(s), parent);
-    FRAME(child, 3.3, 2.6, 30.7, 12.9);
+    FRAME(child, ALIGN(3.3), ALIGN(2.6), ALIGN(30.7), ALIGN(12.9));
+#undef ALIGN
     BACKGROUND(child, BLUE);
     ADD(parent, child);
     frame *f = render(c, s);

@@ -39,8 +39,8 @@ an identity transform and preserves bounds origin without resetting transform.
 
 Opacity applies to the whole subtree. Corner radius and selected corners round
 background/border; `masks_to_bounds` also clips children and contents. Borders
-are inside bounds, above contents and children. Pixel snapping rounds geometry
-and border width to the backing-scale grid; see [architecture](architecture.md).
+are inside bounds, above contents and children. Geometry renders where it is
+set; see [architecture](architecture.md#coordinates-and-device-pixels).
 
 Shadows escape the layer's own clip. Their shape is an explicit local-space path
 or rounded bounds, never the alpha of contents. The entire shape casts a shadow,

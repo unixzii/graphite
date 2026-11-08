@@ -102,28 +102,29 @@ ranges of a line as `GR_DRAW_TEXT_GLYPHS` ops; a backend replays layouts whose
 vtable it recognizes. Color is a drawing argument, so
 recoloring needs no relayout.
 
-## Coordinates and pixel snapping
+## Coordinates and device pixels
 
 A `gr_resolved` is the layer's properties plus what core derives from them:
-`props` with its bounds and border width snapped, the composed `transform` and
+`props` as set, the composed `transform` and
 the kind's `content`. Box space runs from `(0,0)` to `props.bounds.size`.
 Background, border, image, clipping and default shadow use it. Local space is
 offset by `props.bounds.origin` and is used by children, paths, drawings,
 custom shadows and path masks; translate it by `-bounds.origin` into box space.
 
-The resolved transform is `T(position) * transform * T(-anchor * size)` with its
-translation snapped; the root uses identity. Every backend places layers with
+The resolved transform is `T(position) * transform * T(-anchor * size)`; the
+root uses identity. Every backend places layers with
 it. Core Animation keeps the anchor point at zero, puts the translation in
 `position` and only the linear part in `transform`, so translated layers keep
 the cheaper identity transform. Image
 placement is computed centrally, and `gr_resolved_new_shadow_path` builds the
 box-space shadow outline.
 
-Pixel snapping is always on. Translation, bounds offset, axis-aligned size and
-border width snap to the backing-scale grid. Nonzero box dimensions and borders
-retain at least one device pixel. Snapping is local to each layer, so
-fractional error can accumulate in deep hierarchies. Scale changes invalidate
-dependent resolved values.
+Layers render where they are set, at any scale. An edge lands on a device pixel
+when its coordinate times the backing scale is whole (note that the default
+anchor point of 0.5 puts the translation of an odd-sized layer half a point off
+its position); applications that want crisp edges at rest align their geometry,
+and `aligned_edges_and_borders_are_crisp` checks that every backend keeps
+aligned geometry crisp. Scale changes only redraw contents.
 
 Coordinates use logical points, top-left origin, downward Y and radians. Colors
 are straight-alpha sRGB; images and captures use premultiplied RGBA8. Shadows use

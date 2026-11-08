@@ -21,7 +21,7 @@ addToLibrary({
      *     │ └ sublayers, in local space (translated by the bounds offset)
      *     └ border    an svg, only while the layer has one; above contents and sublayers
      * Everything painted is SVG geometry or transformed, never CSS box sizes: browsers store those in fixed point
-     * (1/64 px in Chromium), which puts snapped edges off the device-pixel grid at fractional scales. */
+     * (1/64 px in Chromium), which puts device-aligned edges off the grid at fractional scales. */
     node(id) {
       const el = GRWeb.box('div');
       el.className = 'gr-layer';

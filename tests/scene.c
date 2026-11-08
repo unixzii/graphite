@@ -469,10 +469,13 @@ static void geometry(void)
     OK(gr_layer_set_bounds(l, (gr_rect){{0.2, 0.2}, {10.2, 4.2}}));
     OK(gr_scene_set_backing_scale(s, 1.5));
     OK(gr_scene_commit(s));
+    /* Geometry is passed through as set, at any scale. */
     v = &update(&r, l)->resolved;
-    CHECK_NEAR(v->props.bounds.size.width, 10);
-    CHECK_NEAR(v->props.bounds.size.height, 4);
-    CHECK_NEAR(v->props.border.width, 2.0 / 3);
+    CHECK_NEAR(v->props.bounds.origin.x, 0.2);
+    CHECK_NEAR(v->props.bounds.size.width, 10.2);
+    CHECK_NEAR(v->props.bounds.size.height, 4.2);
+    CHECK_NEAR(v->props.border.width, 0.3);
+    CHECK_NEAR(v->transform.tx, gr_layer_get_position(l).x - 5.1);
     gr_path *outline = gr_resolved_new_shadow_path(v);
     CHECK(outline);
     gr_path_element_list el = gr_path_get_elements(outline);
@@ -491,7 +494,7 @@ static void geometry(void)
     v = &update(&r, l)->resolved;
     outline = gr_resolved_new_shadow_path(v);
     el = gr_path_get_elements(outline);
-    CHECK_NEAR(el.data[0].p[0].x, 4 - 4.0 / 3);
+    CHECK_NEAR(el.data[0].p[0].x, 3);
     CHECK_NEAR(el.data[0].p[0].y, 3);
     gr_path_unref(outline);
     CHECK(gr_layer_set_opacity(l, NAN) == GR_ERROR_ARGUMENT);
@@ -572,11 +575,11 @@ static void property_dependencies(void)
     CHECK(!gr_scene_needs_commit(s) && gr_layer_get_blur(l) == 3);
     OK(gr_scene_set_backing_scale(s, 2));
     OK(gr_scene_commit(s));
-    /* Scale changes re-snap geometry and redraw contents. */
-    CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW | GR_DIRTY_CONTENT));
-    CHECK(update(&r, shape)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
-    CHECK(update(&r, gradient)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
-    CHECK(update(&r, gr_scene_get_root(s))->changed == GR_DIRTY_GEOMETRY);
+    /* Scale changes redraw contents; geometry does not depend on the scale. */
+    CHECK(update(&r, l)->changed == GR_DIRTY_CONTENT);
+    CHECK(update(&r, shape)->changed == GR_DIRTY_CONTENT);
+    CHECK(update(&r, gradient)->changed == GR_DIRTY_CONTENT);
+    CHECK(!update(&r, gr_scene_get_root(s)));
     gr_gradient_stop stops[] = {{0, {0, 0, 0, 1}}, {1, {1, 1, 1, 1}}};
     desc.kind = GR_PAINT_LINEAR;
     desc.value.linear.start = (gr_point){0, 0};

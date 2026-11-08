@@ -4,7 +4,7 @@
 
 - **Core model**: scenes, layer handles with reference counting, dirty
   tracking with dependency propagation, the two-phase commit, `gr_commit_batch`
-  and resolved values, pixel snapping, `Canvas` → `DisplayList`, and the
+  and resolved values, `Canvas` → `DisplayList`, and the
   recording backend and mirror tree tests.
 - **macOS backend**: layer mapping, run-loop commit scheduling, CoreGraphics
   replay, view and layer hosting with backing-scale tracking, and `CARenderer`
@@ -18,8 +18,8 @@
   shapes as `ShapeVisual`s, native group opacity, shadows and masks,
   DispatcherQueue commit scheduling and DPI tracking. Passes the whole
   conformance suite and has a real-window test.
-- **UI rendering basics**: crisp edges at fractional scales (sizes and
-  border widths snap to device pixels).
+- **UI rendering basics**: geometry renders where it is set, and backends
+  keep device-aligned geometry crisp at fractional scales.
 - **Layer blur** (`gr_layer_set_blur`) on all three backends. Core Animation
   measures σ in layer space, GTK and Windows in screen space.
 - **Conformance suite**: 28 semantic, 7 measured and 18 text cases at 1×, 1.5×

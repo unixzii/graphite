@@ -61,10 +61,10 @@ div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
    └─ svg       border: the rounded box minus its inset, inside the box and above everything
 ```
 
-- **Geometry**: the resolved snapped transform goes into `transform`.
+- **Geometry**: the resolved transform goes into `transform`.
   Everything painted is SVG geometry, `clip-path: path()` or a transformed
   element, never a CSS box size: browsers store box sizes and border widths in
-  fixed point (1/64 px in Chromium), which moves snapped edges off the
+  fixed point (1/64 px in Chromium), which moves device-aligned edges off the
   device-pixel grid at fractional scales (see
   [Lessons learned](#lessons-learned)). Local-space content and sublayers are
   translated by the bounds offset.
@@ -320,8 +320,8 @@ suite, because the runner uses CDP.
   value changes. The tick checks it before every frame.
 
 - **CSS box sizes are fixed point.** Chromium stores widths, heights and border
-  widths in 1/64 px. At 1.5×, a snapped size such as 40.6667 pt truncates to
-  60.98 device pixels, so `edges_and_borders_are_crisp` found partly covered
+  widths in 1/64 px. At 1.5×, a device-aligned size such as 40.6667 pt truncates
+  to 60.98 device pixels, so `aligned_edges_and_borders_are_crisp` found partly covered
   pixels at the edges of a CSS box with a CSS border. Transforms and SVG
   geometry are floating point and stay crisp, so nothing painted relies on box
   sizes.

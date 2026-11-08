@@ -15,7 +15,7 @@ coverage figures; they exercise additional core paths separately.
 | Deferred drawing, stale versions, read-only callbacks | `drawers`; covers deferred execution, reentry rejection, backing scale, version invalidation and inactive providers. |
 | Drawer cleanup and ownership | `drawers`, `cascade`, `teardown_reentry`, plus `rejected_drawer_preserves_ownership`; invalid and wrong-kind installation retain the old drawer and leave rejected userdata owned by its caller. |
 | Scene teardown and backend reentry | `deferred_release`, `teardown_reentry`, `unavailable_backend`, `deep_tree`, lifecycle example; includes callback-driven final releases and deep iterative destruction. |
-| Geometry, snapping, borders, shadow outlines, dirty dependencies | `geometry`, `property_dependencies`; main contract behavior is covered, but not every numerical input/transform combination. |
+| Geometry at every scale, borders, shadow outlines, dirty dependencies | `geometry`, `property_dependencies`; main contract behavior is covered, but not every numerical input/transform combination. |
 | Immutable resource copies, retention, thread-shared refs | `resources`, `paths`, `shared_resources`; includes retained resources after caller release and concurrent ref/unref. |
 | Canvas failure and recording boundaries | `recording_failure_and_state_isolation` adds invalid-operation atomicity, nested save/restore balancing, reuse after finish, and resource survival after the previous recording is released. |
 

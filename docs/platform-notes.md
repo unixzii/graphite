@@ -144,7 +144,7 @@ and Homebrew ships 4.24.
   Rasterize at logical size × scale and draw with `texture_scale` nodes. X11
   has integer scales only.
 - The new renderers place fractional coordinates exactly, which blurs
-  hairlines. Graphite's pixel snapping matters more here.
+  hairlines unless the application aligns them to device pixels.
 - `GtkWidget:overflow` defaults to visible; set it to hidden to clip to the
   allocation.
 - Animation is main-thread only (`GdkFrameClock`, tick callbacks).

@@ -10,8 +10,7 @@ extern "C" {
 
 /* Scene lifetime */
 
-/** Creates an owned Scene with a container root and scale 1; rejects invalid size. Resolved geometry is always
- * snapped to device pixels. */
+/** Creates an owned Scene with a container root and scale 1; rejects invalid size. */
 GR_API gr_scene *gr_scene_new(gr_size root_size);
 
 /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
@@ -35,7 +34,7 @@ GR_API bool gr_scene_needs_commit(const gr_scene *scene);
  * pending work and returns STATE; reentry returns REENTRANT. */
 GR_API gr_result gr_scene_commit(gr_scene *scene);
 
-/* Scale and snapping */
+/* Scale */
 
 /** Returns the current number of device pixels per logical point. */
 GR_API double gr_scene_get_backing_scale(const gr_scene *scene);

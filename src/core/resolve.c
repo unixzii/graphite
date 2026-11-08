@@ -9,16 +9,6 @@ gr_affine gr_model_transform(const gr_model_props *p, gr_size size)
     return m;
 }
 
-static double snap(double x, double scale)
-{
-    return round(x * scale) / scale;
-}
-
-static double snap_length(double x, double scale)
-{
-    return x > 0 ? fmax(round(x * scale), 1) / scale : x;
-}
-
 static gr_rect place(gr_gravity gravity, gr_size content, gr_size size)
 {
     double w = content.width, h = content.height;
@@ -92,30 +82,12 @@ gr_layer_props gr_model_props_of(const gr_layer *l)
                             .blur_sigma = e->blur_sigma};
 }
 
-/* Snapping is local to each layer: translation, bounds origin, axis-aligned size and border width move to the
- * device-pixel grid, keeping at least one pixel for nonzero lengths. */
+/* Geometry is passed through as set: aligning it to device pixels is the application's choice. */
 gr_resolved gr_model_resolve(const gr_layer *l)
 {
-    double scale = l->scene->scale;
     gr_resolved r = {.props = gr_model_props_of(l)};
-    gr_layer_props *p = &r.props;
-    if (p->transform.a == 1 && p->transform.d == 1 && p->transform.b == 0 && p->transform.c == 0)
-    {
-        p->bounds.size.width = snap_length(p->bounds.size.width, scale);
-        p->bounds.size.height = snap_length(p->bounds.size.height, scale);
-    }
-    p->bounds.origin.x = snap(p->bounds.origin.x, scale);
-    p->bounds.origin.y = snap(p->bounds.origin.y, scale);
-    if (p->has_border)
-        p->border.width = snap_length(p->border.width, scale);
-    if (l == l->scene->root)
-        r.transform = (gr_affine){1, 0, 0, 1, 0, 0};
-    else
-    {
-        r.transform = gr_model_transform(&l->props, p->bounds.size);
-        r.transform.tx = snap(r.transform.tx, scale);
-        r.transform.ty = snap(r.transform.ty, scale);
-    }
+    const gr_layer_props *p = &r.props;
+    r.transform = l == l->scene->root ? (gr_affine){1, 0, 0, 1, 0, 0} : gr_model_transform(&l->props, p->bounds.size);
     switch (l->kind)
     {
         case GR_LAYER_CONTENT:

@@ -85,8 +85,8 @@ typedef struct
  * paths, drawings, path masks and custom shadows. Pointer members borrow from the batch. */
 typedef struct
 {
-    gr_layer_props props; /**< props.bounds and props.border.width are snapped to device pixels. */
-    gr_affine transform;  /**< Snapped box-to-parent-local transform; identity for the root. */
+    gr_layer_props props; /**< The layer's properties as set. */
+    gr_affine transform;  /**< Box-to-parent-local transform; identity for the root. */
     gr_resolved_content content;
 } gr_resolved;
 
