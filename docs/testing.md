@@ -22,7 +22,8 @@ mapping, and drives text layouts through a fake text system to check caret
 normalization, lifetimes and text recording.
 `tests/events.c` drives the host event API through a recording host: handler
 ownership and replacement, frame request coalescing, reentrant dispatch queues,
-release during delivery and event validation.
+release during delivery and event validation (debug builds only; release
+builds trust backends).
 `tests/lifecycle.c` demonstrates ownership through an entire Scene lifetime.
 The shared harness supports listing/filtering and reports each case; failures
 remain active in Release builds. See [coverage notes](core-test-audit.md).

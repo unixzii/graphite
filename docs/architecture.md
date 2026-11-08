@@ -41,7 +41,7 @@ that recognize them by vtable address and return NULL/false for other hosts.
 Hosts with a native input surface are interactive: they deliver input and frame events from
 [event.h](../include/graphite/event.h) to one handler. Graphite normalizes events into host coordinates and paces
 frames; hit testing, routing, gestures and focus chains stay with the application. Core owns the handler and the
-delivery rules (validation, frame request coalescing, queueing events dispatched from inside a handler, deferred
+delivery rules (event validation in debug builds, frame request coalescing, queueing events dispatched from inside a handler, deferred
 handler destruction); platforms report native events through `gr_scene_host_dispatch_event` and implement the
 optional event callbacks of `gr_scene_host_vtable`.
 

@@ -194,12 +194,14 @@ GR_API const gr_scene_host_vtable *gr_scene_host_get_vtable(const gr_scene_host 
 GR_API void *gr_scene_host_get_data(const gr_scene_host *host);
 
 /** Delivers event to the handler and returns whether it consumed it; event storage is borrowed for the call.
- * Returns false without delivery for non-interactive hosts, invalid events, a missing handler, FRAME events that
- * were not requested, and VIEWPORT/FOCUS events that repeat the current state, so platforms may report state
- * liberally. VIEWPORT and FOCUS update the state that gr_scene_host_get_viewport and gr_scene_host_has_focus return
- * even without a handler. FRAME clears the pending request before delivery, so the handler can request the next
- * one. Events dispatched while a handler runs (for example focus changes the platform sends synchronously) are
- * copied, delivered in order after it returns, and report false. Holds a host reference until delivery ends. */
+ * Events must be valid (finite values, known enums, in-range fields); builds without NDEBUG check this and drop
+ * invalid ones, release builds trust the backend. Returns false without delivery for non-interactive hosts, a
+ * missing handler, FRAME events that were not requested, and VIEWPORT/FOCUS events that repeat the current state,
+ * so platforms may report state liberally. VIEWPORT and FOCUS update the state that gr_scene_host_get_viewport and
+ * gr_scene_host_has_focus return even without a handler. FRAME clears the pending request before delivery, so the
+ * handler can request the next one. Events dispatched while a handler runs (for example focus changes the platform
+ * sends synchronously) are copied, delivered in order after it returns, and report false. Holds a host reference until
+ * delivery ends. */
 GR_API bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event);
 
 /** Returns whether a frame was requested and not yet delivered. */

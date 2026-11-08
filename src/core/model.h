@@ -88,9 +88,13 @@ extern const gr_layer_extras gr_model_no_extras;
 
 gr_model_props gr_model_defaults(void);
 gr_layer_props gr_model_props_of(const gr_layer *layer);
-gr_result gr_model_writable(const gr_scene *s);
 void gr_model_mark(gr_layer *layer, gr_dirty_bits bits);
 void gr_model_flush(gr_scene *scene);
+/* Asks the backend for a commit once something is queued; unlike gr_model_flush, it releases nothing. */
+void gr_model_request(gr_scene *scene);
+/* Marks a property change and requests a commit. Property changes release no layers (setters are refused while a
+ * commit or drawer runs), so nothing needs flushing. */
+void gr_model_changed(gr_layer *layer, gr_dirty_bits bits);
 void gr_model_attach(gr_layer *layer, bool attached);
 gr_dirty_bits gr_model_size_bits(const gr_layer *layer);
 gr_dirty_bits gr_model_corner_bits(const gr_layer *layer);
@@ -98,6 +102,11 @@ void gr_model_drop_content(gr_layer *layer);
 void gr_model_mask_refs(const gr_mask *mask, bool acquire);
 gr_resolved gr_model_resolve(const gr_layer *layer);
 gr_affine gr_model_transform(const gr_model_props *props, gr_size size);
+
+static inline gr_result gr_model_writable(const gr_scene *s)
+{
+    return s && (s->drawing || s->busy) ? GR_ERROR_REENTRANT : GR_OK;
+}
 
 /* Unset extras read as zero. */
 static inline const gr_layer_extras *gr_model_extras(const gr_layer *l)

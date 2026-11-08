@@ -402,6 +402,7 @@ static void event_validation(void)
         CHECK(gr_scene_host_dispatch_event(host, &valid[i]));
     CHECK(r.count == 6);
 
+#ifndef NDEBUG /* Release builds trust backends to send valid events. */
     gr_event bad[18];
     size_t n = 0;
     bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_PREEDIT + 1);
@@ -428,6 +429,7 @@ static void event_validation(void)
         CHECK(!gr_scene_host_dispatch_event(host, &bad[i]));
     CHECK(r.count == 6);
     CHECK(gr_scene_host_frame_requested(host)); /* An invalid FRAME does not consume the request. */
+#endif
     gr_scene_host_unref(host);
     gr_scene_unref(scene);
 }
@@ -467,10 +469,12 @@ static void state_events(void)
     CHECK(gr_scene_host_get_viewport(host, &v) && v.scale == 1.5);
     CHECK(r.count == 2 && r.types[0] == GR_EVENT_VIEWPORT && r.types[1] == GR_EVENT_FOCUS_OUT);
 
+#ifndef NDEBUG
     /* An invalid VIEWPORT leaves the state alone. */
     viewport.value.viewport.size.width = -1;
     CHECK(!gr_scene_host_dispatch_event(host, &viewport));
     CHECK(gr_scene_host_get_viewport(host, &v) && v.size.width == 800);
+#endif
     gr_scene_host_unref(host);
     gr_scene_unref(scene);
 }

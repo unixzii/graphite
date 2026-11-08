@@ -8,11 +8,6 @@ gr_model_props gr_model_defaults(void)
         .anchor_point = {0.5, 0.5}, .transform = {1, 0, 0, 1, 0, 0}, .opacity = 1, .masked_corners = GR_CORNERS_ALL};
 }
 
-gr_result gr_model_writable(const gr_scene *s)
-{
-    return s && (s->drawing || s->busy) ? GR_ERROR_REENTRANT : GR_OK;
-}
-
 static void dequeue(gr_layer *l)
 {
     if (!l->queued)
@@ -128,6 +123,24 @@ static void clear_edges(gr_layer *l)
     free(children);
 }
 
+void gr_model_request(gr_scene *s)
+{
+    if (s->has_backend && !s->requested && !s->closing && !s->busy && !s->drawing && !s->draining &&
+        (s->dirty_head || s->released_count))
+    {
+        s->requested = true;
+        s->busy = true;
+        s->vtable.request_commit(s->backend);
+        s->busy = false;
+    }
+}
+
+void gr_model_changed(gr_layer *l, gr_dirty_bits bits)
+{
+    gr_model_mark(l, bits);
+    gr_model_request(l->scene);
+}
+
 /* Consumes a Scene pin after cleanup and scheduling; callers must not use s afterward. */
 static void flush_owned(gr_scene *s)
 {
@@ -163,13 +176,7 @@ static void flush_owned(gr_scene *s)
             free(l);
     }
     s->draining = false;
-    if (s->has_backend && !s->requested && (s->dirty_head || s->released_count))
-    {
-        s->requested = true;
-        s->busy = true;
-        s->vtable.request_commit(s->backend);
-        s->busy = false;
-    }
+    gr_model_request(s);
     gr_scene_unref(s);
 }
 

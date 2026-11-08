@@ -2,8 +2,7 @@
 
 static gr_result changed(gr_layer *l, gr_dirty_bits bits)
 {
-    gr_model_mark(l, bits);
-    gr_model_flush(l->scene);
+    gr_model_changed(l, bits);
     return GR_OK;
 }
 
