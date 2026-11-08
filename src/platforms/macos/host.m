@@ -98,6 +98,13 @@ static NSCursor *native_cursor(gr_cursor cursor)
     }
 }
 
+/* Selector targets stay dynamic. */
+@interface GRSceneView ()
+- (void)displayFrame:(CADisplayLink *)link API_AVAILABLE(macos(14.0));
+- (void)windowKeyChanged:(NSNotification *)notification;
+@end
+
+__attribute__((objc_direct_members))
 @implementation GRSceneView
 {
     CADisplayLink *_displayLink;

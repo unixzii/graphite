@@ -2,12 +2,19 @@
 
 #import <objc/message.h>
 
-static NSValue *key(gr_layer *layer)
+/* Maps borrowed pointer keys (layer identities, image IDs) to retained objects without boxing them. */
+static CFMutableDictionaryRef new_map(void)
 {
-    return [NSValue valueWithPointer:layer];
+    return CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
 }
 
-@interface GRDrawingDelegate : NSObject <CALayerDelegate>
+static id lookup(CFDictionaryRef map, const void *key)
+{
+    return (__bridge id)CFDictionaryGetValue(map, key);
+}
+
+__attribute__((objc_direct_members))
+@interface GRDrawingDelegate : NSObject<CALayerDelegate>
 @property(nonatomic) gr_drawer_provider *provider;
 @property(nonatomic) gr_layer *identity;
 @property(nonatomic) uint64_t version;
@@ -39,6 +46,7 @@ static NSValue *key(gr_layer *layer)
 
 @end
 
+__attribute__((objc_direct_members))
 @interface GRNode : NSObject
 @property(nonatomic, strong) CALayer *outer;
 @property(nonatomic, strong) CALayer *body;
@@ -49,13 +57,15 @@ static NSValue *key(gr_layer *layer)
 @property(nonatomic) uint64_t version;
 @property(nonatomic) CGRect displayBounds;
 @property(nonatomic) double displayScale;
+@property(nonatomic) gr_layer *identity;
 @property(nonatomic) gr_layer *parent;
-@property(nonatomic, strong) NSMutableArray<NSValue *> *children;
+@property(nonatomic, strong) NSMutableArray<GRNode *> *children;
 @property(nonatomic) double blur;
 @end
 @implementation GRNode
 @end
 
+__attribute__((objc_direct_members))
 @interface GRImage : NSObject
 @property(nonatomic) CGImageRef image;
 @property(nonatomic) size_t uses;
@@ -70,10 +80,11 @@ static NSValue *key(gr_layer *layer)
 
 @end
 
+__attribute__((objc_direct_members))
 @interface GRBackend : NSObject
 @property(nonatomic, strong) CALayer *host;
-@property(nonatomic, strong) NSMutableDictionary<NSValue *, GRNode *> *nodes;
-@property(nonatomic, strong) NSMutableDictionary<NSNumber *, GRImage *> *images;
+@property(nonatomic) CFMutableDictionaryRef nodes;  /**< gr_layer * to GRNode. */
+@property(nonatomic) CFMutableDictionaryRef images; /**< Image ID to GRImage. */
 @property(nonatomic) gr_scene_link *scene;
 @property(nonatomic) gr_drawer_provider *drawers;
 @property(nonatomic) double scale;
@@ -221,6 +232,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
         apply_gradient((CAGradientLayer *)mask, m->value.gradient);
 }
 
+__attribute__((objc_direct_members))
 @implementation GRBackend
 
 - (instancetype)init
@@ -228,8 +240,8 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     self = [super init];
     if (self)
     {
-        _nodes = [NSMutableDictionary dictionary];
-        _images = [NSMutableDictionary dictionary];
+        _nodes = new_map();
+        _images = new_map();
         _scale = 1;
     }
     return self;
@@ -243,13 +255,13 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
         CFRelease(_observer);
         _observer = NULL;
     }
-    for (GRNode *node in _nodes.allValues)
+    for (GRNode *node in ((__bridge NSDictionary *)_nodes).allValues)
     {
         node.body.delegate = nil;
         [node.outer removeFromSuperlayer];
     }
-    [_nodes removeAllObjects];
-    [_images removeAllObjects];
+    CFDictionaryRemoveAllValues(_nodes);
+    CFDictionaryRemoveAllValues(_images);
 }
 
 - (void)dealloc
@@ -257,6 +269,8 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     [self shutdown];
     if (_runLoop)
         CFRelease(_runLoop);
+    CFRelease(_nodes);
+    CFRelease(_images);
     gr_drawer_provider_unref(_drawers);
     gr_scene_link_unref(_scene);
 }
@@ -291,7 +305,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
 
 - (GRNode *)node:(gr_layer *)identity
 {
-    GRNode *node = _nodes[key(identity)];
+    GRNode *node = lookup(_nodes, identity);
     if (!node)
         abort();
     return node;
@@ -324,22 +338,23 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     NSMutableArray *layers = [NSMutableArray arrayWithCapacity:node.children.count + 1];
     if (node.imageLayer)
         [layers addObject:node.imageLayer];
-    for (NSValue *child in node.children)
-        [layers addObject:[self node:child.pointerValue].outer];
+    for (GRNode *child in node.children)
+        [layers addObject:child.outer];
     node.body.sublayers = layers;
 }
 
 - (void)releaseImage:(uint64_t)identity
 {
-    GRImage *image = _images[@(identity)];
+    const void *key = (const void *)(uintptr_t)identity;
+    GRImage *image = lookup(_images, key);
     if (image && --image.uses == 0)
-        [_images removeObjectForKey:@(identity)];
+        CFDictionaryRemoveValue(_images, key);
 }
 
 - (CGImageRef)acquireImage:(gr_image *)image
 {
-    NSNumber *identity = @(gr_image_get_id(image));
-    GRImage *entry = _images[identity];
+    const void *key = (const void *)(uintptr_t)gr_image_get_id(image);
+    GRImage *entry = lookup(_images, key);
     if (entry)
     {
         ++entry.uses;
@@ -351,7 +366,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     entry = [GRImage new];
     entry.image = cg;
     entry.uses = 1;
-    _images[identity] = entry;
+    CFDictionarySetValue(_images, key, (__bridge const void *)entry);
     return cg;
 }
 
@@ -534,19 +549,18 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
 
 - (void)releaseNode:(gr_layer *)identity
 {
-    GRNode *node = _nodes[key(identity)];
+    GRNode *node = lookup(_nodes, identity);
     if (!node)
         return;
-    [_nodes removeObjectForKey:key(identity)];
+    CFDictionaryRemoveValue(_nodes, identity);
     [node.outer removeFromSuperlayer];
     node.body.delegate = nil;
     if (node.imageID)
         [self releaseImage:node.imageID];
     if (node.parent)
-        [_nodes[key(node.parent)].children removeObject:key(identity)];
-    for (NSValue *childID in node.children)
+        [((GRNode *)lookup(_nodes, node.parent)).children removeObjectIdenticalTo:node];
+    for (GRNode *child in node.children)
     {
-        GRNode *child = _nodes[childID];
         if (child.parent == identity)
         {
             child.parent = NULL;
@@ -564,7 +578,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     if (_scale != batch->backing_scale)
     {
         _scale = batch->backing_scale;
-        for (GRNode *node in _nodes.allValues)
+        for (GRNode *node in ((__bridge NSDictionary *)_nodes).allValues)
         {
             node.outer.contentsScale = _scale;
             node.body.contentsScale = _scale;
@@ -575,6 +589,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     {
         gr_realized_layer value = batch->realized.data[i];
         GRNode *node = [GRNode new];
+        node.identity = value.layer;
         /* One layer until a shadow needs an outer layer (see split:). */
         node.body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
                     : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
@@ -585,7 +600,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
         node.body.allowsEdgeAntialiasing = YES;
         node.body.contentsScale = _scale;
         node.body.anchorPoint = CGPointZero;
-        _nodes[key(value.layer)] = node;
+        CFDictionarySetValue(_nodes, value.layer, (__bridge const void *)node);
     }
     if (batch->root)
     {
@@ -599,12 +614,11 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     {
         const gr_children_update *u = &batch->children.data[i];
         GRNode *parent = [self node:u->parent];
-        for (NSValue *old in parent.children)
+        for (GRNode *child in parent.children)
         {
             bool found = false;
             for (size_t j = 0; j < u->children.count; ++j)
-                found |= old.pointerValue == u->children.data[j];
-            GRNode *child = [self node:old.pointerValue];
+                found |= child.identity == u->children.data[j];
             if (!found && child.parent == u->parent)
             {
                 child.parent = NULL;
@@ -621,9 +635,9 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
             gr_layer *identity = u->children.data[j];
             GRNode *child = [self node:identity];
             if (child.parent && child.parent != u->parent)
-                [_nodes[key(child.parent)].children removeObject:key(identity)];
+                [((GRNode *)lookup(_nodes, child.parent)).children removeObjectIdenticalTo:child];
             child.parent = u->parent;
-            [children addObject:key(identity)];
+            [children addObject:child];
         }
         [self node:u->parent].children = children;
         [self syncChildren:u->parent];

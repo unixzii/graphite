@@ -1,42 +1,8 @@
 #include "internal.h"
 
-CGPoint gr_cg_point(gr_point p)
-{
-    return CGPointMake(p.x, p.y);
-}
-
-CGRect gr_cg_rect(gr_rect r)
-{
-    return CGRectMake(r.origin.x, r.origin.y, r.size.width, r.size.height);
-}
-
-gr_rect gr_from_cg_rect(CGRect r)
-{
-    return (gr_rect){{r.origin.x, r.origin.y}, {r.size.width, r.size.height}};
-}
-
-CGAffineTransform gr_cg_affine(gr_affine m)
-{
-    return CGAffineTransformMake(m.a, m.b, m.c, m.d, m.tx, m.ty);
-}
-
 CGColorRef gr_cg_color(gr_color c)
 {
     return CGColorCreateSRGB(c.r, c.g, c.b, c.a);
-}
-
-CACornerMask gr_ca_corners(gr_corners c)
-{
-    CACornerMask mask = 0;
-    if (c & GR_CORNER_TOP_LEFT)
-        mask |= kCALayerMinXMinYCorner;
-    if (c & GR_CORNER_TOP_RIGHT)
-        mask |= kCALayerMaxXMinYCorner;
-    if (c & GR_CORNER_BOTTOM_LEFT)
-        mask |= kCALayerMinXMaxYCorner;
-    if (c & GR_CORNER_BOTTOM_RIGHT)
-        mask |= kCALayerMaxXMaxYCorner;
-    return mask;
 }
 
 CGPathRef gr_cg_path(const gr_path *path)
