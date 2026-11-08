@@ -1,6 +1,6 @@
 #include "model.h"
 
-gr_affine gr_model_transform(const gr_layer_props *p, gr_size size)
+gr_affine gr_model_transform(const gr_model_props *p, gr_size size)
 {
     gr_affine m = p->transform;
     double x = p->anchor_point.x * size.width, y = p->anchor_point.y * size.height;
@@ -68,12 +68,36 @@ static gr_rect place(gr_gravity gravity, gr_size content, gr_size size)
     return (gr_rect){{x, y}, {w, h}};
 }
 
+gr_layer_props gr_model_props_of(const gr_layer *l)
+{
+    const gr_model_props *m = &l->props;
+    const gr_layer_extras *e = gr_model_extras(l);
+    return (gr_layer_props){.bounds = m->bounds,
+                            .position = m->position,
+                            .anchor_point = m->anchor_point,
+                            .transform = m->transform,
+                            .opacity = m->opacity,
+                            .hidden = m->hidden,
+                            .masks_to_bounds = m->masks_to_bounds,
+                            .has_background = m->has_background,
+                            .background = m->background,
+                            .corner_radius = m->corner_radius,
+                            .masked_corners = m->masked_corners,
+                            .has_border = e->has_border,
+                            .border = e->border,
+                            .has_shadow = e->has_shadow,
+                            .shadow = e->shadow,
+                            .has_mask = e->has_mask,
+                            .mask = e->mask,
+                            .blur_sigma = e->blur_sigma};
+}
+
 /* Snapping is local to each layer: translation, bounds origin, axis-aligned size and border width move to the
  * device-pixel grid, keeping at least one pixel for nonzero lengths. */
 gr_resolved gr_model_resolve(const gr_layer *l)
 {
     double scale = l->scene->scale;
-    gr_resolved r = {.props = l->props};
+    gr_resolved r = {.props = gr_model_props_of(l)};
     gr_layer_props *p = &r.props;
     if (p->transform.a == 1 && p->transform.d == 1 && p->transform.b == 0 && p->transform.c == 0)
     {

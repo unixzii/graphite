@@ -33,16 +33,12 @@ typedef struct
     gr_point position, anchor_point;
     gr_affine transform;
     float opacity;
-    bool hidden, masks_to_bounds;
-    bool has_background;
+    gr_corners masked_corners;
+    bool hidden, masks_to_bounds, has_background, has_border, has_shadow, has_mask;
     gr_color background;
     double corner_radius;
-    gr_corners masked_corners;
-    bool has_border;
     gr_border border;
-    bool has_shadow;
     gr_shadow shadow;
-    bool has_mask;
     gr_mask mask;
     double blur_sigma;
 } gr_layer_props;

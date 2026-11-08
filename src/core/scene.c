@@ -1,8 +1,10 @@
 #include "model.h"
 
-gr_layer_props gr_model_defaults(void)
+const gr_layer_extras gr_model_no_extras;
+
+gr_model_props gr_model_defaults(void)
 {
-    return (gr_layer_props){
+    return (gr_model_props){
         .anchor_point = {0.5, 0.5}, .transform = {1, 0, 0, 1, 0, 0}, .opacity = 1, .masked_corners = GR_CORNERS_ALL};
 }
 
@@ -72,22 +74,37 @@ void gr_model_attach(gr_layer *l, bool attached)
 
 void gr_model_drop_content(gr_layer *l)
 {
-    gr_drawer drawer = l->drawer;
-    l->drawer = (gr_drawer){0};
-    gr_path *shadow = l->props.has_shadow ? l->props.shadow.path : NULL;
-    bool masked = l->props.has_mask;
-    gr_mask mask = l->props.mask;
+    /* Reset the layer first; releasing resources and destroying the drawer may run user code. */
+    gr_layer_extras *extras = l->extras;
+    gr_drawer drawer = {0};
+    gr_image *image = NULL;
+    gr_shape_props shape = {0};
+    gr_paint *gradient = NULL;
+    l->extras = NULL;
     l->props = gr_model_defaults();
-    gr_shape_props shape = l->shape;
-    l->shape = (gr_shape_props){.stroke_end = 1};
-    gr_image *image = l->image;
-    gr_paint *gradient = l->gradient;
-    l->image = NULL;
-    l->gradient = NULL;
     l->gravity = GR_GRAVITY_RESIZE;
-    gr_path_unref(shadow);
-    if (masked)
-        gr_model_mask_refs(&mask, false);
+    switch (l->kind)
+    {
+        case GR_LAYER_CONTENT:
+            drawer = l->drawer;
+            image = l->image;
+            l->drawer = (gr_drawer){0};
+            l->image = NULL;
+            break;
+        case GR_LAYER_SHAPE:
+            shape = l->shape;
+            l->shape = (gr_shape_props){.stroke_end = 1};
+            break;
+        case GR_LAYER_GRADIENT:
+            gradient = l->gradient;
+            l->gradient = NULL;
+            break;
+    }
+    if (extras && extras->has_shadow)
+        gr_path_unref(extras->shadow.path);
+    if (extras && extras->has_mask)
+        gr_model_mask_refs(&extras->mask, false);
+    free(extras);
     gr_path_unref(shape.path);
     gr_paint_unref(shape.fill);
     gr_stroke_unref(shape.stroke);
@@ -236,11 +253,12 @@ gr_layer *gr_layer_new(gr_scene *s, gr_layer_kind kind)
     gr_layer *l = gr_alloc(1, sizeof(*l));
     *l = (gr_layer){.refs = 1,
                     .scene = s,
-                    .kind = kind,
+                    .kind = (uint8_t)kind,
+                    .gravity = GR_GRAVITY_RESIZE,
                     .dirty = GR_DIRTY_ALL,
-                    .props = gr_model_defaults(),
-                    .shape = {.stroke_end = 1},
-                    .gravity = GR_GRAVITY_RESIZE};
+                    .props = gr_model_defaults()};
+    if (kind == GR_LAYER_SHAPE)
+        l->shape.stroke_end = 1;
     l->next = s->layers;
     if (s->layers)
         s->layers->previous = l;
@@ -336,7 +354,8 @@ static bool size_content(const gr_layer *l)
 
 gr_dirty_bits gr_model_corner_bits(const gr_layer *l)
 {
-    return l->props.has_shadow && !l->props.shadow.path ? GR_DIRTY_SHADOW : 0;
+    const gr_layer_extras *e = gr_model_extras(l);
+    return e->has_shadow && !e->shadow.path ? GR_DIRTY_SHADOW : 0;
 }
 
 gr_dirty_bits gr_model_size_bits(const gr_layer *l)
@@ -346,8 +365,9 @@ gr_dirty_bits gr_model_size_bits(const gr_layer *l)
 
 static gr_dirty_bits snap_bits(const gr_layer *l)
 {
-    return GR_DIRTY_GEOMETRY | (l->props.has_border ? GR_DIRTY_APPEARANCE : 0) |
-           (l->props.has_shadow ? GR_DIRTY_SHADOW : 0) | (size_content(l) ? GR_DIRTY_CONTENT : 0);
+    const gr_layer_extras *e = gr_model_extras(l);
+    return GR_DIRTY_GEOMETRY | (e->has_border ? GR_DIRTY_APPEARANCE : 0) | (e->has_shadow ? GR_DIRTY_SHADOW : 0) |
+           (size_content(l) ? GR_DIRTY_CONTENT : 0);
 }
 
 gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
@@ -391,7 +411,7 @@ gr_result gr_drawer_provider_draw(gr_drawer_provider *p, gr_layer *l, uint64_t v
         return GR_ERROR_REENTRANT;
     if (l->scene && l->scene != s)
         return GR_ERROR_SCENE;
-    if (!l->refs || l->scene != s || !l->drawer.draw || l->display_version != version)
+    if (!l->refs || l->scene != s || !gr_model_has_drawer(l) || l->display_version != version)
         return GR_ERROR_STATE;
     if (!info || !gr_valid_rect(info->bounds) || !isfinite(info->scale) || info->scale <= 0)
         return GR_ERROR_ARGUMENT;

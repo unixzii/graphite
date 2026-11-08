@@ -7,6 +7,32 @@ static gr_result changed(gr_layer *l, gr_dirty_bits bits)
     return GR_OK;
 }
 
+static gr_layer_extras *extras(gr_layer *l)
+{
+    if (!l->extras)
+    {
+        l->extras = gr_alloc(1, sizeof(*l->extras));
+        *l->extras = gr_model_no_extras;
+    }
+    return l->extras;
+}
+
+/* Frees the extras once every property in them is unset. */
+static void trim(gr_layer *l)
+{
+    gr_layer_extras *e = l->extras;
+    if (e && !e->has_border && !e->has_shadow && !e->has_mask && e->blur_sigma == 0)
+    {
+        free(e);
+        l->extras = NULL;
+    }
+}
+
+static bool is(const gr_layer *l, gr_layer_kind kind)
+{
+    return l->scene && l->kind == kind;
+}
+
 gr_layer_kind gr_layer_get_kind(const gr_layer *l)
 {
     return l->kind;
@@ -197,9 +223,9 @@ gr_result gr_layer_set_bounds(gr_layer *l, gr_rect value)
         bits |= gr_model_size_bits(l);
     if (!gr_point_equal(old.origin, value.origin))
     {
-        if (l->props.has_shadow && l->props.shadow.path)
+        if (gr_model_extras(l)->shadow.path)
             bits |= GR_DIRTY_SHADOW;
-        if (l->drawer.draw)
+        if (gr_model_has_drawer(l))
             bits |= GR_DIRTY_CONTENT;
     }
     l->props.bounds = value;
@@ -270,8 +296,8 @@ gr_result gr_layer_set_background(gr_layer *l, const gr_color *value)
 
 bool gr_layer_get_border(const gr_layer *l, gr_border *out)
 {
-    bool present = l->scene && l->props.has_border;
-    *out = present ? l->props.border : (gr_border){0};
+    bool present = l->scene && gr_model_extras(l)->has_border;
+    *out = present ? l->extras->border : (gr_border){0};
     return present;
 }
 
@@ -283,18 +309,19 @@ gr_result gr_layer_set_border(gr_layer *l, const gr_border *value)
         return GR_ERROR_REENTRANT;
     if (value && !(isfinite(value->width) && value->width >= 0 && gr_valid_color(value->color)))
         return GR_ERROR_ARGUMENT;
-    if (l->props.has_border == (value != NULL) &&
-        (!value || (l->props.border.width == value->width && gr_color_equal(l->props.border.color, value->color))))
+    const gr_layer_extras *e = gr_model_extras(l);
+    if (e->has_border == (value != NULL) &&
+        (!value || (e->border.width == value->width && gr_color_equal(e->border.color, value->color))))
         return GR_OK;
-    gr_border next = value ? *value : (gr_border){0};
-    l->props.has_border = value != NULL;
-    l->props.border = next;
+    extras(l)->has_border = value != NULL;
+    l->extras->border = value ? *value : (gr_border){0};
+    trim(l);
     return changed(l, GR_DIRTY_APPEARANCE);
 }
 
 double gr_layer_get_blur(const gr_layer *l)
 {
-    return l->scene ? l->props.blur_sigma : 0;
+    return l->scene ? gr_model_extras(l)->blur_sigma : 0;
 }
 
 gr_result gr_layer_set_blur(gr_layer *l, double value)
@@ -305,16 +332,17 @@ gr_result gr_layer_set_blur(gr_layer *l, double value)
         return GR_ERROR_REENTRANT;
     if (!(isfinite(value) && value >= 0))
         return GR_ERROR_ARGUMENT;
-    if (l->props.blur_sigma == value)
+    if (gr_model_extras(l)->blur_sigma == value)
         return GR_OK;
-    l->props.blur_sigma = value;
+    extras(l)->blur_sigma = value;
+    trim(l);
     return changed(l, GR_DIRTY_APPEARANCE);
 }
 
 bool gr_layer_get_shadow(const gr_layer *l, gr_shadow *out)
 {
-    bool present = l->scene && l->props.has_shadow;
-    *out = present ? l->props.shadow : (gr_shadow){0};
+    bool present = l->scene && gr_model_extras(l)->has_shadow;
+    *out = present ? l->extras->shadow : (gr_shadow){0};
     return present;
 }
 
@@ -327,24 +355,25 @@ gr_result gr_layer_set_shadow(gr_layer *l, const gr_shadow *value)
     if (value && !(gr_valid_color(value->color) && gr_valid_point(value->offset) && isfinite(value->blur_sigma) &&
                    value->blur_sigma >= 0))
         return GR_ERROR_ARGUMENT;
-    if (l->props.has_shadow == (value != NULL) &&
-        (!value || (gr_color_equal(l->props.shadow.color, value->color) &&
-                    gr_point_equal(l->props.shadow.offset, value->offset) &&
-                    l->props.shadow.blur_sigma == value->blur_sigma && l->props.shadow.path == value->path)))
+    const gr_layer_extras *e = gr_model_extras(l);
+    if (e->has_shadow == (value != NULL) &&
+        (!value || (gr_color_equal(e->shadow.color, value->color) && gr_point_equal(e->shadow.offset, value->offset) &&
+                    e->shadow.blur_sigma == value->blur_sigma && e->shadow.path == value->path)))
         return GR_OK;
     gr_shadow next = value ? *value : (gr_shadow){0};
-    gr_path *old = l->props.has_shadow ? l->props.shadow.path : NULL;
+    gr_path *old = e->shadow.path;
     gr_path_ref(next.path);
-    l->props.has_shadow = value != NULL;
-    l->props.shadow = next;
+    extras(l)->has_shadow = value != NULL;
+    l->extras->shadow = next;
+    trim(l);
     gr_path_unref(old);
     return changed(l, GR_DIRTY_SHADOW);
 }
 
 bool gr_layer_get_mask(const gr_layer *l, gr_mask *out)
 {
-    bool present = l->scene && l->props.has_mask;
-    *out = present ? l->props.mask : (gr_mask){0};
+    bool present = l->scene && gr_model_extras(l)->has_mask;
+    *out = present ? l->extras->mask : (gr_mask){0};
     return present;
 }
 
@@ -394,14 +423,16 @@ gr_result gr_layer_set_mask(gr_layer *l, const gr_mask *value)
         return GR_ERROR_REENTRANT;
     if (value && !valid_mask(value))
         return GR_ERROR_ARGUMENT;
-    if (l->props.has_mask == (value != NULL) && (!value || same_mask(&l->props.mask, value)))
+    const gr_layer_extras *e = gr_model_extras(l);
+    if (e->has_mask == (value != NULL) && (!value || same_mask(&e->mask, value)))
         return GR_OK;
-    gr_mask old = l->props.mask;
-    bool had = l->props.has_mask;
+    gr_mask old = e->mask;
+    bool had = e->has_mask;
     if (value)
         gr_model_mask_refs(value, true);
-    l->props.has_mask = value != NULL;
-    l->props.mask = value ? *value : (gr_mask){0};
+    extras(l)->has_mask = value != NULL;
+    l->extras->mask = value ? *value : (gr_mask){0};
+    trim(l);
     if (had)
         gr_model_mask_refs(&old, false);
     return changed(l, GR_DIRTY_MASK);
@@ -514,12 +545,12 @@ static gr_result kind_writable(gr_layer *l, gr_layer_kind kind)
 
 gr_image *gr_content_layer_get_image(const gr_layer *l)
 {
-    return l->scene ? l->image : NULL;
+    return is(l, GR_LAYER_CONTENT) ? l->image : NULL;
 }
 
 gr_gravity gr_content_layer_get_gravity(const gr_layer *l)
 {
-    return l->scene ? l->gravity : GR_GRAVITY_RESIZE;
+    return is(l, GR_LAYER_CONTENT) ? (gr_gravity)l->gravity : GR_GRAVITY_RESIZE;
 }
 
 gr_result gr_content_layer_set_gravity(gr_layer *l, gr_gravity gravity)
@@ -598,7 +629,7 @@ gr_result gr_content_layer_clear_drawer(gr_layer *l)
 
 bool gr_content_layer_has_drawer(const gr_layer *l)
 {
-    return l->scene && l->drawer.draw;
+    return l->scene && gr_model_has_drawer(l);
 }
 
 gr_result gr_content_layer_set_needs_display(gr_layer *l)
@@ -667,7 +698,7 @@ static bool stroke_equal(gr_stroke *a, gr_stroke *b)
 
 gr_path *gr_shape_layer_get_path(const gr_layer *l)
 {
-    return l->scene ? l->shape.path : NULL;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.path : NULL;
 }
 
 gr_result gr_shape_layer_set_path(gr_layer *l, gr_path *value)
@@ -685,7 +716,7 @@ gr_result gr_shape_layer_set_path(gr_layer *l, gr_path *value)
 
 gr_paint *gr_shape_layer_get_fill(const gr_layer *l)
 {
-    return l->scene ? l->shape.fill : NULL;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.fill : NULL;
 }
 
 gr_result gr_shape_layer_set_fill(gr_layer *l, gr_paint *value)
@@ -705,7 +736,7 @@ gr_result gr_shape_layer_set_fill(gr_layer *l, gr_paint *value)
 
 gr_stroke *gr_shape_layer_get_stroke(const gr_layer *l)
 {
-    return l->scene ? l->shape.stroke : NULL;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.stroke : NULL;
 }
 
 gr_result gr_shape_layer_set_stroke(gr_layer *l, gr_stroke *value)
@@ -725,7 +756,7 @@ gr_result gr_shape_layer_set_stroke(gr_layer *l, gr_stroke *value)
 
 gr_paint *gr_gradient_layer_get_gradient(const gr_layer *l)
 {
-    return l->scene ? l->gradient : NULL;
+    return is(l, GR_LAYER_GRADIENT) ? l->gradient : NULL;
 }
 
 gr_result gr_gradient_layer_set_gradient(gr_layer *l, gr_paint *value)
@@ -745,7 +776,7 @@ gr_result gr_gradient_layer_set_gradient(gr_layer *l, gr_paint *value)
 
 gr_fill_rule gr_shape_layer_get_fill_rule(const gr_layer *l)
 {
-    return l->scene ? l->shape.fill_rule : GR_FILL_NONZERO;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.fill_rule : GR_FILL_NONZERO;
 }
 
 gr_result gr_shape_layer_set_fill_rule(gr_layer *l, gr_fill_rule value)
@@ -763,7 +794,7 @@ gr_result gr_shape_layer_set_fill_rule(gr_layer *l, gr_fill_rule value)
 
 double gr_shape_layer_get_stroke_start(const gr_layer *l)
 {
-    return l->scene ? l->shape.stroke_start : 0;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.stroke_start : 0;
 }
 
 gr_result gr_shape_layer_set_stroke_start(gr_layer *l, double value)
@@ -782,7 +813,7 @@ gr_result gr_shape_layer_set_stroke_start(gr_layer *l, double value)
 
 double gr_shape_layer_get_stroke_end(const gr_layer *l)
 {
-    return l->scene ? l->shape.stroke_end : 1;
+    return is(l, GR_LAYER_SHAPE) ? l->shape.stroke_end : 1;
 }
 
 gr_result gr_shape_layer_set_stroke_end(gr_layer *l, double value)
