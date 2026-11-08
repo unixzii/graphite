@@ -17,7 +17,9 @@ are documented in `src/platforms/{macos,gtk,windows}/README.md`.
 
 The examples and conformance switches are independent of `BUILD_TESTING`.
 With testing enabled, only enabled examples/conformance tools register tests.
-macOS and Windows backends are selected automatically on their platforms.
+macOS and Windows backends are selected automatically on their platforms, and
+the Web backend when configuring with Emscripten's `emcmake` (static libraries
+only; see its [README](../src/platforms/web/README.md)).
 Formatting targets remain available; clang-format is required when running them,
 not for building or installing the libraries.
 
@@ -80,7 +82,9 @@ target_link_libraries(my_app PRIVATE graphite::macos)
 
 Configure with `-DCMAKE_PREFIX_PATH=/tmp/graphite-package`. Available targets are
 `graphite::graphite` and the installed platform's `graphite::macos`,
-`graphite::gtk`, or `graphite::windows`. Platform targets transitively link core
+`graphite::gtk`, `graphite::windows` or `graphite::web`. Emscripten consumers
+pass `-Dgraphite_DIR=<prefix>/lib/cmake/graphite`, because its toolchain only
+searches its own sysroot. Platform targets transitively link core
 and native dependencies. Components are optional; requesting a missing required
 component fails during configuration. GTK packages rediscover GTK with pkg-config
 on the consumer machine. Static Windows packages carry their native system

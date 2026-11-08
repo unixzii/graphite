@@ -300,6 +300,8 @@ static void *thread_main(void *data)
 void text_layouts_are_thread_safe(ctx *c)
 {
     SYSTEM_OR_SKIP(c);
+    if (!supports(c, GR_CONF_THREADS))
+        return;
     (void)system;
     gr_text_layout *layout = layout_of(c, PANGRAM, width(120));
     worker workers[8];

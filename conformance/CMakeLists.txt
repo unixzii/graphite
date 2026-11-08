@@ -40,3 +40,16 @@ if(TARGET graphite_windows)
         set_tests_properties(graphite.conformance.windows PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
     endif()
 endif()
+if(TARGET graphite_web)
+    # Runs in headless Chromium through tests/web/run.mjs; JSPI lets captures wait for the page's screenshots.
+    add_executable(graphite_web_conformance web.c)
+    target_link_libraries(graphite_web_conformance PRIVATE graphite_conformance graphite_web)
+    target_compile_options(graphite_web_conformance PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_link_options(graphite_web_conformance PRIVATE -sJSPI -sSINGLE_FILE=1 -sEXIT_RUNTIME=1 -sENVIRONMENT=web
+        -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB "SHELL:--js-library ${CMAKE_CURRENT_SOURCE_DIR}/web.js")
+    set_property(TARGET graphite_web_conformance APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web.js)
+    if(BUILD_TESTING AND GRAPHITE_NODE AND EXISTS ${PROJECT_SOURCE_DIR}/tests/web/node_modules/playwright)
+        add_test(NAME graphite.conformance.web
+            COMMAND ${GRAPHITE_NODE} ${PROJECT_SOURCE_DIR}/tests/web/run.mjs $<TARGET_FILE:graphite_web_conformance>)
+    endif()
+endif()

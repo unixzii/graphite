@@ -1,7 +1,7 @@
 set(graphite_install_targets graphite)
 set(GRAPHITE_PACKAGE_GTK OFF)
 
-foreach(platform macos gtk windows)
+foreach(platform macos gtk windows web)
     if(TARGET graphite_${platform})
         list(APPEND graphite_install_targets graphite_${platform})
         set_target_properties(graphite_${platform} PROPERTIES EXPORT_NAME ${platform})

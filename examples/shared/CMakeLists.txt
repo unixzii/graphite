@@ -18,6 +18,15 @@ elseif(WIN32)
     target_compile_definitions(graphite_example_shell PRIVATE NOMINMAX UNICODE _UNICODE)
     target_link_libraries(graphite_example_shell PUBLIC graphite_example graphite_windows windowscodecs)
     target_compile_options(graphite_example_shell PRIVATE /W4 /WX /EHsc)
+elseif(TARGET graphite_web)
+    add_library(graphite_example_shell STATIC cli.c frames.c platform/web.c)
+    target_link_libraries(graphite_example_shell PUBLIC graphite_example graphite_web)
+    target_compile_options(graphite_example_shell PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    # One self-contained script per example; the selftest exits with its status, interactive pages keep running.
+    target_link_options(graphite_example_shell PUBLIC -sSINGLE_FILE=1 -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1
+        -sENVIRONMENT=web "SHELL:--js-library ${CMAKE_CURRENT_SOURCE_DIR}/platform/web.js")
+    set_property(TARGET graphite_example_shell APPEND PROPERTY INTERFACE_LINK_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/web.js)
 elseif(TARGET graphite_gtk)
     add_library(graphite_example_shell STATIC cli.c frames.c platform/gtk.c)
     target_link_libraries(graphite_example_shell PUBLIC graphite_example graphite_gtk)

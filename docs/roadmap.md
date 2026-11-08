@@ -88,7 +88,9 @@ position of an animating layer would then live in the compositor (like
 - Headless Linux testing (for example `mutter --headless`) and CI.
 - Windows: device-loss recovery (`RenderingDeviceReplaced`) and testing on
   x64 hardware.
-- A Web backend (DOM + Canvas2D), tier 2.
+- A Web backend (DOM, CSS and SVG), tier 2: in progress. Layers, drawings,
+  text and events work and every example runs in the browser; masks, IME and
+  touch remain. See the [design](backends/web.md).
 - Optional capabilities with per-platform fallback: conic gradients,
   other content filters, blend modes, backdrop blur.
 - A compositor-driven keyframe animation primitive (Core Animation and
@@ -97,7 +99,6 @@ position of an animating layer would then live in the compositor (like
 ## Open questions
 
 - Final minimum platform versions (proposed: macOS 14, Windows 11, GTK 4.22).
-- Whether web text should use DOM layout or an independent layout engine.
 
 ## Text
 

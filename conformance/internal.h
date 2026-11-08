@@ -92,6 +92,8 @@ double profile_coverage(profile p, size_t channel, double scale);
 gr_scene *new_scene(ctx *c);
 /** Returns the borrowed text system of the harness, or NULL after marking the case skipped. */
 gr_text_system *text_system(ctx *c);
+/** Returns whether the harness supports a GR_CONF_* feature; otherwise marks the case skipped and returns false. */
+bool supports(ctx *c, uint32_t feature);
 gr_layer *new_layer(ctx *c, gr_scene *s, gr_layer_kind kind);
 gr_color color(rgba8 value);
 gr_layer *solid(ctx *c, gr_scene *s, gr_rect rect, rgba8 value);

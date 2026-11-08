@@ -28,3 +28,22 @@ jobs:
           -DCLANG_FORMAT=/usr/bin/clang-format-18
       - name: Format, build and test
         run: cmake --build build --target check
+
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the browser test runner
+        working-directory: tests/web
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Configure
+        run: emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: Build and test
+        # Formatting is checked by the c job.
+        run: cmake --build build --parallel && ctest --test-dir build --output-on-failure -E graphite.format

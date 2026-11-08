@@ -193,6 +193,11 @@ static void shared_resources(void)
         CHECK(WaitForSingleObject(threads[i], INFINITE) == WAIT_OBJECT_0);
         CloseHandle(threads[i]);
     }
+#elif defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    /* Without -pthread, pthread_create always fails: run the workers one after another. */
+    for (size_t i = 0; i < 4; ++i)
+        worker(gr_display_list_ref(list));
+    gr_display_list_unref(list);
 #else
     pthread_t threads[4];
     for (size_t i = 0; i < 4; ++i)

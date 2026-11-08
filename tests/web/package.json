@@ -1,0 +1,9 @@
+{
+  "name": "graphite-web-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the Web backend's tests in a browser",
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}

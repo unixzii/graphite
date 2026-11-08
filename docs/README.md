@@ -11,6 +11,7 @@
 | [Core coverage](core-test-audit.md) | Covered contracts and remaining test opportunities |
 | [Writing a backend](backends/writing-a-backend.md) | Backend vtable and hosting requirements |
 | [macOS](backends/macos.md), [GTK](backends/gtk.md), [Windows](backends/windows.md) | Native implementations |
+| [Web](backends/web.md) | Design and spike measurements for a DOM backend (not implemented) |
 | [Platform notes](platform-notes.md) | Rendering capabilities and constraints |
 | [Roadmap](roadmap.md) | Implemented features and planned work |
 

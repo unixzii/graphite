@@ -5,6 +5,8 @@
 #include <graphite/gtk.h>
 #elif defined(CONSUMER_WINDOWS)
 #include <graphite/windows.h>
+#elif defined(CONSUMER_WEB)
+#include <graphite/web.h>
 #endif
 
 int main(void)
@@ -23,6 +25,11 @@ int main(void)
 #elif defined(CONSUMER_WINDOWS)
     gr_windows_pixels pixels = {0};
     gr_windows_pixels_clear(&pixels);
+#elif defined(CONSUMER_WEB)
+    /* Linking the backend needs its runtime library; attaching needs a document, which node does not have. */
+    gr_scene_host *(*volatile attach)(gr_scene *, const char *) = gr_web_attach_to_element;
+    if (!attach)
+        return 1;
 #endif
     return 0;
 }

@@ -161,6 +161,13 @@ static bool save_png(const char *path, const gr_conf_pixels *pixels)
     return ok;
 }
 
+bool supports(ctx *c, uint32_t feature)
+{
+    if (c->harness->unsupported & feature)
+        c->skipped = true;
+    return !(c->harness->unsupported & feature);
+}
+
 gr_text_system *text_system(ctx *c)
 {
     if (!c->text && c->harness->text_system)

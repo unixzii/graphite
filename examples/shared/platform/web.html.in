@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- Page for one Graphite example. ?selftest and ?fps pass --selftest and --fps. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graphite @GRAPHITE_EXAMPLE_NAME@</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f2f2f7; }
+  #graphite { position: fixed; inset: 0; }
+</style>
+<div id="graphite"></div>
+<script>
+  var Module = {
+    arguments: [...new URLSearchParams(location.search).keys()].map((name) => '--' + name),
+  };
+</script>
+<script src="@GRAPHITE_EXAMPLE_NAME@.js"></script>

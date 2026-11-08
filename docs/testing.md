@@ -43,7 +43,10 @@ checks. GTK's optional external-library leak suppressions are documented in
 
 Platform tests verify hosting, scaling, idle scheduling, snapshots and lifetime.
 They need a GUI/renderer session: macOS needs Metal/WindowServer, GTK a graphical
-display, and Windows an interactive desktop rather than SSH session 0.
+display, and Windows an interactive desktop rather than SSH session 0. The Web
+backend's test runs in headless Chromium through Playwright, and an Emscripten
+build runs the core suites under node; see the
+[Web backend guide](../src/platforms/web/README.md).
 
 [Conformance](../conformance/README.md) contains semantic assertions and measured
 edge/blur/coverage probes at three scales. Compare captures from the same backend

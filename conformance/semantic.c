@@ -142,6 +142,8 @@ void opacity_is_group_opacity(ctx *c)
 
 void masks_clip_by_alpha(ctx *c)
 {
+    if (!supports(c, GR_CONF_MASKS))
+        return;
     gr_scene *s = new_scene(c);
     gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED), *mask = new_layer(c, s, GR_LAYER_CONTAINER);
     FRAME(mask, 0, 0, 20, 40);
@@ -154,6 +156,8 @@ void masks_clip_by_alpha(ctx *c)
 
 void masks_keep_sublayers_outside_bounds(ctx *c)
 {
+    if (!supports(c, GR_CONF_MASKS))
+        return;
     gr_scene *s = new_scene(c);
     gr_layer *l = solid(c, s, RECT(0, 0, 40, 40), RED), *mask = new_layer(c, s, GR_LAYER_CONTAINER);
     gr_layer *inside = new_layer(c, s, GR_LAYER_CONTAINER), *outside = new_layer(c, s, GR_LAYER_CONTAINER);
