@@ -8,7 +8,7 @@ owns transform, opacity, visibility, shadow and the blur filter (the private
 `CAFilter`); the body owns local bounds,
 clipping, background, border, contents and mask. Images use a dedicated first
 sublayer. Image CGImages are shared by resource identity with per-node usage
-counts. Shape gradient paints currently fall back to the first stop.
+counts.
 
 Drawn content uses a CALayerDelegate. Core Animation requests display, the
 delegate invokes the drawer provider with its display version and the native

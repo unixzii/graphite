@@ -203,12 +203,7 @@ addToLibrary({
       if (!paint) return;
       const c = s.color;
       span.style.color = c ? `rgb(${c[0] * 255} ${c[1] * 255} ${c[2] * 255} / ${c[3]})` : paint.color;
-      const lines = [];
-      if (paint.decorations) {
-        if (s.decorations & 1) lines.push('underline');
-        if (s.decorations & 2) lines.push('line-through');
-      }
-      if (lines.length) span.style.textDecorationLine = lines.join(' ');
+      if (paint.decorations && s.decorations & 1) span.style.textDecorationLine = 'underline';
     },
 
     /* A line as a block: a baseline marker, then its content and any ellipsis. The block's font, which sets the
@@ -269,16 +264,15 @@ addToLibrary({
       const { text, options } = L;
       const host = GRText.measure();
       let lines = [];
-      if (options.hasWidth && options.wrap !== 2) {
+      if (options.hasWidth && options.wrap !== 1) {
         // 1. Wrap in one block and follow the cluster boxes down.
         const block = document.createElement('div');
         block.style.font = GRText.font(L.base);
         Object.assign(block.style, {
           width: options.width + 'px', whiteSpace: 'pre-wrap', direction: options.direction === 2 ? 'rtl' : 'ltr',
           unicodeBidi: options.direction ? 'isolate' : 'plaintext',
+          overflowWrap: 'break-word',
         });
-        if (options.wrap === 1) block.style.wordBreak = 'break-all';
-        else block.style.overflowWrap = 'break-word';
         const spans = GRText.spans(L, 0, text.length, null);
         block.append(...spans);
         host.append(block);

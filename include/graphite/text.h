@@ -44,8 +44,7 @@ typedef uint32_t gr_text_decorations;
 
 enum
 {
-    GR_TEXT_DECORATION_UNDERLINE = 1u,
-    GR_TEXT_DECORATION_STRIKETHROUGH = 2u
+    GR_TEXT_DECORATION_UNDERLINE = 1u
 };
 
 /** Selects the style members a span overrides. */
@@ -128,7 +127,6 @@ GR_API uint64_t gr_attributed_text_get_id(const gr_attributed_text *text);
 typedef enum
 {
     GR_TEXT_WRAP_WORD, /**< Break between words; break inside a word only when it alone exceeds the width. */
-    GR_TEXT_WRAP_CHAR, /**< Break between any grapheme clusters. */
     GR_TEXT_WRAP_NONE  /**< Break only at paragraph separators. */
 } gr_text_wrap;
 
@@ -318,7 +316,7 @@ GR_API gr_result gr_canvas_draw_text_layout(gr_canvas *canvas, gr_text_layout *l
 
 /** Records drawing glyphs [glyphs.start, glyphs.end) of one line of layout, with the layout box origin at origin, so
  * each glyph lands at origin + its position; place a glyph elsewhere by adjusting origin or the canvas transform.
- * Draws glyphs only, without underline or strikethrough, so for text without decorations drawing every glyph range
+ * Draws glyphs only, without underlines, so for text without decorations drawing every glyph range
  * of every line at one origin matches gr_canvas_draw_text_layout. color and alpha work as there. Refs layout;
  * rejects a line or range outside the layout, nonfinite origin or invalid color. */
 GR_API gr_result gr_canvas_draw_text_glyphs(gr_canvas *canvas, gr_text_layout *layout, size_t line,

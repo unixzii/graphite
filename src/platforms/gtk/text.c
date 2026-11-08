@@ -189,8 +189,6 @@ static PangoAttrList *attributes(const pg_system *system, const gr_attributed_te
         }
         if (style.decorations & GR_TEXT_DECORATION_UNDERLINE)
             insert(list, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE), start, end);
-        if (style.decorations & GR_TEXT_DECORATION_STRIKETHROUGH)
-            insert(list, pango_attr_strikethrough_new(TRUE), start, end);
         if (style.letter_spacing != 0)
             insert(list, pango_attr_letter_spacing_new(to_pango(style.letter_spacing)), start, end);
     }
@@ -343,7 +341,7 @@ static void build(pg_layout *l)
     if (bounded)
     {
         pango_layout_set_width(layout, to_pango(o->max_width));
-        pango_layout_set_wrap(layout, o->wrap == GR_TEXT_WRAP_CHAR ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         /* Unwrapped lines with end truncation: Pango ellipsizes each paragraph to one line. */
         if (o->wrap == GR_TEXT_WRAP_NONE)
             pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);

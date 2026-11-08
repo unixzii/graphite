@@ -404,8 +404,8 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
         {
             GskRoundedRect sr = gr_gsk_rounded(shape->value.rounded_rect.rect, shape->value.rounded_rect.radius,
                                                shape->value.rounded_rect.corners);
-            gtk_snapshot_append_outset_shadow(s, &sr, &color, (float)shadow->offset.x, (float)shadow->offset.y,
-                                              (float)shape->value.rounded_rect.spread, (float)(shadow->blur_sigma * 2));
+            gtk_snapshot_append_outset_shadow(s, &sr, &color, (float)shadow->offset.x, (float)shadow->offset.y, 0,
+                                              (float)(shadow->blur_sigma * 2));
         }
         else
         {

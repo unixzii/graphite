@@ -1,6 +1,6 @@
 # Backend conformance
 
-The suite contains **29 semantic cases, 8 measured cases and 18 text cases**,
+The suite contains **28 semantic cases, 7 measured cases and 18 text cases**,
 each at **1×, 1.5× and 2×**.
 
 ## Organization

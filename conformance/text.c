@@ -145,12 +145,6 @@ void text_wraps_inside_max_width(ctx *c)
     CHECK(gr_text_layout_get_range_rects(layout, (gr_text_range){0, PANGRAM.count}, NULL, 0) == m.line_count);
     gr_text_layout_unref(layout);
 
-    gr_text_layout_options chars = width(80);
-    chars.wrap = GR_TEXT_WRAP_CHAR;
-    layout = layout_of(c, PANGRAM, chars);
-    CHECK(gr_text_layout_get_metrics(layout).line_count >= m.line_count);
-    gr_text_layout_unref(layout);
-
     gr_text_layout_options none = width(80);
     none.wrap = GR_TEXT_WRAP_NONE;
     layout = layout_of(c, PANGRAM, none);
@@ -512,16 +506,16 @@ void text_styles_and_decorations_render(ctx *c)
 
     gr_text_span italic = {{0, 4}, GR_TEXT_STYLE_SLANT, gr_text_style_default()};
     italic.style.slant = GR_FONT_SLANT_ITALIC;
-    gr_text_span strike = {{0, 4}, GR_TEXT_STYLE_DECORATIONS, gr_text_style_default()};
-    strike.style.decorations = GR_TEXT_DECORATION_STRIKETHROUGH;
+    gr_text_span underline = {{0, 4}, GR_TEXT_STYLE_DECORATIONS, gr_text_style_default()};
+    underline.style.decorations = GR_TEXT_DECORATION_UNDERLINE;
     gr_text_layout *slanted =
         layout_with(c, STR("Mmmm"), (gr_text_span_list){&italic, 1}, gr_text_layout_options_default());
-    gr_text_layout *struck =
-        layout_with(c, STR("Mmmm"), (gr_text_span_list){&strike, 1}, gr_text_layout_options_default());
+    gr_text_layout *underlined =
+        layout_with(c, STR("Mmmm"), (gr_text_span_list){&underline, 1}, gr_text_layout_options_default());
     gr_scene *s = new_scene(c);
     show(c, s, regular, POINT(4, 4), color(RED));
     show(c, s, slanted, POINT(4, 34), color(RED));
-    show(c, s, struck, POINT(4, 64), color(RED));
+    show(c, s, underlined, POINT(4, 64), color(RED));
     frame *f = render(c, s);
     gr_text_layout_metrics m = gr_text_layout_get_metrics(regular);
     gr_text_line l = line(regular, 0);
@@ -539,14 +533,14 @@ void text_styles_and_decorations_render(ctx *c)
                            (int)p->data[((size_t)(y + shift) * p->width + x) * 4 + 3]) > 64;
     conf_check(c, straight > 0 && changed > straight / 10, "italic changed %zu of %zu inked pixels", changed, straight);
 
-    /* Strikethrough adds ink between the glyphs at about half the x-height. */
-    gr_rect band_plain = RECT(4, 4 + l.baseline - l.ascent * 0.45, m.size.width, l.ascent * 0.3);
-    gr_rect band_struck = band_plain;
-    band_struck.origin.y += 60;
-    size_t base_ink = inked(f, band_plain), struck_ink = inked(f, band_struck);
-    conf_check(c, struck_ink > base_ink + (size_t)(m.size.width * f->scale * 0.5),
-               "strikethrough band %zu vs plain %zu", struck_ink, base_ink);
-    gr_text_layout_unref(struck);
+    /* An underline adds ink just below the baseline, where "Mmmm" has none. */
+    gr_rect band_plain = RECT(4, 4 + l.baseline + 0.5, m.size.width, l.ascent * 0.25);
+    gr_rect band_underlined = band_plain;
+    band_underlined.origin.y += 60;
+    size_t base_ink = inked(f, band_plain), underline_ink = inked(f, band_underlined);
+    conf_check(c, underline_ink > base_ink + (size_t)(m.size.width * f->scale * 0.5), "underline band %zu vs plain %zu",
+               underline_ink, base_ink);
+    gr_text_layout_unref(underlined);
     gr_text_layout_unref(slanted);
     gr_text_layout_unref(regular);
 }

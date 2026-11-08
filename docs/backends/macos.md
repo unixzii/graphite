@@ -54,8 +54,6 @@ conformance suite's text cases) lays text out with CoreText:
   they skip descenders (g, y, p). For context-colored runs the underline takes
   the context's **stroke** color, not its fill color, so both are set to the
   draw color first; otherwise those underlines come out black.
-- CoreText draws no strikethrough, so it is a rectangle from the run's font
-  metrics. It does not skip glyphs (browsers do not either).
 - Glyph font identities key on the PostScript name, `CTFontCopyVariation` and
   the font matrix (synthetic oblique). Size matters only through variation
   axes: SF's optical size axis makes 14 pt and 28 pt different faces.
@@ -76,8 +74,6 @@ conformance suite's text cases) lays text out with CoreText:
 
 ## Known gaps
 
-- Gradient paints on shape layers fills and strokes degrade to the first
-  stop. Doing this properly needs a `CAGradientLayer` masked by the shape.
 - Text: no font loading from bytes, locale, font features or line height
   yet. Text drawn into a layer is rasterized at the backing scale, so it blurs
   under scale transforms (see the roadmap's rasterization scale gap).

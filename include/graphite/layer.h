@@ -31,8 +31,8 @@ typedef struct
 {
     gr_color color;
     gr_point offset;
-    double blur_sigma, spread;
-    gr_path *path; /**< Optional, local-space custom shadow; spread ignored if set. */
+    double blur_sigma;
+    gr_path *path; /**< Optional, local-space custom shadow; otherwise the rounded box casts it. */
 } gr_shadow;
 
 typedef enum
@@ -276,13 +276,15 @@ GR_API gr_result gr_shape_layer_set_path(gr_layer *layer, gr_path *path);
 /** Returns the borrowed fill, or NULL when unset or inert. */
 GR_API gr_paint *gr_shape_layer_get_fill(const gr_layer *layer);
 
-/** Sets fill, acquiring its reference before releasing the old value; NULL clears. */
+/** Sets a solid fill, acquiring its reference before releasing the old value; NULL clears. Gradients return
+ * ARGUMENT: mask a gradient layer with the path instead. */
 GR_API gr_result gr_shape_layer_set_fill(gr_layer *layer, gr_paint *fill);
 
 /** Returns the borrowed stroke, or NULL when unset or inert. */
 GR_API gr_stroke *gr_shape_layer_get_stroke(const gr_layer *layer);
 
-/** Sets stroke, acquiring its reference before releasing the old value; NULL clears. */
+/** Sets a stroke with a solid paint, acquiring its reference before releasing the old value; NULL clears. Gradient
+ * paints return ARGUMENT. */
 GR_API gr_result gr_shape_layer_set_stroke(gr_layer *layer, gr_stroke *stroke);
 
 /** Returns the fill rule; default is GR_FILL_NONZERO. */

@@ -168,7 +168,7 @@ gr_scene *gr_scene_new(gr_size size)
     if (!gr_valid_rect((gr_rect){{0, 0}, size}))
         return NULL;
     gr_scene *s = gr_alloc(1, sizeof(*s));
-    *s = (gr_scene){.refs = 1, .scale = 1, .snapping = true};
+    *s = (gr_scene){.refs = 1, .scale = 1};
     s->link = gr_alloc(1, sizeof(*s->link));
     *s->link = (gr_scene_link){1, s};
     s->provider = gr_alloc(1, sizeof(*s->provider));
@@ -329,11 +329,6 @@ double gr_scene_get_backing_scale(const gr_scene *s)
     return s->scale;
 }
 
-bool gr_scene_get_pixel_snapping(const gr_scene *s)
-{
-    return s->snapping;
-}
-
 static bool size_content(const gr_layer *l)
 {
     return l->kind == GR_LAYER_GRADIENT || (l->kind == GR_LAYER_CONTENT && (l->image || l->drawer.draw));
@@ -365,20 +360,7 @@ gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
         return GR_OK;
     s->scale = scale;
     for (gr_layer *l = s->layers; l; l = l->next)
-        gr_model_mark(l, (s->snapping ? snap_bits(l) : 0) | (l->kind != GR_LAYER_CONTAINER ? GR_DIRTY_CONTENT : 0));
-    gr_model_flush(s);
-    return GR_OK;
-}
-
-gr_result gr_scene_set_pixel_snapping(gr_scene *s, bool enabled)
-{
-    if (gr_model_writable(s) != GR_OK)
-        return GR_ERROR_REENTRANT;
-    if (s->snapping == enabled)
-        return GR_OK;
-    s->snapping = enabled;
-    for (gr_layer *l = s->layers; l; l = l->next)
-        gr_model_mark(l, snap_bits(l));
+        gr_model_mark(l, snap_bits(l) | (l->kind != GR_LAYER_CONTAINER ? GR_DIRTY_CONTENT : 0));
     gr_model_flush(s);
     return GR_OK;
 }

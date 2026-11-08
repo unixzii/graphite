@@ -113,11 +113,11 @@ The resolved transform is `T(position) * transform * T(-anchor * size)`; the roo
 uses identity. Resolved size, border width, shadow shape and image placement are
 computed centrally. Backends using raw position must include `snap_offset`.
 
-Pixel snapping is enabled by default. Translation, bounds offset, axis-aligned
-size and border width snap to the backing-scale grid. Nonzero box dimensions and
-borders retain at least one device pixel. Snapping is local to each layer, so
-fractional error can accumulate in deep hierarchies. Scale or snapping changes
-invalidate dependent resolved values.
+Pixel snapping is always on. Translation, bounds offset, axis-aligned size and
+border width snap to the backing-scale grid. Nonzero box dimensions and borders
+retain at least one device pixel. Snapping is local to each layer, so
+fractional error can accumulate in deep hierarchies. Scale changes invalidate
+dependent resolved values.
 
 Coordinates use logical points, top-left origin, downward Y and radians. Colors
 are straight-alpha sRGB; images and captures use premultiplied RGBA8. Shadows use

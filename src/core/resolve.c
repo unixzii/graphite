@@ -72,7 +72,6 @@ gr_resolved gr_model_resolve(const gr_layer *l)
 {
     const gr_layer_props *p = &l->props;
     double scale = l->scene->scale;
-    bool snapping = l->scene->snapping;
     bool axis_aligned = p->transform.a == 1 && p->transform.d == 1 && p->transform.b == 0 && p->transform.c == 0;
     gr_resolved r = {.props = *p,
                      .size = p->bounds.size,
@@ -80,15 +79,14 @@ gr_resolved gr_model_resolve(const gr_layer *l)
                      .border = p->border,
                      .bounds_offset = {-p->bounds.origin.x, -p->bounds.origin.y},
                      .has_shadow = p->has_shadow};
-    if (snapping && axis_aligned)
+    if (axis_aligned)
     {
         r.size.width = snap_length(r.size.width, scale);
         r.size.height = snap_length(r.size.height, scale);
     }
-    if (snapping && r.has_border)
+    if (r.has_border)
         r.border.width = snap_length(r.border.width, scale);
     r.transform = l == l->scene->root ? (gr_affine){1, 0, 0, 1, 0, 0} : gr_model_transform(p, r.size);
-    if (snapping)
     {
         double tx = snap(r.transform.tx, scale), ty = snap(r.transform.ty, scale);
         r.snap_offset = (gr_point){tx - r.transform.tx, ty - r.transform.ty};
@@ -110,7 +108,6 @@ gr_resolved gr_model_resolve(const gr_layer *l)
             r.shadow_shape.value.rounded_rect.rect = (gr_rect){{0, 0}, r.size};
             r.shadow_shape.value.rounded_rect.radius = p->corner_radius;
             r.shadow_shape.value.rounded_rect.corners = p->masked_corners;
-            r.shadow_shape.value.rounded_rect.spread = p->shadow.spread;
         }
     }
     switch (l->kind)
@@ -162,17 +159,9 @@ gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point offset)
     if (shape->kind == GR_SHADOW_ROUNDED_RECT)
     {
         gr_rect r = shape->value.rounded_rect.rect;
-        double radius = shape->value.rounded_rect.radius, spread = shape->value.rounded_rect.spread;
-        if (gr_valid_rect(r) && isfinite(spread) && isfinite(radius) && radius >= 0)
-        {
-            gr_size size = {fmax(0, r.size.width + 2 * spread), fmax(0, r.size.height + 2 * spread)};
-            r.origin.x += (r.size.width - size.width) / 2;
-            r.origin.y += (r.size.height - size.height) / 2;
-            r.size = size;
-            if (radius > 0)
-                radius = fmax(0, radius + spread);
+        double radius = shape->value.rounded_rect.radius;
+        if (gr_valid_rect(r) && isfinite(radius) && radius >= 0)
             result = gr_path_builder_add_rounded_rect(b, r, radius, shape->value.rounded_rect.corners);
-        }
     }
     else if (shape->kind == GR_SHADOW_PATH && shape->value.path)
     {

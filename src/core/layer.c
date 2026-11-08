@@ -325,13 +325,12 @@ gr_result gr_layer_set_shadow(gr_layer *l, const gr_shadow *value)
     if (gr_model_writable(l->scene) != GR_OK)
         return GR_ERROR_REENTRANT;
     if (value && !(gr_valid_color(value->color) && gr_valid_point(value->offset) && isfinite(value->blur_sigma) &&
-                   value->blur_sigma >= 0 && isfinite(value->spread)))
+                   value->blur_sigma >= 0))
         return GR_ERROR_ARGUMENT;
     if (l->props.has_shadow == (value != NULL) &&
-        (!value ||
-         (gr_color_equal(l->props.shadow.color, value->color) &&
-          gr_point_equal(l->props.shadow.offset, value->offset) && l->props.shadow.blur_sigma == value->blur_sigma &&
-          l->props.shadow.spread == value->spread && l->props.shadow.path == value->path)))
+        (!value || (gr_color_equal(l->props.shadow.color, value->color) &&
+                    gr_point_equal(l->props.shadow.offset, value->offset) &&
+                    l->props.shadow.blur_sigma == value->blur_sigma && l->props.shadow.path == value->path)))
         return GR_OK;
     gr_shadow next = value ? *value : (gr_shadow){0};
     gr_path *old = l->props.has_shadow ? l->props.shadow.path : NULL;
@@ -694,6 +693,8 @@ gr_result gr_shape_layer_set_fill(gr_layer *l, gr_paint *value)
     gr_result result = kind_writable(l, GR_LAYER_SHAPE);
     if (result != GR_OK || !l->scene)
         return result;
+    if (value && gr_paint_get_desc(value).kind != GR_PAINT_SOLID)
+        return GR_ERROR_ARGUMENT;
     if (paint_equal(l->shape.fill, value))
         return GR_OK;
     gr_paint *old = l->shape.fill;
@@ -712,6 +713,8 @@ gr_result gr_shape_layer_set_stroke(gr_layer *l, gr_stroke *value)
     gr_result result = kind_writable(l, GR_LAYER_SHAPE);
     if (result != GR_OK || !l->scene)
         return result;
+    if (value && gr_paint_get_desc(gr_stroke_get_paint(value)).kind != GR_PAINT_SOLID)
+        return GR_ERROR_ARGUMENT;
     if (stroke_equal(l->shape.stroke, value))
         return GR_OK;
     gr_stroke *old = l->shape.stroke;

@@ -75,7 +75,7 @@ div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
   the one CSS box size in the tree: Chromium ignores a mask on an empty element
   and WebKit clips the mask to the border box.
 - **Shadows** are an SVG path of the resolved shadow shape
-  (`gr_shadow_shape_new_path`, which already applies spread and grown corners),
+  (`gr_shadow_shape_new_path`),
   offset and blurred with `filter: blur(σpx)`. They are not `box-shadow`:
   CSS clips a box shadow away under its own box, but in Graphite the whole
   shape casts the shadow, also beneath a transparent background. WebKit's
@@ -157,9 +157,8 @@ the runtime's number arrays; the layout and every query live in `text.js`, with
 UTF-16 indices inside and UTF-8 offsets at the boundary.
 
 1. **Line breaks.** When the text can wrap, it goes into one block of the
-   layout's width (`white-space: pre-wrap`; `overflow-wrap: break-word` for
-   word wrapping, `word-break: break-all` for characters; `unicode-bidi:
-   plaintext` for automatic direction). For each grapheme cluster
+   layout's width (`white-space: pre-wrap`, `overflow-wrap: break-word`, and
+   `unicode-bidi: plaintext` for automatic direction). For each grapheme cluster
    (`Intl.Segmenter`), a `Range` gives its box, and a cluster starts a new line
    when its top passes the current line's bottom minus half its own height.
    Paragraph separators always end lines; without wrapping, lines are the
@@ -289,7 +288,7 @@ through `tests/web/run.mjs`:
 - The harness uses the Web text system and declares `GR_CONF_THREADS`
   unsupported, so the text thread-safety case reports as skipped.
 
-Result: 54 passed and 1 skipped at 1×, 1.5× and 2×. Only Chromium runs the
+Result: 52 passed and 1 skipped at 1×, 1.5× and 2×. Only Chromium runs the
 suite, because the runner uses CDP.
 
 ## Lessons learned

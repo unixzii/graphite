@@ -85,13 +85,10 @@ static NSValue *key(gr_layer *layer)
 - (void)apply:(const gr_commit_batch *)batch;
 @end
 
+/* Shape layers take solid paints only. */
 static gr_color paint_color(gr_paint *paint)
 {
-    gr_paint_desc d = gr_paint_get_desc(paint);
-    if (d.kind == GR_PAINT_SOLID)
-        return d.value.solid;
-    gr_gradient_stop_list stops = d.kind == GR_PAINT_LINEAR ? d.value.linear.stops : d.value.radial.stops;
-    return stops.count ? stops.data[0].color : (gr_color){0};
+    return gr_paint_get_desc(paint).value.solid;
 }
 
 static void apply_shape(CAShapeLayer *layer, const gr_shape_props *s)

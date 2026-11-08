@@ -44,9 +44,7 @@ and border width to the backing-scale grid; see [architecture](architecture.md).
 
 Shadows escape the layer's own clip. Their shape is an explicit local-space path
 or rounded bounds, never the alpha of contents. The entire shape casts a shadow,
-including beneath transparent backgrounds. Blur uses Gaussian sigma. Spread
-expands/shrinks default bounds, growing rounded corners but preserving square
-ones; custom paths ignore spread.
+including beneath transparent backgrounds. Blur uses Gaussian sigma.
 
 `gr_layer_set_blur` blurs the layer's whole rendering with a Gaussian σ in
 points: shadow, background, contents, sublayers, border, mask and clip. The mask

@@ -446,7 +446,6 @@ static void geometry(void)
     gr_scene *s = new_scene(&r);
     gr_layer *l = gr_layer_new(s, GR_LAYER_CONTENT);
     OK(gr_layer_add_child(gr_scene_get_root(s), l));
-    OK(gr_scene_set_pixel_snapping(s, false));
     OK(gr_layer_set_bounds(l, (gr_rect){{3, 4}, {20, 10}}));
     OK(gr_layer_set_position(l, (gr_point){30, 40}));
     OK(gr_layer_set_transform(l, (gr_affine){2, 0, 0, 3, 1, 2}));
@@ -464,11 +463,10 @@ static void geometry(void)
     CHECK_NEAR(gr_layer_get_bounds(l).origin.x, 3);
     gr_border border = {0.3, {0, 0, 0, 1}};
     OK(gr_layer_set_border(l, &border));
-    gr_shadow shadow = {.color = {0, 0, 0, 1}, .blur_sigma = 2, .spread = 3};
+    gr_shadow shadow = {.color = {0, 0, 0, 1}, .blur_sigma = 2};
     OK(gr_layer_set_shadow(l, &shadow));
     OK(gr_layer_set_corner_radius(l, 2));
     OK(gr_layer_set_bounds(l, (gr_rect){{0.2, 0.2}, {10.2, 4.2}}));
-    OK(gr_scene_set_pixel_snapping(s, true));
     OK(gr_scene_set_backing_scale(s, 1.5));
     OK(gr_scene_commit(s));
     v = &update(&r, l)->resolved;
@@ -479,7 +477,7 @@ static void geometry(void)
     CHECK(outline);
     gr_path_element_list el = gr_path_get_elements(outline);
     CHECK_NEAR(el.data[0].p[0].x, 2);
-    CHECK_NEAR(el.data[0].p[0].y, -3);
+    CHECK_NEAR(el.data[0].p[0].y, 0);
     gr_path_unref(outline);
     gr_path_element e = {GR_PATH_MOVE, {{4, 5}}};
     gr_path *path = gr_path_new((gr_path_element_list){&e, 1});
@@ -544,6 +542,17 @@ static void property_dependencies(void)
     CHECK(!gr_scene_needs_commit(s));
     CHECK(gr_shape_layer_set_fill(l, p) == GR_ERROR_KIND);
     CHECK(gr_gradient_layer_set_gradient(gradient, p) == GR_ERROR_ARGUMENT);
+    gr_gradient_stop ramp[] = {{0, {0, 0, 0, 1}}, {1, {1, 1, 1, 1}}};
+    gr_paint_desc linear = {.kind = GR_PAINT_LINEAR};
+    linear.value.linear.end = (gr_point){1, 0};
+    linear.value.linear.stops = (gr_gradient_stop_list){ramp, 2};
+    gr_paint *ramp_paint = gr_paint_new(&linear);
+    gr_stroke *ramp_stroke = gr_stroke_new(ramp_paint, &style);
+    CHECK(gr_shape_layer_set_fill(shape, ramp_paint) == GR_ERROR_ARGUMENT);
+    CHECK(gr_shape_layer_set_stroke(shape, ramp_stroke) == GR_ERROR_ARGUMENT);
+    CHECK(gr_shape_layer_get_fill(shape) == p && !gr_scene_needs_commit(s));
+    gr_stroke_unref(ramp_stroke);
+    gr_paint_unref(ramp_paint);
     gr_paint_unref(p);
     gr_paint_unref(same);
     gr_stroke_unref(stroke);
@@ -561,14 +570,13 @@ static void property_dependencies(void)
     CHECK(update(&r, l)->changed == GR_DIRTY_APPEARANCE && update(&r, l)->resolved.props.blur_sigma == 3);
     OK(gr_layer_set_blur(l, 3));
     CHECK(!gr_scene_needs_commit(s) && gr_layer_get_blur(l) == 3);
-    OK(gr_scene_set_pixel_snapping(s, false));
-    OK(gr_scene_commit(s));
     OK(gr_scene_set_backing_scale(s, 2));
     OK(gr_scene_commit(s));
-    CHECK(update(&r, l)->changed == GR_DIRTY_CONTENT);
-    CHECK(update(&r, shape)->changed == GR_DIRTY_CONTENT);
-    CHECK(update(&r, gradient)->changed == GR_DIRTY_CONTENT);
-    CHECK(!update(&r, gr_scene_get_root(s)));
+    /* Scale changes re-snap geometry and redraw contents. */
+    CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW | GR_DIRTY_CONTENT));
+    CHECK(update(&r, shape)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
+    CHECK(update(&r, gradient)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
+    CHECK(update(&r, gr_scene_get_root(s))->changed == GR_DIRTY_GEOMETRY);
     gr_gradient_stop stops[] = {{0, {0, 0, 0, 1}}, {1, {1, 1, 1, 1}}};
     desc.kind = GR_PAINT_LINEAR;
     desc.value.linear.start = (gr_point){0, 0};

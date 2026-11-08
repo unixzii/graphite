@@ -30,7 +30,7 @@ static bool same_shadow(gr_shadow_shape const &a, gr_shadow_shape const &b)
         return a.value.path == b.value.path;
     auto &x = a.value.rounded_rect;
     auto &y = b.value.rounded_rect;
-    return same_rect(x.rect, y.rect) && x.radius == y.radius && x.corners == y.corners && x.spread == y.spread;
+    return same_rect(x.rect, y.rect) && x.radius == y.radius && x.corners == y.corners;
 }
 
 /* Box-space bounding box; empty until a rectangle with area is added. */
@@ -326,7 +326,7 @@ struct Backend
         n.masking.reset();
     }
 
-    CompositionBrush paint_brush(gr_paint *p, bool relative);
+    CompositionBrush paint_brush(gr_paint *p);
     CompositionClip rounded_clip(gr_rect r, double radius, gr_corners corners);
     void decoration(Node &n, gr_resolved const &r);
     void shadow(Node &n, gr_resolved const &r);
@@ -352,13 +352,14 @@ struct Backend
     }
 };
 
-CompositionBrush Backend::paint_brush(gr_paint *paint, bool relative)
+/* Shapes take solid paints; gradients come from gradient layers and masks, in unit coordinates of the box. */
+CompositionBrush Backend::paint_brush(gr_paint *paint)
 {
     auto p = gr_paint_get_desc(paint);
     if (p.kind == GR_PAINT_SOLID)
         return comp().CreateColorBrush(color(p.value.solid));
     CompositionGradientBrush brush{nullptr};
-    auto mode = relative ? CompositionMappingMode::Relative : CompositionMappingMode::Absolute;
+    auto mode = CompositionMappingMode::Relative;
     gr_gradient_stop_list stops;
     if (p.kind == GR_PAINT_LINEAR)
     {
@@ -578,7 +579,7 @@ void Backend::apply_mask(gr_layer *id, Node &n, gr_resolved const &r)
     else
     {
         auto sprite = comp().CreateSpriteVisual();
-        sprite.Brush(paint_brush(p.mask.value.gradient, true));
+        sprite.Brush(paint_brush(p.mask.value.gradient));
         sprite.Offset({static_cast<float>(-r.bounds_offset.x), static_cast<float>(-r.bounds_offset.y), 0});
         sprite.Size(vec(r.size.width, r.size.height));
         m.host.Children().InsertAtTop(sprite);
@@ -611,7 +612,7 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
         }
         auto &p = *n.shape;
         p.fill.Geometry(comp().CreatePathGeometry(composition_path(ctx.factory.get(), s.path, s.fill_rule)));
-        p.fill.FillBrush(s.fill ? paint_brush(s.fill, false) : nullptr);
+        p.fill.FillBrush(s.fill ? paint_brush(s.fill) : nullptr);
         double margin = 1;
         if (s.stroke)
         {
@@ -620,7 +621,7 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
             geometry.TrimStart(static_cast<float>(s.stroke_start));
             geometry.TrimEnd(static_cast<float>(s.stroke_end));
             p.stroke.Geometry(geometry);
-            p.stroke.StrokeBrush(paint_brush(gr_stroke_get_paint(s.stroke), false));
+            p.stroke.StrokeBrush(paint_brush(gr_stroke_get_paint(s.stroke)));
             p.stroke.StrokeThickness(static_cast<float>(st.width));
             auto cap = st.cap == GR_CAP_ROUND    ? CompositionStrokeCap::Round
                        : st.cap == GR_CAP_SQUARE ? CompositionStrokeCap::Square
@@ -762,7 +763,7 @@ void Backend::content(gr_layer *id, gr_resolved const &r, bool changed)
         {
             auto s = content_sprite(n);
             if (changed)
-                s.Brush(paint_brush(c.value.gradient, true));
+                s.Brush(paint_brush(c.value.gradient));
             s.Size(vec(r.size.width, r.size.height));
             break;
         }

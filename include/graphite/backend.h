@@ -100,7 +100,6 @@ typedef struct
             gr_rect rect;
             double radius;
             gr_corners corners;
-            double spread;
         } rounded_rect;
 
         gr_path *path; /**< Local coordinates; translate by bounds_offset for box space. */
@@ -259,7 +258,7 @@ GR_API gr_result gr_drawer_provider_draw(gr_drawer_provider *provider, gr_layer 
 /** Returns the resolved box in local coordinates and the supplied positive raster scale. */
 GR_API gr_draw_info gr_resolved_get_draw_info(const gr_resolved *resolved, double scale);
 
-/** Owned path, grown rounded rect or translated custom path, in box space. */
+/** Owned path, the rounded rect or the translated custom path, in box space. */
 GR_API gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point bounds_offset);
 
 /* DisplayList replay */

@@ -47,7 +47,6 @@ struct gr_scene
     gr_layer **released;
     size_t released_count, released_capacity;
     double scale;
-    bool snapping;
     gr_backend_vtable vtable;
     void *backend;
     gr_scene_link *link;

@@ -11,7 +11,7 @@ static void measure_shadow_blur(ctx *c, bool background)
         API(gr_layer_set_background(l, &white));
     }
     API(gr_layer_add_child(gr_scene_get_root(s), l));
-    set_shadow(l, 0, 0, 4, 0);
+    set_shadow(l, 0, 0, 4);
     frame *f = render(c, s);
     profile p = frame_profile(f, POINT(50, 50), POINT(95, 50));
     expect_near(c, "distance to 15.87% alpha (= σ)", profile_crossing(p, 3, 0.1587), 4, 0.8);
@@ -27,29 +27,6 @@ void shadow_blur_matches_sigma(ctx *c)
 void shadow_blur_matches_sigma_without_background(ctx *c)
 {
     measure_shadow_blur(c, false);
-}
-
-void shadow_spread_moves_the_edge(ctx *c)
-{
-    for (size_t i = 0; i < 2; ++i)
-    {
-        gr_scene *s = new_scene(c);
-        gr_layer *l = new_layer(c, s, GR_LAYER_CONTAINER);
-        API(gr_layer_set_frame(l, RECT(10, 10, 40, 80)));
-        if (i == 0)
-        {
-            gr_color white = color(WHITE);
-            API(gr_layer_set_background(l, &white));
-        }
-        set_shadow(l, 0, 0, 4, 6);
-        API(gr_layer_add_child(gr_scene_get_root(s), l));
-        frame *f = render(c, s);
-        profile p = frame_profile(f, POINT(50, 50), POINT(95, 50));
-        char label[100];
-        snprintf(label, sizeof(label), "%s: distance to 50%% alpha (= spread)", i == 0 ? "opaque" : "hollow");
-        expect_near(c, label, profile_crossing(p, 3, 0.5), 6, 0.6);
-        free(p.data);
-    }
 }
 
 void layer_blur_matches_sigma(ctx *c)

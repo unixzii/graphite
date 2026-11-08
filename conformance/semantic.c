@@ -181,7 +181,7 @@ void masks_leave_the_shadow(ctx *c)
 {
     gr_scene *s = new_scene(c);
     gr_layer *l = solid(c, s, RECT(10, 10, 40, 30), RED);
-    set_shadow(l, 0, 40, 0, 0);
+    set_shadow(l, 0, 40, 0);
     set_path_mask(l, RECT(0, 0, 20, 30), RECT(0, 0, 0, 0));
     frame *f = render(c, s);
     EXPECT("masked body", 20, 25, RED);
@@ -428,7 +428,7 @@ void shadow_offset_is_y_down_and_escapes_masks_to_bounds(ctx *c)
     gr_layer *l = solid(c, s, RECT(30, 30, 20, 20), WHITE);
     API(gr_layer_set_masks_to_bounds(l, true));
     API(gr_layer_set_corner_radius(l, 4));
-    set_shadow(l, 0, 15, 0.5, 0);
+    set_shadow(l, 0, 15, 0.5);
     frame *f = render(c, s);
     EXPECT("the layer", 40, 40, WHITE);
     EXPECT("shadow below", 40, 60, BLACK);
@@ -441,7 +441,7 @@ void shadow_is_drawn_under_layers_without_background(ctx *c)
     gr_layer *l = new_layer(c, s, GR_LAYER_CONTAINER);
     FRAME(l, 30, 30, 40, 40);
     API(gr_layer_set_corner_radius(l, 6));
-    set_shadow(l, 0, 0, 0.5, 0);
+    set_shadow(l, 0, 0, 0.5);
     ADD(gr_scene_get_root(s), l);
     frame *f = render(c, s);
     EXPECT("under the layer", 50, 50, BLACK);
@@ -517,25 +517,6 @@ void edges_and_borders_are_crisp(ctx *c)
         }
         free(p.data);
     }
-}
-
-void shadow_spread_grows_the_shape(ctx *c)
-{
-    gr_scene *s = new_scene(c);
-    gr_layer *opaque = solid(c, s, RECT(20, 20, 30, 30), WHITE);
-    set_shadow(opaque, 0, 0, 0.5, 8);
-    gr_layer *hollow = new_layer(c, s, GR_LAYER_CONTAINER);
-    FRAME(hollow, 60, 60, 30, 30);
-    API(gr_layer_set_corner_radius(hollow, 4));
-    set_shadow(hollow, 0, 0, 0.5, 8);
-    ADD(gr_scene_get_root(s), hollow);
-    frame *f = render(c, s);
-    EXPECT("opaque: within the spread", 35, 16, BLACK);
-    EXPECT("opaque: beyond the spread", 35, 6, CLEAR);
-    EXPECT("opaque: the layer", 35, 35, WHITE);
-    EXPECT("hollow: within the spread", 75, 56, BLACK);
-    EXPECT("hollow: beyond the spread", 75, 46, CLEAR);
-    EXPECT("hollow: under the layer", 75, 75, BLACK);
 }
 
 void updates_and_removals_reach_the_screen(ctx *c)

@@ -19,10 +19,10 @@
   DispatcherQueue commit scheduling and DPI tracking. Passes the whole
   conformance suite and has a real-window test.
 - **UI rendering basics**: crisp edges at fractional scales (sizes and
-  border widths snap to device pixels), shadow spread.
+  border widths snap to device pixels).
 - **Layer blur** (`gr_layer_set_blur`) on all three backends. Core Animation
   measures σ in layer space, GTK and Windows in screen space.
-- **Conformance suite**: 29 semantic, 8 measured and 18 text cases at 1×, 1.5×
+- **Conformance suite**: 28 semantic, 7 measured and 18 text cases at 1×, 1.5×
   and 2×; macOS, GTK and Windows pass all of them. Shadow σ is calibrated
   for all three backends.
   The runner executes on the platform-required thread.
@@ -60,19 +60,16 @@ roughly in priority order:
 2. **Image sampling.** A magnification/minification filter property:
    nearest for pixel art and QR codes, trilinear (mipmaps) for downscaled
    thumbnails and icons. Native on Core Animation, GSK and WinComp.
-3. **Gradient paints on shape layers for Core Animation.** They degrade to
-   the first stop today (a gradient layer masked by the shape would fix it),
-   while GTK draws them; add conformance cases once both agree.
-4. **Inset shadows**, for recessed fields and pressed states. GSK has a
+3. **Inset shadows**, for recessed fields and pressed states. GSK has a
    native node; Core Animation needs an emulation (a shadow cast by a large
    rectangle with the rounded box cut out, clipped to the box).
-5. **Nine-slice images** (`contentsCenter`), for stretchable skinned assets.
-6. **Large drawn contents.** Partial redisplay (`set_needs_display_in_rect`)
+4. **Nine-slice images** (`contentsCenter`), for stretchable skinned assets.
+5. **Large drawn contents.** Partial redisplay (`set_needs_display_in_rect`)
    and tiling for very large drawn layers: a single bitmap has a size limit
    in Core Animation (around 8 000 pt tall at 2×). Backends already decide
    when to draw; this adds a dirty / requested rect to `gr_draw_info` so they
    can draw tiles (`CATiledLayer` on Core Animation).
-7. **Image decoding** from encoded bytes through the platform decoders
+6. **Image decoding** from encoded bytes through the platform decoders
    (ImageIO, gdk-pixbuf/glycin, WIC, `createImageBitmap`). Until then,
    applications decode images before creating resources.
 
@@ -151,7 +148,7 @@ and M2 below: CoreText (`gr_macos_text_system_new`), Pango
   `GR_DRAW_TEXT_LAYOUT` op with Canvas recording, and `tests/text.c` with a
   fake text system.
 - Styles: family (including generic names), size, weight, slant, optional
-  color, underline/strikethrough, letter spacing.
+  color, underline, letter spacing.
 - Options: max width, wrap mode, max lines, end ellipsis, alignment, base
   direction.
 - Queries: metrics (size, line count, first/last baseline, visible range,
@@ -184,7 +181,7 @@ box at any origin, so glyphs can be animated or placed one by one. Each glyph
 carries its glyph index, em size and a font face identity (face, variation
 axis values and synthetic bold or oblique, not size) that compares across
 layouts of one text system, so equal glyphs can be matched between layouts.
-Glyph drawing leaves out underline and strikethrough. Per-glyph positions in
+Glyph drawing leaves out underlines. Per-glyph positions in
 one call (text on a path) and glyph outlines would come next, through a font
 object reachable from the font identity.
 
@@ -198,7 +195,7 @@ ellipsis hit testing and the ellipsis at paragraph breaks, alignment by
 paragraph direction, monotonic carets that round-trip through hit testing,
 caret affinity at direction changes, RTL hit testing, grapheme cluster stops,
 bidi selection pieces, letter spacing between graphemes, paint-only color,
-weight, italic and strikethrough, concurrent queries, drawing (upright, inside
+weight, italic and underline, concurrent queries, drawing (upright, inside
 its box, no color leaks, underline), and glyphs (clusters for emoji and RTL,
 ellipsis glyphs, glyph ranges redrawing the layout pixel for pixel, placement
 by origin). Writing these found and fixed
