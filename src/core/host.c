@@ -220,6 +220,8 @@ static bool update_state(gr_scene_host *host, const gr_event *e)
     }
 }
 
+/* Events come from backends, which build them from native input; debug builds check that contract. */
+#ifndef NDEBUG
 static bool valid_pointer(gr_event_type type, const gr_pointer_event *p)
 {
     const uint32_t buttons = (1u << GR_BUTTON_PRIMARY) | (1u << GR_BUTTON_SECONDARY) | (1u << GR_BUTTON_MIDDLE) |
@@ -287,6 +289,8 @@ static bool valid_event(const gr_event *e)
     return false;
 }
 
+#endif
+
 static bool is_text(gr_event_type type)
 {
     return type == GR_EVENT_TEXT_COMMIT || type == GR_EVENT_TEXT_PREEDIT;
@@ -308,7 +312,13 @@ static bool deliver(gr_scene_host *host, const gr_event *event)
 
 bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event)
 {
-    if (!gr_scene_host_is_interactive(host) || !event || !valid_event(event) || !update_state(host, event))
+    if (!gr_scene_host_is_interactive(host) || !event)
+        return false;
+#ifndef NDEBUG
+    if (!valid_event(event))
+        return false;
+#endif
+    if (!update_state(host, event))
         return false;
     if (host->dispatching)
     {

@@ -8,7 +8,7 @@ maintains those contracts; see [architecture](architecture.md) for the pipeline.
 ## Stable identities and retirement
 
 Layers are individually allocated and registered with a Scene. Public references
-and parent/mask ownership determine model lifetime. Native maps borrow identity
+and parent ownership determine model lifetime. Native maps borrow identity
 pointers under a separate allocation lease; taking public references in those
 maps would delay retirement rather than protect only pointer identity.
 
@@ -58,5 +58,5 @@ The returned DisplayList is owned by the caller; core does not retain recordings
 Provider lifetime does not extend a retired layer's identity lease.
 
 `tests/lifecycle.c` demonstrates ownership and deferred work. Scene tests cover
-callback-driven destruction, reentry, deferred retirement, mask replacement,
+callback-driven destruction, reentry, deferred retirement, mask resources,
 borrowed reparenting and deep iterative release. See [testing](testing.md).

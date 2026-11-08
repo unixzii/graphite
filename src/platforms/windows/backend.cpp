@@ -22,15 +22,38 @@ static bool same_rect(gr_rect a, gr_rect b)
            a.size.height == b.size.height;
 }
 
-static bool same_shadow(gr_shadow_shape const &a, gr_shadow_shape const &b)
+static gr_size box_size(gr_resolved const &r)
 {
-    if (a.kind != b.kind)
-        return false;
-    if (a.kind == GR_SHADOW_PATH)
-        return a.value.path == b.value.path;
-    auto &x = a.value.rounded_rect;
-    auto &y = b.value.rounded_rect;
-    return same_rect(x.rect, y.rect) && x.radius == y.radius && x.corners == y.corners && x.spread == y.spread;
+    return r.props.bounds.size;
+}
+
+/* Translates local space into box space. */
+static gr_point local_offset(gr_resolved const &r)
+{
+    return {-r.props.bounds.origin.x, -r.props.bounds.origin.y};
+}
+
+/* What a shadow's outline depends on: a custom path moves with the bounds origin; the rounded box follows the size
+ * and corners. */
+struct ShadowKey
+{
+    gr_path *path = nullptr;
+    gr_rect bounds{};
+    double radius = 0;
+    gr_corners corners = 0;
+};
+
+static ShadowKey shadow_key(gr_resolved const &r)
+{
+    auto &p = r.props;
+    if (p.shadow.path)
+        return {p.shadow.path, {p.bounds.origin, {}}, 0, 0};
+    return {nullptr, {{0, 0}, p.bounds.size}, p.corner_radius, p.masked_corners};
+}
+
+static bool same_key(ShadowKey const &a, ShadowKey const &b)
+{
+    return a.path == b.path && same_rect(a.bounds, b.bounds) && a.radius == b.radius && a.corners == b.corners;
 }
 
 /* Box-space bounding box; empty until a rectangle with area is added. */
@@ -143,38 +166,40 @@ struct ShadowParts
     SpriteVisual sprite{nullptr};
     DropShadow drop{nullptr};
     CompositionDrawingSurface surface{nullptr};
-    bool valid = false;
-    gr_shadow_shape shape{};
-    gr_point offset{};
-    double scale = 0;
-    gr_rect area{};   /**< Box-space bounds of the masked sprite. */
-    gr_point cast{};  /**< Shadow offset. */
-    double bleed = 0; /**< Reach of the shadow blur. */
+    bool keyed = false;
+    ShadowKey key{};
+    gr_path *outline = nullptr; /**< Owned box-space outline. */
+    double scale = 0;           /**< Scale the mask was rasterized at; 0 when it needs rasterizing. */
+    gr_rect area{};             /**< Box-space bounds of the masked sprite. */
+    gr_point cast{};            /**< Shadow offset. */
+    double bleed = 0;           /**< Reach of the shadow blur. */
 
     ~ShadowParts()
     {
-        if (valid && shape.kind == GR_SHADOW_PATH)
-            gr_path_unref(shape.value.path);
+        gr_path_unref(key.path);
+        gr_path_unref(outline);
     }
 
-    void remember(gr_shadow_shape const &next, gr_point at, double factor)
+    void remember(ShadowKey const &next, gr_path *owned)
     {
-        if (next.kind == GR_SHADOW_PATH)
-            gr_path_ref(next.value.path);
-        if (valid && shape.kind == GR_SHADOW_PATH)
-            gr_path_unref(shape.value.path);
-        shape = next;
-        offset = at;
-        scale = factor;
-        valid = true;
+        gr_path_ref(next.path);
+        gr_path_unref(key.path);
+        gr_path_unref(outline);
+        key = next;
+        outline = owned;
+        keyed = true;
+        scale = 0;
     }
 };
 
+/* The body goes through a LayerVisual whose effect multiplies it by the alpha of a visual surface of host, in local
+ * space, holding the mask: a filled ShapeVisual for a path, a SpriteVisual over the box for a gradient. */
 struct Masking
 {
     LayerVisual layer{nullptr};
     ContainerVisual host{nullptr};
     CompositionVisualSurface surface{nullptr};
+    gr_rect area{}; /**< Box-space bounds of the mask. */
 };
 
 /* The layer's whole rendering goes through a LayerVisual whose effect is the blur. */
@@ -194,10 +219,26 @@ struct Drawing
     CompositionDrawingSurface surface{nullptr};
 };
 
+/* A brush over a box-space rectangle: the background, or an image, drawing or gradient. */
+struct Fill
+{
+    CompositionBrush brush{nullptr};
+    gr_rect rect{};
+    CompositionClip clip{nullptr}; /**< Rounded corners, in the fill's own space. */
+};
+
+/* Each layer starts as one SpriteVisual, the body, which takes the transform, opacity and visibility, the clip, the
+ * background or content as its own brush, and the sublayers. Other visuals are added only when needed and then kept:
+ * an outer container once a shadow, mask or blur must sit outside the body, a clipped container when a clip must leave
+ * the border out, a sublayers container to offset sublayers by a nonzero bounds origin, and sprites for a background or
+ * content the body's brush cannot take. */
 struct Node
 {
-    ContainerVisual outer{nullptr}, body{nullptr}, clipped{nullptr}, sublayers{nullptr};
-    SpriteVisual background{nullptr}, sprite{nullptr};
+    ContainerVisual outer{nullptr}, clipped{nullptr}, sublayers{nullptr};
+    SpriteVisual body{nullptr}, background{nullptr}, sprite{nullptr};
+    CompositionColorBrush background_brush{nullptr};
+    Fill fill, art;                       /**< The background and the content's brush. */
+    CompositionClip bounds_clip{nullptr}; /**< Set when masking to bounds. */
     std::unique_ptr<ShapeParts> shape;
     ShapeVisual border_visual{nullptr};
     CompositionSpriteShape border_shape{nullptr};
@@ -206,20 +247,42 @@ struct Node
     std::unique_ptr<Blurring> blurring;
     std::unique_ptr<Drawing> drawing;
     uint64_t image = 0;
-    gr_layer *parent = nullptr, *mask = nullptr, *mask_owner = nullptr;
+    gr_layer *parent = nullptr;
     std::vector<gr_layer *> children;
     /* Snapshot for sizing LayerVisuals, which clip to their size, over the whole subtree. */
     gr_affine transform{1, 0, 0, 1, 0, 0};
     gr_size size{};
     gr_point bounds_offset{};
-    bool hidden = false, clips = false;
+    float opacity = 1;
+    bool hidden = false, clips = false, updated = false;
     double blur = 0;
     gr_rect content_box{};
 
-    /* Parent of the shadow and the body (or the mask's LayerVisual). */
+    /* The visual placed among the parent's sublayers. */
+    Visual top() const
+    {
+        if (outer)
+            return outer;
+        return body;
+    }
+
+    /* Parent of the shadow and the body (or the mask's LayerVisual); needs the outer. */
     ContainerVisual group() const
     {
         return blurring ? blurring->content : outer;
+    }
+
+    /* Parent of the background and content visuals, and of sublayers without a sublayers container. */
+    ContainerVisual paint_parent() const
+    {
+        if (clipped)
+            return clipped;
+        return body;
+    }
+
+    ContainerVisual host() const
+    {
+        return sublayers ? sublayers : paint_parent();
     }
 };
 
@@ -247,7 +310,7 @@ struct Backend
     gr_drawer_provider *drawers = nullptr;
     double scale = 1;
     gr_layer *root = nullptr;
-    bool reported = false;
+    bool reported = false, rescaled = false;
 
     Backend(gr_scene *s, ContainerVisual const &v)
         : ctx(context()), scaled(v), scene(gr_scene_get_link(s), gr_scene_link_unref)
@@ -260,7 +323,7 @@ struct Backend
         {
             scaled.Children().RemoveAll();
             for (auto &entry : nodes)
-                detach(entry.second->outer);
+                detach(entry.second->top());
         }
         catch (...)
         {
@@ -287,13 +350,8 @@ struct Backend
         }
     }
 
-    void clear_content(Node &n)
+    void clear_shape(Node &n)
     {
-        if (n.sprite)
-        {
-            detach(n.sprite);
-            n.sprite = nullptr;
-        }
         if (n.shape)
         {
             detach(n.shape->visual);
@@ -301,14 +359,82 @@ struct Backend
         }
     }
 
-    SpriteVisual content_sprite(Node &n)
+    void clear_content(Node &n)
     {
-        if (n.sprite)
-            return n.sprite;
-        clear_content(n);
-        n.sprite = comp().CreateSpriteVisual();
-        n.clipped.Children().InsertBelow(n.sprite, n.sublayers);
-        return n.sprite;
+        clear_shape(n);
+        n.art = {};
+    }
+
+    /* Content goes above the background and below the sublayers. */
+    void insert_content(Node &n, Visual const &v)
+    {
+        auto parent = n.paint_parent();
+        if (n.background)
+            parent.Children().InsertAbove(v, n.background);
+        else
+            parent.Children().InsertAtBottom(v);
+    }
+
+    /* Sublayers go above the content and below the border. */
+    void insert_child(Node &n, Visual const &v)
+    {
+        auto host = n.host();
+        if (n.border_visual && !n.sublayers && !n.clipped)
+            host.Children().InsertBelow(v, n.border_visual);
+        else
+            host.Children().InsertAtTop(v);
+    }
+
+    /* Moves transform, opacity and visibility to a new outer container that takes the body's place. */
+    void ensure_outer(Node &n)
+    {
+        if (n.outer)
+            return;
+        auto outer = comp().CreateContainerVisual();
+        outer.TransformMatrix(matrix4(n.transform));
+        outer.Opacity(n.opacity);
+        outer.IsVisible(!n.hidden);
+        if (auto parent = n.body.Parent())
+        {
+            parent.Children().InsertAbove(outer, n.body);
+            parent.Children().Remove(n.body);
+        }
+        n.body.TransformMatrix(matrix4({1, 0, 0, 1, 0, 0}));
+        n.body.Opacity(1);
+        n.body.IsVisible(true);
+        outer.Children().InsertAtTop(n.body);
+        n.outer = outer;
+    }
+
+    /* Moves everything but the border into a container the clip goes on. */
+    void ensure_clipped(Node &n)
+    {
+        if (n.clipped)
+            return;
+        auto clipped = comp().CreateContainerVisual();
+        if (n.border_visual)
+            n.body.Children().Remove(n.border_visual);
+        move_children(n.body, clipped);
+        n.body.Children().InsertAtTop(clipped);
+        if (n.border_visual)
+            n.body.Children().InsertAtTop(n.border_visual);
+        n.clipped = clipped;
+    }
+
+    /* Moves the sublayers into a container that offsets them by the bounds origin. */
+    void ensure_sublayers(gr_layer *id, Node &n)
+    {
+        if (n.sublayers)
+            return;
+        auto sublayers = comp().CreateContainerVisual();
+        for (auto c : n.children)
+            if (node(c).parent == id)
+                detach(node(c).top());
+        insert_child(n, sublayers);
+        n.sublayers = sublayers;
+        for (auto c : n.children)
+            if (node(c).parent == id)
+                sublayers.Children().InsertAtTop(node(c).top());
     }
 
     void unmask(Node &n)
@@ -323,25 +449,13 @@ struct Backend
         n.masking.reset();
     }
 
-    void clear_mask_owner(gr_layer *id)
-    {
-        auto &n = node(id);
-        if (n.mask_owner)
-        {
-            auto &owner = node(n.mask_owner);
-            owner.mask = nullptr;
-            unmask(owner);
-            n.mask_owner = nullptr;
-        }
-        detach(n.outer);
-    }
-
-    CompositionBrush paint_brush(gr_paint *p, bool relative);
+    CompositionBrush paint_brush(gr_paint *p);
     CompositionClip rounded_clip(gr_rect r, double radius, gr_corners corners);
     void decoration(Node &n, gr_resolved const &r);
+    void paint(Node &n);
     void shadow(Node &n, gr_resolved const &r);
-    void raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offset);
-    void apply_mask(gr_layer *id, gr_resolved const &r);
+    void raster_shadow(Node &n);
+    void apply_mask(gr_layer *id, Node &n, gr_resolved const &r);
     void apply_blur(gr_layer *id, double sigma);
     double effective_scale(gr_layer *id);
     Measured const &measure(gr_layer *id, std::unordered_map<gr_layer *, Measured> &memo);
@@ -362,13 +476,14 @@ struct Backend
     }
 };
 
-CompositionBrush Backend::paint_brush(gr_paint *paint, bool relative)
+/* Shapes take solid paints; gradients come from gradient layers and masks, in unit coordinates of the box. */
+CompositionBrush Backend::paint_brush(gr_paint *paint)
 {
     auto p = gr_paint_get_desc(paint);
     if (p.kind == GR_PAINT_SOLID)
         return comp().CreateColorBrush(color(p.value.solid));
     CompositionGradientBrush brush{nullptr};
-    auto mode = relative ? CompositionMappingMode::Relative : CompositionMappingMode::Absolute;
+    auto mode = CompositionMappingMode::Relative;
     gr_gradient_stop_list stops;
     if (p.kind == GR_PAINT_LINEAR)
     {
@@ -413,29 +528,24 @@ CompositionClip Backend::rounded_clip(gr_rect r, double radius, gr_corners corne
 void Backend::decoration(Node &n, gr_resolved const &r)
 {
     auto &p = r.props;
-    bool has_border = r.has_border && r.border.width > 0;
-    double amount = has_border && r.border.color.a >= 1 ? r.border.width / 2 : 0;
-    gr_rect inner = inset({{0, 0}, r.size}, amount);
+    bool has_border = r.props.has_border && r.props.border.width > 0;
+    if (has_border && p.masks_to_bounds)
+        ensure_clipped(n);
+    double amount = has_border && r.props.border.color.a >= 1 ? r.props.border.width / 2 : 0;
+    gr_rect inner = inset({{0, 0}, box_size(r)}, amount);
     double radius = p.corner_radius > 0 ? std::max(0.0, p.corner_radius - amount) : 0;
     bool rounded = radius > 0 && p.masked_corners && inner.size.width > 0 && inner.size.height > 0;
-    n.clipped.Clip(p.masks_to_bounds ? rounded_clip(inner, radius, p.masked_corners) : nullptr);
+    n.bounds_clip = p.masks_to_bounds ? rounded_clip(inner, radius, p.masked_corners) : nullptr;
     if (p.has_background)
     {
-        if (!n.background)
-        {
-            n.background = comp().CreateSpriteVisual();
-            n.clipped.Children().InsertAtBottom(n.background);
-        }
-        n.background.Brush(comp().CreateColorBrush(color(p.background)));
-        n.background.Offset({static_cast<float>(inner.origin.x), static_cast<float>(inner.origin.y), 0});
-        n.background.Size(vec(inner.size.width, inner.size.height));
-        n.background.Clip(rounded ? rounded_clip({{0, 0}, inner.size}, radius, p.masked_corners) : nullptr);
+        if (!n.background_brush)
+            n.background_brush = comp().CreateColorBrush();
+        n.background_brush.Color(color(p.background));
+        n.fill = {n.background_brush, inner,
+                  rounded ? rounded_clip({{0, 0}, inner.size}, radius, p.masked_corners) : nullptr};
     }
-    else if (n.background)
-    {
-        detach(n.background);
-        n.background = nullptr;
-    }
+    else
+        n.fill = {};
     if (has_border)
     {
         if (!n.border_visual)
@@ -446,15 +556,15 @@ void Backend::decoration(Node &n, gr_resolved const &r)
             n.body.Children().InsertAtTop(n.border_visual);
         }
         auto b = gr_path_builder_new();
-        gr_path_builder_add_rounded_rect(b, {{0, 0}, r.size}, p.corner_radius, p.masked_corners);
-        gr_path_builder_add_rounded_rect(b, inset({{0, 0}, r.size}, r.border.width),
-                                         std::max(0.0, p.corner_radius - r.border.width), p.masked_corners);
+        gr_path_builder_add_rounded_rect(b, {{0, 0}, box_size(r)}, p.corner_radius, p.masked_corners);
+        gr_path_builder_add_rounded_rect(b, inset({{0, 0}, box_size(r)}, r.props.border.width),
+                                         std::max(0.0, p.corner_radius - r.props.border.width), p.masked_corners);
         path_owner ring(gr_path_builder_finish(b), gr_path_unref);
         gr_path_builder_unref(b);
         n.border_shape.Geometry(
             comp().CreatePathGeometry(composition_path(ctx.factory.get(), ring.get(), GR_FILL_EVEN_ODD)));
-        n.border_shape.FillBrush(comp().CreateColorBrush(color(r.border.color)));
-        n.border_visual.Size(vec(r.size.width, r.size.height));
+        n.border_shape.FillBrush(comp().CreateColorBrush(color(r.props.border.color)));
+        n.border_visual.Size(vec(box_size(r).width, box_size(r).height));
     }
     else if (n.border_visual)
     {
@@ -464,18 +574,77 @@ void Backend::decoration(Node &n, gr_resolved const &r)
     }
 }
 
-void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offset)
+static bool at_origin(gr_rect r)
+{
+    return r.origin.x == 0 && r.origin.y == 0;
+}
+
+/* The body's brush paints below its children, so it takes the background when the background starts at the box's
+ * corner and its rounding is the body's clip (masking to bounds, or nothing else to clip), or else the content when
+ * there is no background. Whatever it cannot take gets a sprite. */
+void Backend::paint(Node &n)
+{
+    bool alone = n.children.empty() && !n.art.brush && !n.shape;
+    bool fill_own = n.fill.brush && !n.clipped && at_origin(n.fill.rect) && (!n.fill.clip || n.bounds_clip || alone);
+    bool art_own = n.art.brush && !n.fill.brush && !n.clipped && at_origin(n.art.rect);
+    Fill const *own = fill_own ? &n.fill : art_own ? &n.art : nullptr;
+    n.body.Brush(own ? own->brush : nullptr);
+    n.body.Size(own ? vec(own->rect.size.width, own->rect.size.height) : vec(0, 0));
+    if (n.clipped)
+        n.clipped.Clip(n.bounds_clip);
+    if (n.bounds_clip && !n.clipped)
+        n.body.Clip(n.bounds_clip);
+    else if (fill_own && n.fill.clip)
+        n.body.Clip(n.fill.clip);
+    else
+        n.body.Clip(nullptr);
+    if (n.fill.brush && !fill_own)
+    {
+        if (!n.background)
+        {
+            n.background = comp().CreateSpriteVisual();
+            n.paint_parent().Children().InsertAtBottom(n.background);
+        }
+        n.background.Brush(n.fill.brush);
+        n.background.Offset({static_cast<float>(n.fill.rect.origin.x), static_cast<float>(n.fill.rect.origin.y), 0});
+        n.background.Size(vec(n.fill.rect.size.width, n.fill.rect.size.height));
+        n.background.Clip(n.fill.clip);
+    }
+    else if (n.background)
+    {
+        detach(n.background);
+        n.background = nullptr;
+    }
+    if (n.art.brush && !art_own)
+    {
+        if (!n.sprite)
+        {
+            n.sprite = comp().CreateSpriteVisual();
+            insert_content(n, n.sprite);
+        }
+        n.sprite.Brush(n.art.brush);
+        n.sprite.Offset({static_cast<float>(n.art.rect.origin.x), static_cast<float>(n.art.rect.origin.y), 0});
+        n.sprite.Size(vec(n.art.rect.size.width, n.art.rect.size.height));
+    }
+    else if (n.sprite)
+    {
+        detach(n.sprite);
+        n.sprite = nullptr;
+    }
+}
+
+/* Rasterizes the outline into the DropShadow's mask once per outline and scale. */
+void Backend::raster_shadow(Node &n)
 {
     auto &p = *n.shadow;
-    if (p.valid && p.scale == scale && p.offset.x == offset.x && p.offset.y == offset.y && same_shadow(p.shape, shape))
+    if (p.scale == scale)
         return;
-    path_owner outline(gr_shadow_shape_new_path(&shape, offset), gr_path_unref);
-    auto bbox = control_bounds(outline.get());
+    p.scale = scale;
+    auto bbox = p.outline ? control_bounds(p.outline) : std::nullopt;
     if (!bbox)
     {
         p.sprite.Size({0, 0});
         p.area = {};
-        p.remember(shape, offset, scale);
         return;
     }
     auto area = inset(*bbox, -1);
@@ -493,7 +662,7 @@ void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offs
                  desc.kind = GR_PAINT_SOLID;
                  desc.value.solid = {1, 1, 1, 1};
                  auto white = gr_paint_new(&desc);
-                 gr_canvas_fill_path(c, outline.get(), GR_FILL_NONZERO, white);
+                 gr_canvas_fill_path(c, p.outline, GR_FILL_NONZERO, white);
                  gr_paint_unref(white);
                  list_owner list(gr_canvas_finish(c), gr_display_list_unref);
                  gr_canvas_unref(c);
@@ -506,12 +675,11 @@ void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offs
     p.sprite.Size(vec(w / scale, h / scale));
     p.area = {area.origin, {w / scale, h / scale}};
     p.surface = surface;
-    p.remember(shape, offset, scale);
 }
 
 void Backend::shadow(Node &n, gr_resolved const &r)
 {
-    if (!r.props.has_shadow || !r.has_shadow)
+    if (!r.props.has_shadow)
     {
         if (n.shadow)
         {
@@ -522,6 +690,7 @@ void Backend::shadow(Node &n, gr_resolved const &r)
     }
     if (!n.shadow)
     {
+        ensure_outer(n);
         n.shadow = std::make_unique<ShadowParts>();
         n.shadow->sprite = comp().CreateSpriteVisual();
         n.shadow->drop = comp().CreateDropShadow();
@@ -537,35 +706,23 @@ void Backend::shadow(Node &n, gr_resolved const &r)
     n.shadow->drop.BlurRadius(static_cast<float>(s.blur_sigma * 3));
     n.shadow->cast = s.offset;
     n.shadow->bleed = s.blur_sigma * 3;
-    raster_shadow(n, r.shadow_shape, r.bounds_offset);
+    auto key = shadow_key(r);
+    if (!n.shadow->keyed || !same_key(key, n.shadow->key))
+        n.shadow->remember(key, gr_resolved_new_shadow_path(&r));
+    raster_shadow(n);
 }
 
-void Backend::apply_mask(gr_layer *id, gr_resolved const &r)
+void Backend::apply_mask(gr_layer *id, Node &n, gr_resolved const &r)
 {
-    auto &n = node(id);
-    if (n.mask == r.mask)
-        return;
-    if (n.mask)
-    {
-        auto it = nodes.find(n.mask);
-        if (it != nodes.end())
-        {
-            it->second->mask_owner = nullptr;
-            detach(it->second->outer);
-        }
-    }
-    n.mask = r.mask;
-    if (!r.mask)
+    auto &p = r.props;
+    if (!p.has_mask)
     {
         unmask(n);
         return;
     }
-    clear_mask_owner(r.mask);
-    auto &mask = node(r.mask);
-    mask.parent = nullptr;
-    mask.mask_owner = id;
     if (!n.masking)
     {
+        ensure_outer(n);
         n.masking = std::make_unique<Masking>();
         auto &m = *n.masking;
         m.host = comp().CreateContainerVisual();
@@ -582,8 +739,34 @@ void Backend::apply_mask(gr_layer *id, gr_resolved const &r)
         n.group().Children().InsertAtTop(m.layer);
         effects.insert(id);
     }
-    n.masking->host.Children().RemoveAll();
-    n.masking->host.Children().InsertAtTop(mask.outer);
+    auto &m = *n.masking;
+    m.host.Children().RemoveAll();
+    if (p.mask.kind == GR_MASK_PATH)
+    {
+        auto bounds = control_bounds(p.mask.value.path.path);
+        auto e = bounds ? inset(*bounds, -1) : gr_rect{};
+        auto shape = comp().CreateSpriteShape(comp().CreatePathGeometry(
+            composition_path(ctx.factory.get(), p.mask.value.path.path, p.mask.value.path.rule)));
+        shape.FillBrush(comp().CreateColorBrush(color({1, 1, 1, 1})));
+        auto container = comp().CreateContainerShape();
+        container.Shapes().Append(shape);
+        container.Offset(vec(-e.origin.x, -e.origin.y));
+        auto visual = comp().CreateShapeVisual();
+        visual.Shapes().Append(container);
+        visual.Offset({static_cast<float>(e.origin.x), static_cast<float>(e.origin.y), 0});
+        visual.Size(vec(e.size.width, e.size.height));
+        m.host.Children().InsertAtTop(visual);
+        m.area = {{e.origin.x + local_offset(r).x, e.origin.y + local_offset(r).y}, e.size};
+    }
+    else
+    {
+        auto sprite = comp().CreateSpriteVisual();
+        sprite.Brush(paint_brush(p.mask.value.gradient));
+        sprite.Offset({static_cast<float>(-local_offset(r).x), static_cast<float>(-local_offset(r).y), 0});
+        sprite.Size(vec(box_size(r).width, box_size(r).height));
+        m.host.Children().InsertAtTop(sprite);
+        m.area = {{0, 0}, box_size(r)};
+    }
 }
 
 void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &r, bool changed)
@@ -607,11 +790,11 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
             p.container.Shapes().Append(p.fill);
             p.container.Shapes().Append(p.stroke);
             p.visual.Shapes().Append(p.container);
-            n.clipped.Children().InsertBelow(p.visual, n.sublayers);
+            insert_content(n, p.visual);
         }
         auto &p = *n.shape;
         p.fill.Geometry(comp().CreatePathGeometry(composition_path(ctx.factory.get(), s.path, s.fill_rule)));
-        p.fill.FillBrush(s.fill ? paint_brush(s.fill, false) : nullptr);
+        p.fill.FillBrush(s.fill ? paint_brush(s.fill) : nullptr);
         double margin = 1;
         if (s.stroke)
         {
@@ -620,7 +803,7 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
             geometry.TrimStart(static_cast<float>(s.stroke_start));
             geometry.TrimEnd(static_cast<float>(s.stroke_end));
             p.stroke.Geometry(geometry);
-            p.stroke.StrokeBrush(paint_brush(gr_stroke_get_paint(s.stroke), false));
+            p.stroke.StrokeBrush(paint_brush(gr_stroke_get_paint(s.stroke)));
             p.stroke.StrokeThickness(static_cast<float>(st.width));
             auto cap = st.cap == GR_CAP_ROUND    ? CompositionStrokeCap::Round
                        : st.cap == GR_CAP_SQUARE ? CompositionStrokeCap::Square
@@ -651,7 +834,7 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
     auto &p = *n.shape;
     auto e = p.extent;
     p.visual.Offset(
-        {static_cast<float>(r.bounds_offset.x + e.origin.x), static_cast<float>(r.bounds_offset.y + e.origin.y), 0});
+        {static_cast<float>(local_offset(r).x + e.origin.x), static_cast<float>(local_offset(r).y + e.origin.y), 0});
     p.visual.Size(vec(e.size.width, e.size.height));
     p.container.Offset(vec(-e.origin.x, -e.origin.y));
 }
@@ -689,7 +872,7 @@ void Backend::drawing(gr_layer *id, gr_resolved const &r)
     if (n.drawing && n.drawing->version == version && same_rect(n.drawing->bounds, info.bounds) &&
         n.drawing->scale == scale)
         return;
-    double width = std::ceil(r.size.width * scale), height = std::ceil(r.size.height * scale);
+    double width = std::ceil(box_size(r).width * scale), height = std::ceil(box_size(r).height * scale);
     gr_display_list *raw = nullptr;
     if (width >= 1 && height >= 1)
         gr_drawer_provider_draw(drawers, id, version, &info, &raw);
@@ -701,20 +884,21 @@ void Backend::drawing(gr_layer *id, gr_resolved const &r)
         return;
     }
     auto w = pixel_dimension(width), h = pixel_dimension(height);
-    auto surface =
-        n.drawing && n.drawing->width == w && n.drawing->height == h ? n.drawing->surface : ctx.surface(w, h);
+    bool reuse = n.drawing && n.drawing->width == w && n.drawing->height == h && n.art.brush;
+    auto surface = reuse ? n.drawing->surface : ctx.surface(w, h);
     ctx.draw(surface,
              [&](ID2D1DeviceContext *dc, POINT at)
              {
                  replay(dc, ctx.factory.get(), list.get(),
-                        {scale, 0, 0, scale, r.bounds_offset.x * scale + at.x, r.bounds_offset.y * scale + at.y});
+                        {scale, 0, 0, scale, local_offset(r).x * scale + at.x, local_offset(r).y * scale + at.y});
              });
-    auto sprite = content_sprite(n);
-    auto brush = comp().CreateSurfaceBrush(surface);
-    brush.Stretch(CompositionStretch::Fill);
-    sprite.Brush(brush);
-    sprite.Offset({0, 0, 0});
-    sprite.Size(vec(w / scale, h / scale));
+    if (!reuse)
+    {
+        auto brush = comp().CreateSurfaceBrush(surface);
+        brush.Stretch(CompositionStretch::Fill);
+        n.art.brush = brush;
+    }
+    n.art.rect = {{0, 0}, {w / scale, h / scale}};
     n.drawing = std::make_unique<Drawing>(Drawing{version, info.bounds, scale, w, h, surface});
 }
 
@@ -722,6 +906,8 @@ void Backend::content(gr_layer *id, gr_resolved const &r, bool changed)
 {
     auto &n = node(id);
     auto const &c = r.content;
+    if (c.kind != GR_CONTENT_SHAPE)
+        clear_shape(n);
     auto image = c.kind == GR_CONTENT_IMAGE ? c.value.image.image : nullptr;
     uint64_t wanted = image ? gr_image_get_id(image) : 0;
     if (n.image != wanted)
@@ -733,11 +919,10 @@ void Backend::content(gr_layer *id, gr_resolved const &r, bool changed)
         {
             auto surface = acquire_image(image);
             n.image = wanted;
-            auto sprite = content_sprite(n);
             auto brush = comp().CreateSurfaceBrush(surface);
             brush.Stretch(CompositionStretch::Fill);
             brush.BitmapInterpolationMode(CompositionBitmapInterpolationMode::Linear);
-            sprite.Brush(brush);
+            n.art.brush = brush;
         }
     }
     if (c.kind != GR_CONTENT_DRAWN)
@@ -748,25 +933,18 @@ void Backend::content(gr_layer *id, gr_resolved const &r, bool changed)
             clear_content(n);
             break;
         case GR_CONTENT_IMAGE:
-        {
-            auto s = content_sprite(n);
-            s.Offset(
-                {static_cast<float>(c.value.image.rect.origin.x), static_cast<float>(c.value.image.rect.origin.y), 0});
-            s.Size(vec(c.value.image.rect.size.width, c.value.image.rect.size.height));
+            n.art.rect = c.value.image.rect;
             break;
-        }
         case GR_CONTENT_DRAWN:
             drawing(id, r);
             break;
         case GR_CONTENT_GRADIENT:
-        {
-            auto s = content_sprite(n);
-            if (changed)
-                s.Brush(paint_brush(c.value.gradient, true));
-            s.Size(vec(r.size.width, r.size.height));
+            if (changed || !n.art.brush)
+                n.art.brush = paint_brush(c.value.gradient);
+            n.art.rect = {{0, 0}, box_size(r)};
             break;
-        }
         case GR_CONTENT_SHAPE:
+            n.art = {};
             update_shape(n, c.value.shape, r, changed);
             break;
     }
@@ -790,6 +968,7 @@ void Backend::apply_blur(gr_layer *id, double sigma)
     }
     if (!n.blurring)
     {
+        ensure_outer(n);
         if (!blur_factory)
             blur_factory = comp().CreateEffectFactory(gaussian_blur(), std::vector<hstring>{L"Blur.BlurAmount"});
         auto b = std::make_unique<Blurring>();
@@ -815,8 +994,7 @@ double Backend::effective_scale(gr_layer *id)
     {
         auto &n = *it->second;
         factor *= min_scale(n.transform);
-        auto up = n.parent ? n.parent : n.mask_owner;
-        it = up ? nodes.find(up) : nodes.end();
+        it = n.parent ? nodes.find(n.parent) : nodes.end();
     }
     return std::max(factor, 1e-3);
 }
@@ -838,11 +1016,8 @@ Measured const &Backend::measure(gr_layer *id, std::unordered_map<gr_layer *, Me
     }
     if (n.clips)
         m.body.intersect(bounds);
-    if (n.mask)
-    {
-        auto &mask = node(n.mask);
-        m.body.intersect(mask.hidden ? Extent{} : measure(n.mask, memo).all.mapped(mask.transform, n.bounds_offset));
-    }
+    if (n.masking)
+        m.body.intersect(extent_of(n.masking->area));
     m.all = m.body;
     if (n.shadow)
     {
@@ -894,30 +1069,42 @@ void Backend::update(gr_layer_update const &u)
     auto &n = node(u.layer);
     auto &r = u.resolved;
     auto bits = u.changed;
+    /* A geometry change that only moves the box (same size and bounds origin, same scale) touches the transform. */
+    bool box = !n.updated || rescaled;
+    n.updated = true;
     if (bits & GR_DIRTY_GEOMETRY)
     {
-        n.transform = u.layer == root ? gr_affine{1, 0, 0, 1, 0, 0} : r.transform;
-        n.size = r.size;
-        n.bounds_offset = r.bounds_offset;
-        n.outer.TransformMatrix(matrix4(n.transform));
-        n.sublayers.Offset({static_cast<float>(r.bounds_offset.x), static_cast<float>(r.bounds_offset.y), 0});
+        auto size = box_size(r);
+        auto offset = local_offset(r);
+        box = box || size.width != n.size.width || size.height != n.size.height || offset.x != n.bounds_offset.x ||
+              offset.y != n.bounds_offset.y;
+        n.transform = r.transform;
+        n.size = size;
+        n.bounds_offset = offset;
+        n.top().TransformMatrix(matrix4(n.transform));
+        if (offset.x != 0 || offset.y != 0)
+            ensure_sublayers(u.layer, n);
+        if (n.sublayers)
+            n.sublayers.Offset({static_cast<float>(offset.x), static_cast<float>(offset.y), 0});
     }
     if (bits & GR_DIRTY_APPEARANCE)
     {
         n.hidden = r.props.hidden;
         n.clips = r.props.masks_to_bounds;
-        n.outer.Opacity(r.props.opacity);
-        n.outer.IsVisible(!r.props.hidden);
+        n.opacity = r.props.opacity;
+        n.top().Opacity(n.opacity);
+        n.top().IsVisible(!n.hidden);
         if (n.blur != r.props.blur_sigma)
             apply_blur(u.layer, r.props.blur_sigma);
     }
-    if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_APPEARANCE))
+    bool geometry = (bits & GR_DIRTY_GEOMETRY) && box;
+    if (geometry || (bits & GR_DIRTY_APPEARANCE))
         decoration(n, r);
-    if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW))
+    if (geometry || (bits & GR_DIRTY_SHADOW))
         shadow(n, r);
-    if (bits & GR_DIRTY_MASK)
-        apply_mask(u.layer, r);
-    if (bits & (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT))
+    if (geometry || (bits & GR_DIRTY_MASK))
+        apply_mask(u.layer, n, r);
+    if (geometry || (bits & GR_DIRTY_CONTENT))
     {
         content(u.layer, r, (bits & GR_DIRTY_CONTENT) != 0);
         auto const &c = r.content;
@@ -926,9 +1113,11 @@ void Backend::update(gr_layer_update const &u)
             n.content_box = c.value.image.rect;
         else if (c.kind == GR_CONTENT_SHAPE && n.shape)
             n.content_box = {
-                {n.shape->extent.origin.x + r.bounds_offset.x, n.shape->extent.origin.y + r.bounds_offset.y},
+                {n.shape->extent.origin.x + local_offset(r).x, n.shape->extent.origin.y + local_offset(r).y},
                 n.shape->extent.size};
     }
+    if (geometry || (bits & (GR_DIRTY_APPEARANCE | GR_DIRTY_CONTENT)))
+        paint(n);
 }
 
 void Backend::release(gr_layer *id)
@@ -939,26 +1128,16 @@ void Backend::release(gr_layer *id)
     auto n = std::move(it->second);
     nodes.erase(it);
     effects.erase(id);
-    detach(n->outer);
+    detach(n->top());
     if (n->image)
         release_image(n->image);
-    if (auto owner = nodes.find(n->mask_owner); owner != nodes.end() && owner->second->mask == id)
-    {
-        owner->second->mask = nullptr;
-        unmask(*owner->second);
-    }
-    if (auto mask = nodes.find(n->mask); mask != nodes.end())
-    {
-        mask->second->mask_owner = nullptr;
-        detach(mask->second->outer);
-    }
     if (auto parent = nodes.find(n->parent); parent != nodes.end())
         std::erase(parent->second->children, id);
     for (auto c : n->children)
         if (auto child = nodes.find(c); child != nodes.end() && child->second->parent == id)
         {
             child->second->parent = nullptr;
-            detach(child->second->outer);
+            detach(child->second->top());
         }
 }
 
@@ -968,24 +1147,19 @@ void Backend::apply(gr_commit_batch const &b)
     drawers = gr_drawer_provider_ref(b.drawers);
     bool scale_changed = scale != b.backing_scale;
     scale = b.backing_scale;
+    rescaled = scale_changed;
     if (scale_changed)
         scaled.Scale({static_cast<float>(scale), static_cast<float>(scale), 1});
     for (size_t i = 0; i < b.realized.count; ++i)
     {
         auto n = std::make_unique<Node>();
-        n->outer = comp().CreateContainerVisual();
-        n->body = comp().CreateContainerVisual();
-        n->clipped = comp().CreateContainerVisual();
-        n->sublayers = comp().CreateContainerVisual();
-        n->clipped.Children().InsertAtTop(n->sublayers);
-        n->body.Children().InsertAtTop(n->clipped);
-        n->outer.Children().InsertAtTop(n->body);
+        n->body = comp().CreateSpriteVisual();
         nodes.emplace(b.realized.data[i].layer, std::move(n));
     }
     if (b.root)
     {
         root = b.root;
-        scaled.Children().InsertAtTop(node(root).outer);
+        scaled.Children().InsertAtTop(node(root).top());
     }
     for (size_t i = 0; i < b.updates.count; ++i)
         try
@@ -1008,7 +1182,7 @@ void Backend::apply(gr_commit_batch const &b)
             if (!found && node(id).parent == u.parent)
             {
                 node(id).parent = nullptr;
-                detach(node(id).outer);
+                detach(node(id).top());
             }
         }
     }
@@ -1018,7 +1192,6 @@ void Backend::apply(gr_commit_batch const &b)
         for (size_t j = 0; j < u.children.count; ++j)
         {
             auto id = u.children.data[j];
-            clear_mask_owner(id);
             auto &child = node(id);
             if (child.parent && child.parent != u.parent)
             {
@@ -1032,12 +1205,12 @@ void Backend::apply(gr_commit_batch const &b)
         parent.children.clear();
         for (size_t j = 0; j < u.children.count; ++j)
             parent.children.push_back(u.children.data[j]);
-        parent.sublayers.Children().RemoveAll();
+        /* The host may also hold the parent's visuals, so only sublayers are taken out and put back in order. */
         for (auto id : parent.children)
-        {
-            detach(node(id).outer);
-            parent.sublayers.Children().InsertAtTop(node(id).outer);
-        }
+            detach(node(id).top());
+        for (auto id : parent.children)
+            insert_child(parent, node(id).top());
+        paint(parent);
     }
     for (size_t i = 0; i < b.released.count; ++i)
         release(b.released.data[i]);
@@ -1045,8 +1218,8 @@ void Backend::apply(gr_commit_batch const &b)
         for (auto &entry : nodes)
         {
             auto &n = *entry.second;
-            if (n.shadow && n.shadow->valid && n.shadow->scale != scale)
-                raster_shadow(n, n.shadow->shape, n.shadow->offset);
+            if (n.shadow)
+                raster_shadow(n);
             if (n.blurring)
                 apply_blur(entry.first, n.blur);
         }

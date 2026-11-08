@@ -24,7 +24,7 @@ enum
     GR_DIRTY_CHILDREN = 32u
 };
 
-/** Read-only raw property snapshots in commit updates. Pointer members borrow
+/** Read-only property snapshots in commit updates. Pointer members borrow
  * resources from the batch; copy values and ref resources to retain them.
  * Applications change individual properties through the layer API. */
 typedef struct
@@ -33,15 +33,13 @@ typedef struct
     gr_point position, anchor_point;
     gr_affine transform;
     float opacity;
-    bool hidden, masks_to_bounds;
-    bool has_background;
+    gr_corners masked_corners;
+    bool hidden, masks_to_bounds, has_background, has_border, has_shadow, has_mask;
     gr_color background;
     double corner_radius;
-    gr_corners masked_corners;
-    bool has_border;
     gr_border border;
-    bool has_shadow;
     gr_shadow shadow;
+    gr_mask mask;
     double blur_sigma;
 } gr_layer_props;
 
@@ -81,41 +79,14 @@ typedef struct
     } value;
 } gr_resolved_content;
 
-typedef enum
-{
-    GR_SHADOW_ROUNDED_RECT,
-    GR_SHADOW_PATH
-} gr_shadow_shape_kind;
-
+/** A layer as backends apply it: its properties plus what core derives from them, so every backend interprets the
+ * model identically. Box space runs from (0, 0) to props.bounds.size and holds the background, border, image
+ * placement, clip and default shadow. Local space is box space offset by props.bounds.origin and holds sublayers,
+ * paths, drawings, path masks and custom shadows. Pointer members borrow from the batch. */
 typedef struct
 {
-    gr_shadow_shape_kind kind;
-
-    union
-    {
-        struct
-        {
-            gr_rect rect;
-            double radius;
-            gr_corners corners;
-            double spread;
-        } rounded_rect;
-
-        gr_path *path; /**< Local coordinates; translate by bounds_offset for box space. */
-    } value;
-} gr_shadow_shape;
-
-typedef struct
-{
-    gr_layer_props props;
-    gr_affine transform; /**< Snapped box-to-parent transform; root identity. */
-    gr_point snap_offset, bounds_offset;
-    gr_size size; /**< Resolved size, not raw props.bounds.size. */
-    bool has_border;
-    gr_border border; /**< Snapped width. */
-    gr_layer *mask;   /**< Nullable. */
-    bool has_shadow;
-    gr_shadow_shape shadow_shape;
+    gr_layer_props props; /**< props.bounds and props.border.width are snapped to device pixels. */
+    gr_affine transform;  /**< Snapped box-to-parent-local transform; identity for the root. */
     gr_resolved_content content;
 } gr_resolved;
 
@@ -223,12 +194,14 @@ GR_API const gr_scene_host_vtable *gr_scene_host_get_vtable(const gr_scene_host 
 GR_API void *gr_scene_host_get_data(const gr_scene_host *host);
 
 /** Delivers event to the handler and returns whether it consumed it; event storage is borrowed for the call.
- * Returns false without delivery for non-interactive hosts, invalid events, a missing handler, FRAME events that
- * were not requested, and VIEWPORT/FOCUS events that repeat the current state, so platforms may report state
- * liberally. VIEWPORT and FOCUS update the state that gr_scene_host_get_viewport and gr_scene_host_has_focus return
- * even without a handler. FRAME clears the pending request before delivery, so the handler can request the next
- * one. Events dispatched while a handler runs (for example focus changes the platform sends synchronously) are
- * copied, delivered in order after it returns, and report false. Holds a host reference until delivery ends. */
+ * Events must be valid (finite values, known enums, in-range fields); builds without NDEBUG check this and drop
+ * invalid ones, release builds trust the backend. Returns false without delivery for non-interactive hosts, a
+ * missing handler, FRAME events that were not requested, and VIEWPORT/FOCUS events that repeat the current state,
+ * so platforms may report state liberally. VIEWPORT and FOCUS update the state that gr_scene_host_get_viewport and
+ * gr_scene_host_has_focus return even without a handler. FRAME clears the pending request before delivery, so the
+ * handler can request the next one. Events dispatched while a handler runs (for example focus changes the platform
+ * sends synchronously) are copied, delivered in order after it returns, and report false. Holds a host reference until
+ * delivery ends. */
 GR_API bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event);
 
 /** Returns whether a frame was requested and not yet delivered. */
@@ -258,8 +231,9 @@ GR_API gr_result gr_drawer_provider_draw(gr_drawer_provider *provider, gr_layer 
 /** Returns the resolved box in local coordinates and the supplied positive raster scale. */
 GR_API gr_draw_info gr_resolved_get_draw_info(const gr_resolved *resolved, double scale);
 
-/** Owned path, grown rounded rect or translated custom path, in box space. */
-GR_API gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point bounds_offset);
+/** Returns an owned box-space outline of the shadow: the rounded box, or the custom path moved out of local space.
+ * Returns NULL without a shadow. */
+GR_API gr_path *gr_resolved_new_shadow_path(const gr_resolved *resolved);
 
 /* DisplayList replay */
 

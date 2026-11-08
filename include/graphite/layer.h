@@ -31,16 +31,39 @@ typedef struct
 {
     gr_color color;
     gr_point offset;
-    double blur_sigma, spread;
-    gr_path *path; /**< Optional, local-space custom shadow; spread ignored if set. */
+    double blur_sigma;
+    gr_path *path; /**< Optional, local-space custom shadow; otherwise the rounded box casts it. */
 } gr_shadow;
+
+typedef enum
+{
+    GR_MASK_PATH,    /**< Opaque inside the path, transparent outside. */
+    GR_MASK_GRADIENT /**< The gradient's alpha inside the bounds, transparent outside. */
+} gr_mask_kind;
+
+/** An alpha mask over the layer's background, border, contents and sublayers; the shadow is not masked. */
+typedef struct
+{
+    gr_mask_kind kind;
+
+    union
+    {
+        struct
+        {
+            gr_path *path; /**< Local space. */
+            gr_fill_rule rule;
+        } path;
+
+        gr_paint *gradient; /**< LINEAR/RADIAL paint in unit coordinates of the bounds; colors are ignored. */
+    } value;
+} gr_mask;
 
 /* Layer lifetime */
 
 /** Creates an owned detached layer of a fixed kind in a live Scene.
  * Returns NULL for an invalid kind. Defaults: zero bounds/position, anchor
  * (0.5,0.5), identity transform, opacity 1, visible, no clip/background/border/
- * shadow/blur, radius 0 and all corners. Shapes have no path/fill/stroke, nonzero
+ * shadow/mask/blur, radius 0 and all corners. Shapes have no path/fill/stroke, nonzero
  * fill rule and stroke range [0,1]. Content gravity defaults to resize. */
 GR_API gr_layer *gr_layer_new(gr_scene *scene, gr_layer_kind kind);
 
@@ -158,7 +181,15 @@ GR_API bool gr_layer_get_shadow(const gr_layer *layer, gr_shadow *out);
  * releasing the previous one. */
 GR_API gr_result gr_layer_set_shadow(gr_layer *layer, const gr_shadow *shadow);
 
-/* Hierarchy and masks */
+/** Copies the optional mask into required out; returns true if present. If absent (including an inert layer),
+ * returns false and zeroes out. Resources in the copied value are borrowed until mask replacement or Scene teardown. */
+GR_API bool gr_layer_get_mask(const gr_layer *layer, gr_mask *out);
+
+/** Copies mask, or clears it with NULL. Rejects an unknown kind, a missing path, an invalid fill rule or a missing or
+ * solid gradient. Refs the new resource before releasing the previous one. */
+GR_API gr_result gr_layer_set_mask(gr_layer *layer, const gr_mask *mask);
+
+/* Hierarchy */
 
 /** Returns the number of ordered children, or zero for an inert layer. */
 GR_API size_t gr_layer_get_child_count(const gr_layer *layer);
@@ -166,24 +197,17 @@ GR_API size_t gr_layer_get_child_count(const gr_layer *layer);
 /** Returns a borrowed child, or NULL out of range; ref before retaining across hierarchy changes. */
 GR_API gr_layer *gr_layer_get_child(const gr_layer *layer, size_t index);
 
-/** Returns the borrowed sublayer parent, or NULL; mask ownership is not a sublayer parent. */
+/** Returns the borrowed parent, or NULL. */
 GR_API gr_layer *gr_layer_get_parent(const gr_layer *layer);
 
-/** Appends/reparents child and acquires parent ownership; rejects cross-Scene, cyclic or illegal root/mask
- * attachment. */
+/** Appends/reparents child and acquires parent ownership; rejects cross-Scene, cyclic or root attachment. */
 GR_API gr_result gr_layer_add_child(gr_layer *parent, gr_layer *child);
 
 /** index is interpreted after removing child from its old position; clamp to count. */
 GR_API gr_result gr_layer_insert_child(gr_layer *parent, gr_layer *child, size_t index);
 
-/** Detaches child or mask ownership; a detached layer is unchanged. Caller must hold a valid reference. */
+/** Detaches the layer from its parent; a detached layer is unchanged. Caller must hold a valid reference. */
 GR_API gr_result gr_layer_remove_from_parent(gr_layer *layer);
-
-/** Returns the borrowed mask, or NULL; valid until replacement, removal or Scene teardown. */
-GR_API gr_layer *gr_layer_get_mask(const gr_layer *layer);
-
-/** Refs mask, or clears with NULL; rejects cross-Scene, cyclic, parented or nested masks without changing state. */
-GR_API gr_result gr_layer_set_mask(gr_layer *layer, gr_layer *mask);
 
 /* Content layers */
 
@@ -252,13 +276,15 @@ GR_API gr_result gr_shape_layer_set_path(gr_layer *layer, gr_path *path);
 /** Returns the borrowed fill, or NULL when unset or inert. */
 GR_API gr_paint *gr_shape_layer_get_fill(const gr_layer *layer);
 
-/** Sets fill, acquiring its reference before releasing the old value; NULL clears. */
+/** Sets a solid fill, acquiring its reference before releasing the old value; NULL clears. Gradients return
+ * ARGUMENT: mask a gradient layer with the path instead. */
 GR_API gr_result gr_shape_layer_set_fill(gr_layer *layer, gr_paint *fill);
 
 /** Returns the borrowed stroke, or NULL when unset or inert. */
 GR_API gr_stroke *gr_shape_layer_get_stroke(const gr_layer *layer);
 
-/** Sets stroke, acquiring its reference before releasing the old value; NULL clears. */
+/** Sets a stroke with a solid paint, acquiring its reference before releasing the old value; NULL clears. Gradient
+ * paints return ARGUMENT. */
 GR_API gr_result gr_shape_layer_set_stroke(gr_layer *layer, gr_stroke *stroke);
 
 /** Returns the fill rule; default is GR_FILL_NONZERO. */

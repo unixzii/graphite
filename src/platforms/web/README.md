@@ -8,11 +8,11 @@ measurements behind it.
 
 **Status: renders layers, drawings and text, and delivers events.** Layer
 geometry, opacity, visibility, background, corner radii, borders,
-`masks_to_bounds`, shadows, blur, and shape, gradient, image and drawn contents
-all render, and `gr_web_text_system_new` lays out and draws text. Hosts are
+`masks_to_bounds`, masks, shadows, blur, and shape, gradient, image and drawn
+contents all render, and `gr_web_text_system_new` lays out and draws text. Hosts are
 interactive: frames, viewport (size and `devicePixelRatio`), focus, mouse and
-pen pointers, wheel and keys, and cursors. Masks, text input (IME) and touch
-are not implemented yet. Every example runs in the browser.
+pen pointers, wheel and keys, and cursors. Text input (IME) and touch are not
+implemented yet. Every example runs in the browser.
 
 ## Implementation
 
@@ -74,8 +74,8 @@ ctest --test-dir ../graphite-wasm --output-on-failure
   because clang-format rewrites JavaScript written inline in C.
 - `graphite.conformance.web` (`conformance/web.c` and `web.js`) runs the shared
   conformance suite in headless Chromium through the same runner; captures go
-  to `target/conformance/web`. Mask cases and the text thread-safety case are
-  skipped as unsupported. Pass case-name filters after the program:
+  to `target/conformance/web`. The text thread-safety case is skipped as
+  unsupported. Pass case-name filters after the program:
   `node tests/web/run.mjs ../graphite-wasm/conformance/graphite_web_conformance.js shadow`.
 - `graphite.web` also drives the interactive host with synthetic DOM events
   (pointer, wheel, key, focus), checks that each animation frame delivers its

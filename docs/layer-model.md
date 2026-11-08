@@ -44,9 +44,7 @@ and border width to the backing-scale grid; see [architecture](architecture.md).
 
 Shadows escape the layer's own clip. Their shape is an explicit local-space path
 or rounded bounds, never the alpha of contents. The entire shape casts a shadow,
-including beneath transparent backgrounds. Blur uses Gaussian sigma. Spread
-expands/shrinks default bounds, growing rounded corners but preserving square
-ones; custom paths ignore spread.
+including beneath transparent backgrounds. Blur uses Gaussian sigma.
 
 `gr_layer_set_blur` blurs the layer's whole rendering with a Gaussian σ in
 points: shadow, background, contents, sublayers, border, mask and clip. The mask
@@ -58,10 +56,19 @@ screen space, unaffected by scale transforms.
 
 ## Masks
 
-`gr_layer_set_mask` uses the mask subtree's alpha, positioned in the owner's local
-space. Masks cannot already have a parent, cannot themselves have a mask, and
-cannot be nested or create cycles. Invalid relations return an error without
-changing state. A mask can be detached and subsequently used as a child.
+A mask is a layer property, not another layer. `gr_layer_set_mask` takes a
+`gr_mask` of one of two kinds:
+
+- `GR_MASK_PATH`: opaque inside a path in local space (with a fill rule),
+  transparent outside it, so sublayers past the bounds stay visible inside it.
+- `GR_MASK_GRADIENT`: the alpha of a linear or radial gradient in unit
+  coordinates of the bounds, like a gradient layer's; transparent outside the
+  bounds. Colors are ignored. Fading a scrolling list's edges is the typical use.
+
+The mask covers the background, border, contents and sublayers but not the
+shadow. Every backend maps both kinds to native operations: a `CAShapeLayer`
+or `CAGradientLayer` mask, a GSK mask node, a LayerVisual alpha-mask effect,
+and CSS `clip-path` or `mask-image`.
 
 ## Contents and Canvas
 

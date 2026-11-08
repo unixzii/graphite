@@ -30,8 +30,26 @@ struct recorder
     void (*during_apply)(recorder *, const gr_commit_batch *);
 };
 
+static void mask_refs(const gr_layer_props *p, bool acquire)
+{
+    if (!p->has_mask)
+        return;
+    if (p->mask.kind == GR_MASK_PATH)
+    {
+        if (acquire)
+            gr_path_ref(p->mask.value.path.path);
+        else
+            gr_path_unref(p->mask.value.path.path);
+    }
+    else if (acquire)
+        gr_paint_ref(p->mask.value.gradient);
+    else
+        gr_paint_unref(p->mask.value.gradient);
+}
+
 static void snapshot_ref(gr_resolved *r)
 {
+    mask_refs(&r->props, true);
     if (r->props.has_shadow)
         gr_path_ref(r->props.shadow.path);
     switch (r->content.kind)
@@ -57,6 +75,7 @@ static void clear_updates(recorder *r)
     for (size_t i = 0; i < r->update_count; ++i)
     {
         gr_resolved *v = &r->updates[i].resolved;
+        mask_refs(&v->props, false);
         if (v->props.has_shadow)
             gr_path_unref(v->props.shadow.path);
         switch (v->content.kind)
@@ -151,8 +170,6 @@ static void apply(void *userdata, const gr_commit_batch *b)
     {
         const gr_layer_update *u = &b->updates.data[i];
         CHECK(node(r, u->layer) && !(u->changed & GR_DIRTY_CHILDREN));
-        if (u->resolved.mask)
-            CHECK(node(r, u->resolved.mask));
         r->updates[r->update_count] = *u;
         snapshot_ref(&r->updates[r->update_count++].resolved);
     }
@@ -188,6 +205,15 @@ static void init_recorder(recorder *r, gr_scene *scene)
     r->updates = calloc(LIMIT, sizeof(*r->updates));
     r->nodes = calloc(LIMIT, sizeof(*r->nodes));
     CHECK(r->updates && r->nodes);
+}
+
+static gr_path *unit_path(void)
+{
+    gr_path_builder *b = gr_path_builder_new();
+    OK(gr_path_builder_add_rect(b, (gr_rect){{0, 0}, {1, 1}}));
+    gr_path *path = gr_path_builder_finish(b);
+    gr_path_builder_unref(b);
+    return path;
 }
 
 static gr_scene *new_scene(recorder *r)
@@ -262,7 +288,7 @@ static void tree(void)
     gr_scene *s = new_scene(&r), *other = gr_scene_new((gr_size){1, 1});
     gr_layer *root = gr_scene_get_root(s);
     gr_layer *a = gr_layer_new(s, GR_LAYER_CONTAINER), *b = gr_layer_new(s, GR_LAYER_CONTAINER);
-    gr_layer *c = gr_layer_new(s, GR_LAYER_CONTAINER), *mask = gr_layer_new(s, GR_LAYER_SHAPE);
+    gr_layer *c = gr_layer_new(s, GR_LAYER_CONTAINER);
     OK(gr_layer_add_child(root, a));
     OK(gr_layer_add_child(root, b));
     OK(gr_layer_add_child(a, c));
@@ -276,17 +302,6 @@ static void tree(void)
     CHECK(gr_layer_add_child(c, c) == GR_ERROR_CYCLE);
     CHECK(gr_layer_add_child(c, root) == GR_ERROR_STATE);
     CHECK(gr_layer_add_child(c, gr_scene_get_root(other)) == GR_ERROR_SCENE);
-    CHECK(gr_layer_set_mask(a, c) == GR_ERROR_STATE);
-    OK(gr_layer_set_mask(a, mask));
-    CHECK(gr_layer_get_parent(mask) == NULL && gr_layer_get_mask(a) == mask);
-    CHECK(gr_layer_add_child(root, mask) == GR_ERROR_STATE);
-    CHECK(gr_layer_set_mask(mask, c) == GR_ERROR_STATE);
-    OK(gr_scene_commit(s));
-    CHECK(node(&r, mask));
-    OK(gr_layer_remove_from_parent(mask));
-    CHECK(!gr_layer_get_mask(a));
-    OK(gr_layer_set_mask(a, mask));
-    gr_layer_unref(mask); /* Owner keeps mask alive. */
     gr_layer_unref(c);
     gr_layer_unref(a);
     gr_layer_unref(b);
@@ -431,7 +446,6 @@ static void geometry(void)
     gr_scene *s = new_scene(&r);
     gr_layer *l = gr_layer_new(s, GR_LAYER_CONTENT);
     OK(gr_layer_add_child(gr_scene_get_root(s), l));
-    OK(gr_scene_set_pixel_snapping(s, false));
     OK(gr_layer_set_bounds(l, (gr_rect){{3, 4}, {20, 10}}));
     OK(gr_layer_set_position(l, (gr_point){30, 40}));
     OK(gr_layer_set_transform(l, (gr_affine){2, 0, 0, 3, 1, 2}));
@@ -439,8 +453,8 @@ static void geometry(void)
     const gr_resolved *v = &update(&r, l)->resolved;
     CHECK_NEAR(v->transform.tx, 11);
     CHECK_NEAR(v->transform.ty, 27);
-    CHECK_NEAR(v->bounds_offset.x, -3);
-    CHECK_NEAR(v->bounds_offset.y, -4);
+    CHECK_NEAR(v->props.bounds.origin.x, 3);
+    CHECK_NEAR(v->props.bounds.origin.y, 4);
     OK(gr_layer_set_transform(l, (gr_affine){1, 0, 0, 1, 0, 0}));
     OK(gr_layer_set_frame(l, (gr_rect){{5, 6}, {11, 12}}));
     gr_rect frame = gr_layer_get_frame(l);
@@ -449,22 +463,21 @@ static void geometry(void)
     CHECK_NEAR(gr_layer_get_bounds(l).origin.x, 3);
     gr_border border = {0.3, {0, 0, 0, 1}};
     OK(gr_layer_set_border(l, &border));
-    gr_shadow shadow = {.color = {0, 0, 0, 1}, .blur_sigma = 2, .spread = 3};
+    gr_shadow shadow = {.color = {0, 0, 0, 1}, .blur_sigma = 2};
     OK(gr_layer_set_shadow(l, &shadow));
     OK(gr_layer_set_corner_radius(l, 2));
     OK(gr_layer_set_bounds(l, (gr_rect){{0.2, 0.2}, {10.2, 4.2}}));
-    OK(gr_scene_set_pixel_snapping(s, true));
     OK(gr_scene_set_backing_scale(s, 1.5));
     OK(gr_scene_commit(s));
     v = &update(&r, l)->resolved;
-    CHECK_NEAR(v->size.width, 10);
-    CHECK_NEAR(v->size.height, 4);
-    CHECK_NEAR(v->border.width, 2.0 / 3);
-    gr_path *outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
+    CHECK_NEAR(v->props.bounds.size.width, 10);
+    CHECK_NEAR(v->props.bounds.size.height, 4);
+    CHECK_NEAR(v->props.border.width, 2.0 / 3);
+    gr_path *outline = gr_resolved_new_shadow_path(v);
     CHECK(outline);
     gr_path_element_list el = gr_path_get_elements(outline);
     CHECK_NEAR(el.data[0].p[0].x, 2);
-    CHECK_NEAR(el.data[0].p[0].y, -3);
+    CHECK_NEAR(el.data[0].p[0].y, 0);
     gr_path_unref(outline);
     gr_path_element e = {GR_PATH_MOVE, {{4, 5}}};
     gr_path *path = gr_path_new((gr_path_element_list){&e, 1});
@@ -476,7 +489,7 @@ static void geometry(void)
     OK(gr_scene_commit(s));
     CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW));
     v = &update(&r, l)->resolved;
-    outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
+    outline = gr_resolved_new_shadow_path(v);
     el = gr_path_get_elements(outline);
     CHECK_NEAR(el.data[0].p[0].x, 4 - 4.0 / 3);
     CHECK_NEAR(el.data[0].p[0].y, 3);
@@ -529,6 +542,17 @@ static void property_dependencies(void)
     CHECK(!gr_scene_needs_commit(s));
     CHECK(gr_shape_layer_set_fill(l, p) == GR_ERROR_KIND);
     CHECK(gr_gradient_layer_set_gradient(gradient, p) == GR_ERROR_ARGUMENT);
+    gr_gradient_stop ramp[] = {{0, {0, 0, 0, 1}}, {1, {1, 1, 1, 1}}};
+    gr_paint_desc linear = {.kind = GR_PAINT_LINEAR};
+    linear.value.linear.end = (gr_point){1, 0};
+    linear.value.linear.stops = (gr_gradient_stop_list){ramp, 2};
+    gr_paint *ramp_paint = gr_paint_new(&linear);
+    gr_stroke *ramp_stroke = gr_stroke_new(ramp_paint, &style);
+    CHECK(gr_shape_layer_set_fill(shape, ramp_paint) == GR_ERROR_ARGUMENT);
+    CHECK(gr_shape_layer_set_stroke(shape, ramp_stroke) == GR_ERROR_ARGUMENT);
+    CHECK(gr_shape_layer_get_fill(shape) == p && !gr_scene_needs_commit(s));
+    gr_stroke_unref(ramp_stroke);
+    gr_paint_unref(ramp_paint);
     gr_paint_unref(p);
     gr_paint_unref(same);
     gr_stroke_unref(stroke);
@@ -546,14 +570,13 @@ static void property_dependencies(void)
     CHECK(update(&r, l)->changed == GR_DIRTY_APPEARANCE && update(&r, l)->resolved.props.blur_sigma == 3);
     OK(gr_layer_set_blur(l, 3));
     CHECK(!gr_scene_needs_commit(s) && gr_layer_get_blur(l) == 3);
-    OK(gr_scene_set_pixel_snapping(s, false));
-    OK(gr_scene_commit(s));
     OK(gr_scene_set_backing_scale(s, 2));
     OK(gr_scene_commit(s));
-    CHECK(update(&r, l)->changed == GR_DIRTY_CONTENT);
-    CHECK(update(&r, shape)->changed == GR_DIRTY_CONTENT);
-    CHECK(update(&r, gradient)->changed == GR_DIRTY_CONTENT);
-    CHECK(!update(&r, gr_scene_get_root(s)));
+    /* Scale changes re-snap geometry and redraw contents. */
+    CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW | GR_DIRTY_CONTENT));
+    CHECK(update(&r, shape)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
+    CHECK(update(&r, gradient)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT));
+    CHECK(update(&r, gr_scene_get_root(s))->changed == GR_DIRTY_GEOMETRY);
     gr_gradient_stop stops[] = {{0, {0, 0, 0, 1}}, {1, {1, 1, 1, 1}}};
     desc.kind = GR_PAINT_LINEAR;
     desc.value.linear.start = (gr_point){0, 0};
@@ -746,26 +769,37 @@ static void rejected_mutations_stay_clean(void)
     recorder r;
     gr_scene *s = new_scene(&r), *other = gr_scene_new((gr_size){1, 1});
     gr_layer *root = gr_scene_get_root(s), *a = gr_layer_new(s, GR_LAYER_CONTAINER);
-    gr_layer *child = gr_layer_new(s, GR_LAYER_CONTAINER), *mask = gr_layer_new(s, GR_LAYER_SHAPE);
+    gr_layer *child = gr_layer_new(s, GR_LAYER_CONTAINER);
+    gr_path *path = unit_path();
+    gr_mask mask = {.kind = GR_MASK_PATH, .value.path = {path, GR_FILL_NONZERO}}, out;
     OK(gr_layer_add_child(root, a));
     OK(gr_layer_add_child(a, child));
-    OK(gr_layer_set_mask(a, mask));
+    OK(gr_layer_set_mask(a, &mask));
     OK(gr_layer_set_position(a, (gr_point){12, 34}));
     OK(gr_scene_commit(s));
     size_t requests = r.requests, applies = r.applies;
     CHECK(gr_layer_add_child(child, a) == GR_ERROR_CYCLE);
     CHECK(gr_layer_add_child(gr_scene_get_root(other), child) == GR_ERROR_SCENE);
-    CHECK(gr_layer_add_child(root, mask) == GR_ERROR_STATE);
-    CHECK(gr_layer_set_mask(a, gr_scene_get_root(other)) == GR_ERROR_SCENE);
-    CHECK(gr_layer_set_mask(a, a) == GR_ERROR_CYCLE);
-    CHECK(gr_layer_set_mask(a, child) == GR_ERROR_STATE);
+    gr_mask bad = {.kind = GR_MASK_PATH, .value.path = {NULL, GR_FILL_NONZERO}};
+    CHECK(gr_layer_set_mask(a, &bad) == GR_ERROR_ARGUMENT);
+    bad.value.path.path = path;
+    bad.value.path.rule = (gr_fill_rule)7;
+    CHECK(gr_layer_set_mask(a, &bad) == GR_ERROR_ARGUMENT);
+    bad = (gr_mask){.kind = GR_MASK_GRADIENT};
+    CHECK(gr_layer_set_mask(a, &bad) == GR_ERROR_ARGUMENT);
+    gr_paint_desc solid = {.kind = GR_PAINT_SOLID, .value.solid = {1, 1, 1, 1}};
+    bad.value.gradient = gr_paint_new(&solid);
+    CHECK(gr_layer_set_mask(a, &bad) == GR_ERROR_ARGUMENT);
+    gr_paint_unref(bad.value.gradient);
+    bad.kind = (gr_mask_kind)9;
+    CHECK(gr_layer_set_mask(a, &bad) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_position(a, (gr_point){NAN, 0}) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_corner_radius(a, -1) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_blur(a, -1) == GR_ERROR_ARGUMENT && gr_layer_set_blur(a, INFINITY) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_set_masked_corners(a, (gr_corners)0x80) == GR_ERROR_ARGUMENT);
     CHECK(gr_scene_set_backing_scale(s, 0) == GR_ERROR_ARGUMENT);
     CHECK(gr_layer_get_parent(child) == a && gr_layer_get_parent(a) == root);
-    CHECK(gr_layer_get_child_count(a) == 1 && gr_layer_get_mask(a) == mask);
+    CHECK(gr_layer_get_child_count(a) == 1 && gr_layer_get_mask(a, &out) && out.value.path.path == path);
     CHECK(gr_layer_get_position(a).x == 12 && gr_layer_get_position(a).y == 34);
     CHECK(gr_layer_get_corner_radius(a) == 0 && gr_layer_get_masked_corners(a) == GR_CORNERS_ALL);
     CHECK(gr_layer_get_blur(a) == 0);
@@ -775,38 +809,62 @@ static void rejected_mutations_stay_clean(void)
     CHECK(r.applies == applies);
     gr_layer_unref(a);
     gr_layer_unref(child);
-    gr_layer_unref(mask);
+    gr_path_unref(path);
     gr_scene_unref(other);
     gr_scene_unref(s);
 }
 
-static void mask_replacement_lifetime(void)
+static gr_paint *fade(void)
+{
+    gr_gradient_stop stops[] = {{0, {1, 1, 1, 0}}, {1, {1, 1, 1, 1}}};
+    gr_paint_desc desc = {.kind = GR_PAINT_LINEAR};
+    desc.value.linear.end = (gr_point){0, 1};
+    desc.value.linear.stops = (gr_gradient_stop_list){stops, 2};
+    return gr_paint_new(&desc);
+}
+
+static void mask_property(void)
 {
     recorder r;
     gr_scene *s = new_scene(&r);
     gr_layer *owner = gr_layer_new(s, GR_LAYER_CONTAINER);
-    gr_layer *old = gr_layer_new(s, GR_LAYER_SHAPE), *replacement = gr_layer_new(s, GR_LAYER_SHAPE);
     OK(gr_layer_add_child(gr_scene_get_root(s), owner));
-    OK(gr_layer_set_mask(owner, old));
-    gr_layer_unref(old);
     OK(gr_scene_commit(s));
-    CHECK(update(&r, owner)->resolved.mask == gr_layer_get_mask(owner));
-    OK(gr_layer_set_mask(owner, replacement));
-    CHECK(gr_scene_get_layer_count(s) == 3);
-    gr_layer_unref(replacement);
+    gr_mask out = {.kind = GR_MASK_GRADIENT};
+    CHECK(!gr_layer_get_mask(owner, &out) && out.kind == GR_MASK_PATH && !out.value.path.path);
+    gr_path *path = unit_path();
+    gr_mask mask = {.kind = GR_MASK_PATH, .value.path = {path, GR_FILL_EVEN_ODD}};
+    OK(gr_layer_set_mask(owner, &mask));
+    gr_path_unref(path); /* The layer keeps the path alive. */
     OK(gr_scene_commit(s));
-    CHECK(r.realized == 1 && r.released == 1);
-    CHECK(update(&r, owner)->changed == GR_DIRTY_MASK);
-    CHECK(update(&r, owner)->resolved.mask == gr_layer_get_mask(owner));
-    CHECK(node(&r, gr_layer_get_mask(owner)));
-    OK(gr_layer_set_mask(owner, gr_layer_get_mask(owner)));
+    const gr_layer_props *p = &update(&r, owner)->resolved.props;
+    CHECK(update(&r, owner)->changed == GR_DIRTY_MASK && r.realized == 0);
+    CHECK(p->has_mask && p->mask.kind == GR_MASK_PATH && p->mask.value.path.path == path);
+    CHECK(p->mask.value.path.rule == GR_FILL_EVEN_ODD);
+    OK(gr_layer_set_mask(owner, &mask));
     CHECK(!gr_scene_needs_commit(s));
-    OK(gr_layer_set_mask(owner, NULL));
-    CHECK(gr_scene_get_layer_count(s) == 2);
+    gr_paint *a = fade(), *b = fade();
+    mask = (gr_mask){.kind = GR_MASK_GRADIENT, .value.gradient = a};
+    OK(gr_layer_set_mask(owner, &mask));
     OK(gr_scene_commit(s));
-    CHECK(r.realized == 0 && r.released == 1 && !update(&r, owner)->resolved.mask);
+    CHECK(update(&r, owner)->resolved.props.mask.value.gradient == a);
+    mask.value.gradient = b; /* Equal paints coalesce. */
+    OK(gr_layer_set_mask(owner, &mask));
+    CHECK(!gr_scene_needs_commit(s));
+    gr_paint_unref(a);
+    gr_paint_unref(b);
+    CHECK(gr_layer_get_mask(owner, &out) && out.kind == GR_MASK_GRADIENT);
+    OK(gr_layer_set_mask(owner, NULL));
+    OK(gr_scene_commit(s));
+    CHECK(update(&r, owner)->changed == GR_DIRTY_MASK && !update(&r, owner)->resolved.props.has_mask);
+    OK(gr_layer_set_mask(owner, NULL));
+    CHECK(!gr_scene_needs_commit(s));
+    a = fade();
+    mask.value.gradient = a;
+    OK(gr_layer_set_mask(owner, &mask));
+    gr_paint_unref(a);
     gr_layer_unref(owner);
-    gr_scene_unref(s);
+    gr_scene_unref(s); /* Teardown releases the mask's resources. */
 }
 
 static void count_host_destroy(void *data)
@@ -856,7 +914,7 @@ int main(int argc, char **argv)
         GR_TEST_CASE(tree),
         GR_TEST_CASE(borrowed_reparent_and_reorder),
         GR_TEST_CASE(rejected_mutations_stay_clean),
-        GR_TEST_CASE(mask_replacement_lifetime),
+        GR_TEST_CASE(mask_property),
         GR_TEST_CASE(drawers),
         GR_TEST_CASE(rejected_drawer_preserves_ownership),
         GR_TEST_CASE(geometry),

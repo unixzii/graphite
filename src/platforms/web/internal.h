@@ -28,15 +28,17 @@ enum
     GR_WEB_REALIZE = 2,    /* layer kind */
     GR_WEB_CHILDREN = 3,   /* parent count children... */
     GR_WEB_RELEASE = 4,    /* layer */
-    GR_WEB_GEOMETRY = 5,   /* layer width height a b c d tx ty bounds_offset_x bounds_offset_y */
+    GR_WEB_GEOMETRY = 5,   /* layer width height a b c d tx ty offset_x offset_y (-bounds.origin) */
     GR_WEB_APPEARANCE = 6, /* layer opacity hidden masks_to_bounds radius corners has_background color has_border
                             * width color blur */
     GR_WEB_SHADOW = 7,     /* layer has; if set: color offset_x offset_y sigma path (box space) */
-    GR_WEB_CONTENT = 8     /* layer kind (gr_content_kind), then
+    GR_WEB_CONTENT = 8,    /* layer kind (gr_content_kind), then
                             * IMAGE: image x y width height (box space)
                             * DRAWN: draw ops until GR_WEB_END (see backend.c)
                             * SHAPE: path? (has, path) paint fill_rule stroke stroke_start stroke_end
                             * GRADIENT: paint */
+    GR_WEB_MASK = 9        /* layer kind (0 none, 1 path, 2 gradient), then
+                            * path: even_odd path (box space); gradient: paint (unit space over the box) */
 };
 
 /* Text draw ops (in DRAWN content), for layouts of the Web text system:

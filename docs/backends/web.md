@@ -3,10 +3,10 @@
 **Status: renders layers, drawings and text, and delivers events.**
 `src/platforms/web` (see its [README](../../src/platforms/web/README.md))
 renders layer properties, shadows, blur, shape, gradient and image contents,
-drawn contents and text, passes every conformance case in Chromium except the
-mask and thread-safety cases, and delivers frame, viewport, focus, pointer,
-scroll and key events. Every example runs in the browser. Masks, IME and touch
-are not implemented yet. This page records the design
+drawn contents, masks and text, passes every conformance case in Chromium except
+the thread-safety case, and delivers frame, viewport, focus, pointer, scroll and
+key events. Every example runs in the browser. IME and touch are not
+implemented yet. This page records the design
 and what a browser spike measured. The spike ran Chromium (headless shell
 158), WebKit and Firefox through Playwright on macOS in November 2026. It
 compared each approach with a reference rendering in the same browser.
@@ -52,12 +52,13 @@ Each layer is a small fixed group of elements with inline styles:
 
 ```
 div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
-├─ svg          shadow: the shadow shape, filled and blurred; outside the clip
-├─ div.body     clip-path: the rounded box, when masks_to_bounds
-│  ├─ svg       background: the rounded box, filled
-│  ├─ content   image, shape, gradient or drawing
-│  └─ div       sublayers, translated by bounds_offset
-└─ svg          border: the rounded box minus its inset, inside the box and above everything
+├─ svg          shadow: the shadow shape, filled and blurred; outside the clip and mask
+└─ div          group: the mask, as clip-path or mask-image
+   ├─ div.body  clip-path: the rounded box, when masks_to_bounds
+   │  ├─ svg    background: the rounded box, filled
+   │  ├─ content image, shape, gradient or drawing
+   │  └─ div    sublayers, translated by -bounds.origin
+   └─ svg       border: the rounded box minus its inset, inside the box and above everything
 ```
 
 - **Geometry**: the resolved snapped transform goes into `transform`.
@@ -68,8 +69,13 @@ div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
   [Lessons learned](#lessons-learned)). Local-space content and sublayers are
   translated by the bounds offset.
 - **Opacity** is CSS group opacity, as Graphite requires.
+- **Masks** apply to the group, so they leave the shadow alone. A path mask is
+  `clip-path: path()` in box space. A gradient mask is `mask-image` with an SVG
+  data URL of the gradient over the box. The group then takes the box's size,
+  the one CSS box size in the tree: Chromium ignores a mask on an empty element
+  and WebKit clips the mask to the border box.
 - **Shadows** are an SVG path of the resolved shadow shape
-  (`gr_shadow_shape_new_path`, which already applies spread and grown corners),
+  (`gr_resolved_new_shadow_path`),
   offset and blurred with `filter: blur(σpx)`. They are not `box-shadow`:
   CSS clips a box shadow away under its own box, but in Graphite the whole
   shape casts the shadow, also beneath a transparent background. WebKit's
@@ -151,9 +157,8 @@ the runtime's number arrays; the layout and every query live in `text.js`, with
 UTF-16 indices inside and UTF-8 offsets at the boundary.
 
 1. **Line breaks.** When the text can wrap, it goes into one block of the
-   layout's width (`white-space: pre-wrap`; `overflow-wrap: break-word` for
-   word wrapping, `word-break: break-all` for characters; `unicode-bidi:
-   plaintext` for automatic direction). For each grapheme cluster
+   layout's width (`white-space: pre-wrap`, `overflow-wrap: break-word`, and
+   `unicode-bidi: plaintext` for automatic direction). For each grapheme cluster
    (`Intl.Segmenter`), a `Range` gives its box, and a cluster starts a new line
    when its top passes the current line's bottom minus half its own height.
    Paragraph separators always end lines; without wrapping, lines are the
@@ -280,11 +285,10 @@ through `tests/web/run.mjs`:
   answers. The scale changes through `Emulation.setDeviceMetricsOverride`.
 - Captures land in Emscripten's in-memory file system; at exit the runner
   copies them to `target/conformance/web`.
-- The harness uses the Web text system and declares `GR_CONF_MASKS` and
-  `GR_CONF_THREADS` unsupported, so the two mask cases and the text
-  thread-safety case report as skipped.
+- The harness uses the Web text system and declares `GR_CONF_THREADS`
+  unsupported, so the text thread-safety case reports as skipped.
 
-Result: 51 passed and 3 skipped at 1×, 1.5× and 2×. Only Chromium runs the
+Result: 52 passed and 1 skipped at 1×, 1.5× and 2×. Only Chromium runs the
 suite, because the runner uses CDP.
 
 ## Lessons learned
@@ -346,9 +350,6 @@ suite, because the runner uses CDP.
 
 ## Known gaps
 
-- **Masks are ignored.** CSS cannot use an arbitrary DOM subtree as a mask
-  (`element()` is Firefox-only). Later, shape, gradient and image masks could
-  become `mask-image`, and general subtrees would need rasterizing.
 - **No offscreen rendering.**
 - No text input (IME) or touch yet.
 - The text system works on the main thread only, glyph identities are
@@ -363,11 +364,11 @@ suite, because the runner uses CDP.
 
 1. **Toolchain** (done): an Emscripten configuration in CMake, the backend
    skeleton with a browser test, and CI running both.
-2. **Rendering** (done apart from masks): host attachment, rAF commits, the
+2. **Rendering** (done): host attachment, rAF commits, the
    command stream, layers, drawn contents, and Playwright-driven conformance.
 3. **Events and examples** (done apart from IME and touch): input, frame,
    viewport and focus events, and a Web shell under `examples/shared/platform`
    with the examples driven by animation frames rather than a blocking loop.
 4. **Text** (done): the DOM text system (layout, metrics, truncation, carets,
    hit testing, range rectangles and approximated glyphs) and its replay.
-5. **Gaps**: simple masks as `mask-image`, IME, and performance work.
+5. **Gaps**: IME and performance work.

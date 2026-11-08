@@ -192,7 +192,6 @@ void apply_style(IDWriteTextLayout *layout, gr_text_style const &s, gr_text_styl
     if (fields & GR_TEXT_STYLE_DECORATIONS)
     {
         check_hresult(layout->SetUnderline((s.decorations & GR_TEXT_DECORATION_UNDERLINE) != 0, r));
-        check_hresult(layout->SetStrikethrough((s.decorations & GR_TEXT_DECORATION_STRIKETHROUGH) != 0, r));
     }
     if (fields & GR_TEXT_STYLE_LETTER_SPACING)
     {
@@ -338,9 +337,7 @@ void build(TextLayout *l)
                                            : o.align == GR_TEXT_ALIGN_START ? DWRITE_TEXT_ALIGNMENT_LEADING
                                                                             : DWRITE_TEXT_ALIGNMENT_TRAILING));
     bool wraps = o.has_max_width && o.wrap != GR_TEXT_WRAP_NONE;
-    check_hresult(format->SetWordWrapping(!wraps                        ? DWRITE_WORD_WRAPPING_NO_WRAP
-                                          : o.wrap == GR_TEXT_WRAP_CHAR ? DWRITE_WORD_WRAPPING_CHARACTER
-                                                                        : DWRITE_WORD_WRAPPING_WRAP));
+    check_hresult(format->SetWordWrapping(wraps ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP));
     bool ellipsize = o.truncation == GR_TEXT_TRUNCATE_END;
     if (ellipsize)
     {

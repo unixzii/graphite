@@ -98,7 +98,7 @@ static bool valid_style(const gr_text_style *style, gr_text_style_fields fields)
     if ((fields & GR_TEXT_STYLE_COLOR) && !gr_valid_color(style->color))
         return false;
     if ((fields & GR_TEXT_STYLE_DECORATIONS) &&
-        (style->decorations & ~(gr_text_decorations)(GR_TEXT_DECORATION_UNDERLINE | GR_TEXT_DECORATION_STRIKETHROUGH)))
+        (style->decorations & ~(gr_text_decorations)GR_TEXT_DECORATION_UNDERLINE))
         return false;
     if ((fields & GR_TEXT_STYLE_LETTER_SPACING) && !isfinite(style->letter_spacing))
         return false;

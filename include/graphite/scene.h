@@ -10,7 +10,8 @@ extern "C" {
 
 /* Scene lifetime */
 
-/** Creates an owned Scene with a container root, scale 1 and pixel snapping enabled; rejects invalid size. */
+/** Creates an owned Scene with a container root and scale 1; rejects invalid size. Resolved geometry is always
+ * snapped to device pixels. */
 GR_API gr_scene *gr_scene_new(gr_size root_size);
 
 /** Acquires an owned reference and returns the same pointer; NULL returns NULL. */
@@ -41,12 +42,6 @@ GR_API double gr_scene_get_backing_scale(const gr_scene *scene);
 
 /** Sets a finite positive scale and invalidates scale-dependent contents; invalid scale returns ARGUMENT. */
 GR_API gr_result gr_scene_set_backing_scale(gr_scene *scene, double scale);
-
-/** Returns whether resolved geometry is snapped to device pixels. */
-GR_API bool gr_scene_get_pixel_snapping(const gr_scene *scene);
-
-/** Enables/disables snapping and invalidates dependent resolved properties. */
-GR_API gr_result gr_scene_set_pixel_snapping(gr_scene *scene, bool enabled);
 
 /** Returns the number of live model layers, including root; excludes retired backend identity leases. */
 GR_API size_t gr_scene_get_layer_count(const gr_scene *scene);

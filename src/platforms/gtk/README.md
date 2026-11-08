@@ -12,8 +12,9 @@ No additional container dependency is introduced: GTK already supplies GLib.
 - `draw.c`: DisplayList to native GSK nodes. Clips, masks and save/restore are
   stacked; global alpha applies per drawing operation. No Cairo raster fallback
   is introduced by the Graphite backend.
-- `tree.c`: per-layer immutable node caching, ancestor invalidation through both
-  child and mask edges, shared image textures, two-pass reparenting and retirement.
+- `tree.c`: per-layer immutable node caching, ancestor invalidation, shared image
+  textures, two-pass reparenting and retirement. Masks are mask nodes over a
+  path fill or the gradient.
   Shadow blur and outset radii use a calibrated factor of 2σ.
 - `host.c`: opaque host ownership and backend callbacks. Stored resolved snapshots
   retain their resources. Scene teardown clears the node registry before layer

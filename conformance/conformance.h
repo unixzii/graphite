@@ -13,8 +13,7 @@ typedef struct
 /** Features a backend may not support yet; cases that need one it lacks are reported as skipped. */
 enum
 {
-    GR_CONF_MASKS = 1u,  /**< gr_layer_set_mask */
-    GR_CONF_THREADS = 2u /**< Threads, for text systems used from several at once */
+    GR_CONF_THREADS = 1u /**< Threads, for text systems used from several at once */
 };
 
 /** Backend adapter. Attach once per Scene; capture reads committed state.

@@ -14,7 +14,7 @@ struct showcase_scene
     double time;
     gr_layer *hour, *minute, *second, *orbit, *planets[6], *moon_orbit;
     gr_layer *drawing, *rings[3], *blob, *star, *compound;
-    gr_layer *spotlight, *badge, *badge_mask;
+    gr_layer *spotlight, *spot_picture, *badge;
     gr_layer *phone, *indicator, *morph, *leaf, *bar;
     gr_layer *carousel, *photos[5], *group[2], *single[2], *dot;
     size_t photo_order[5]; /**< Back to front. */

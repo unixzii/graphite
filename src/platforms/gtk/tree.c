@@ -2,7 +2,7 @@
 
 typedef struct
 {
-    gr_layer *id, *parent, *mask, *mask_owner;
+    gr_layer *id, *parent;
     GPtrArray *children;
     gr_resolved resolved;
     bool has_resolved, cached_valid, has_drawing;
@@ -21,6 +21,21 @@ typedef struct
 
 static void resolved_refs(gr_resolved *r, bool acquire)
 {
+    const gr_mask *m = &r->props.mask;
+    if (r->props.has_mask && m->kind == GR_MASK_PATH)
+    {
+        if (acquire)
+            gr_path_ref(m->value.path.path);
+        else
+            gr_path_unref(m->value.path.path);
+    }
+    else if (r->props.has_mask)
+    {
+        if (acquire)
+            gr_paint_ref(m->value.gradient);
+        else
+            gr_paint_unref(m->value.gradient);
+    }
     if (r->props.has_shadow)
     {
         if (acquire)
@@ -153,7 +168,7 @@ static void invalidate(gr_gtk_shared *s, gr_layer *id)
     {
         clear_node(&n->cached);
         n->cached_valid = false;
-        id = n->parent ? n->parent : n->mask_owner;
+        id = n->parent;
     }
 }
 
@@ -221,15 +236,6 @@ static void update_node(gr_gtk_shared *s, const gr_layer_update *u, double scale
 {
     node *n = required(s, u->layer);
     const gr_resolved *r = &u->resolved;
-    if ((u->changed & GR_DIRTY_MASK) && n->mask != r->mask)
-    {
-        node *old = lookup(s, n->mask);
-        if (old)
-            old->mask_owner = NULL;
-        if (r->mask)
-            required(s, r->mask)->mask_owner = u->layer;
-        n->mask = r->mask;
-    }
     if (u->changed & GR_DIRTY_CONTENT)
     {
         gr_image *image = r->content.kind == GR_CONTENT_IMAGE ? r->content.value.image.image : NULL;
@@ -302,13 +308,6 @@ static void release_node(gr_gtk_shared *s, gr_layer *id)
         if (c && c->parent == id)
             c->parent = NULL;
     }
-    node *mask = lookup(s, n->mask);
-    if (mask)
-        mask->mask_owner = NULL;
-    node *owner = lookup(s, n->mask_owner);
-    if (owner && owner->mask == id)
-        owner->mask = NULL;
-    invalidate(s, n->mask_owner);
     node *parent = lookup(s, n->parent);
     if (parent)
         remove_child(parent, id);
@@ -352,10 +351,6 @@ void gr_gtk_tree_apply(gr_gtk_shared *s, const gr_commit_batch *b)
         {
             gr_layer *id = u->children.data[j];
             node *child = required(s, id);
-            node *owner = lookup(s, child->mask_owner);
-            if (owner && owner->mask == id)
-                owner->mask = NULL;
-            child->mask_owner = NULL;
             if (child->parent && child->parent != u->parent)
             {
                 node *prev = lookup(s, child->parent);
@@ -383,9 +378,9 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
 {
     const gr_resolved *r = &n->resolved;
     const gr_layer_props *p = &r->props;
-    gr_rect bounds = {{0, 0}, r->size};
+    gr_rect bounds = {{0, 0}, p->bounds.size};
     graphene_rect_t rect = gr_graphene_rect(bounds);
-    graphene_point_t local = gr_graphene_point(r->bounds_offset);
+    graphene_point_t local = GRAPHENE_POINT_INIT((float)-p->bounds.origin.x, (float)-p->bounds.origin.y);
     bool rounded = p->corner_radius > 0 && p->masked_corners;
     GskRoundedRect outline = gr_gsk_rounded(bounds, p->corner_radius, rounded ? p->masked_corners : 0);
     GtkSnapshot *s = gtk_snapshot_new();
@@ -400,21 +395,19 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
     /* GSK blur radius is 2 sigma, applied in device space. */
     if (blurred)
         gtk_snapshot_push_blur(s, p->blur_sigma * 2);
-    if (p->has_shadow && r->has_shadow)
+    if (p->has_shadow)
     {
         const gr_shadow *shadow = &p->shadow;
         GdkRGBA color = gr_gdk_color(shadow->color);
-        const gr_shadow_shape *shape = &r->shadow_shape;
-        if (shape->kind == GR_SHADOW_ROUNDED_RECT && p->has_background && p->background.a >= 1 && !n->mask)
+        if (!shadow->path && p->has_background && p->background.a >= 1 && !p->has_mask)
         {
-            GskRoundedRect sr = gr_gsk_rounded(shape->value.rounded_rect.rect, shape->value.rounded_rect.radius,
-                                               shape->value.rounded_rect.corners);
-            gtk_snapshot_append_outset_shadow(s, &sr, &color, (float)shadow->offset.x, (float)shadow->offset.y,
-                                              (float)shape->value.rounded_rect.spread, (float)(shadow->blur_sigma * 2));
+            GskRoundedRect sr = gr_gsk_rounded(bounds, p->corner_radius, p->masked_corners);
+            gtk_snapshot_append_outset_shadow(s, &sr, &color, (float)shadow->offset.x, (float)shadow->offset.y, 0,
+                                              (float)(shadow->blur_sigma * 2));
         }
         else
         {
-            gr_path *path = gr_shadow_shape_new_path(shape, r->bounds_offset);
+            gr_path *path = gr_resolved_new_shadow_path(r);
             GskPath *native = gr_gsk_path(path);
             gr_path_unref(path);
             gtk_snapshot_save(s);
@@ -429,17 +422,23 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
             gsk_path_unref(native);
         }
     }
-    if (n->mask)
+    if (p->has_mask)
     {
         gtk_snapshot_push_mask(s, GSK_MASK_MODE_ALPHA);
-        GskRenderNode *mask = build(shared, n->mask);
-        if (mask)
+        if (p->mask.kind == GR_MASK_PATH)
         {
+            GskPath *path = gr_gsk_path(p->mask.value.path.path);
+            GdkRGBA opaque = {1, 1, 1, 1};
             gtk_snapshot_save(s);
             gtk_snapshot_translate(s, &local);
-            gtk_snapshot_append_node(s, mask);
+            gtk_snapshot_append_fill(
+                s, path, p->mask.value.path.rule == GR_FILL_EVEN_ODD ? GSK_FILL_RULE_EVEN_ODD : GSK_FILL_RULE_WINDING,
+                &opaque);
             gtk_snapshot_restore(s);
+            gsk_path_unref(path);
         }
+        else
+            gr_gsk_paint(s, p->mask.value.gradient, &rect, p->bounds.size);
         gtk_snapshot_pop(s);
     }
     if (p->masks_to_bounds)
@@ -488,7 +487,7 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
             }
             break;
         case GR_CONTENT_GRADIENT:
-            gr_gsk_paint(s, r->content.value.gradient, &rect, r->size);
+            gr_gsk_paint(s, r->content.value.gradient, &rect, p->bounds.size);
             break;
         case GR_CONTENT_NONE:
             break;
@@ -505,16 +504,16 @@ static GskRenderNode *compose(gr_gtk_shared *shared, node *n)
         }
         gtk_snapshot_restore(s);
     }
-    if (r->has_border && r->border.width > 0)
+    if (p->has_border && p->border.width > 0)
     {
-        float w = (float)r->border.width;
+        float w = (float)p->border.width;
         float widths[] = {w, w, w, w};
-        GdkRGBA c = gr_gdk_color(r->border.color), colors[] = {c, c, c, c};
+        GdkRGBA c = gr_gdk_color(p->border.color), colors[] = {c, c, c, c};
         gtk_snapshot_append_border(s, &outline, widths, colors);
     }
     if (p->masks_to_bounds)
         gtk_snapshot_pop(s);
-    if (n->mask)
+    if (p->has_mask)
         gtk_snapshot_pop(s);
     if (blurred)
         gtk_snapshot_pop(s);

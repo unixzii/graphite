@@ -12,18 +12,27 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
 
 ## Rendering and ownership
 
-- Each layer has outer/body/clipped/sublayer composition containers. Group opacity
-  and transforms apply at the outer; shadow escapes the body clip; borders remain
-  above children. Rounded clipping uses opaque-border midline insets.
+- Each layer starts as one SpriteVisual, the body: it takes the transform, group
+  opacity, visibility, clip and sublayers, and its own brush paints the background
+  (when it starts at the box corner and its rounding is the body's clip) or else
+  the content. Other visuals are added on first need and kept: an outer container
+  for a shadow, mask or blur, which must escape the body; a clipped container when
+  a clip must leave the border out; a sublayers container for a nonzero bounds
+  origin; and sprites for a background or content the brush cannot take. Borders
+  stay above sublayers. Rounded clipping uses opaque-border midline insets.
+- A geometry change that keeps the box size, bounds origin and scale only sets the
+  transform; decoration, shadow, mask and content are left alone.
 - Native shape geometry and trimming use separate fill/stroke sprite shapes.
   Linear/radial brushes preserve absolute shape and relative layer coordinates.
-- Alpha masks use a VisualSurface and a custom `IGraphicsEffectD2D1Interop`
-  description of Direct2D's alpha-mask effect, avoiding a Win2D dependency.
+- Masks run the body through a LayerVisual whose effect is Direct2D's alpha-mask
+  effect (a custom `IGraphicsEffectD2D1Interop` description, avoiding a Win2D
+  dependency) over a VisualSurface of the mask: a filled ShapeVisual for a path
+  mask, a gradient SpriteVisual over the box for a gradient mask.
 - Layer blur wraps the outer's contents in a LayerVisual whose effect is
   Direct2D's Gaussian blur (σ times the backing scale, in device pixels).
 - LayerVisuals clip to their size, so after each batch the backend resizes
-  every mask and blur LayerVisual to cover what its subtree draws: contents,
-  sublayers, shadows, and for blur a 3σ margin divided by the smallest scale of
+  every mask and blur LayerVisual to cover what its subtree draws (contents,
+  sublayers and shadows, within the mask's bounds), and for blur a 3σ margin divided by the smallest scale of
   the transforms above it.
 - Images share drawing surfaces by resource ID. Drawers are recorded only when
   version/bounds/scale changes and released after Direct2D replay. Stroke replay

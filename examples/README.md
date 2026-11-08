@@ -125,5 +125,4 @@ to the browser after starting frames. The selftest exits through
 `emscripten_force_exit` with its status. `graphite.examples.<name>` runs it in
 headless Chromium through `tests/web/run.mjs`. Snapshots are not available,
 because the Web backend has no offscreen rendering. Text uses the Web text
-system. There is no mask support yet, so masked parts of `showcase` show
-unmasked.
+system.

@@ -2,12 +2,19 @@
 
 #import <objc/message.h>
 
-static NSValue *key(gr_layer *layer)
+/* Maps borrowed pointer keys (layer identities, image IDs) to retained objects without boxing them. */
+static CFMutableDictionaryRef new_map(void)
 {
-    return [NSValue valueWithPointer:layer];
+    return CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
 }
 
-@interface GRDrawingDelegate : NSObject <CALayerDelegate>
+static id lookup(CFDictionaryRef map, const void *key)
+{
+    return (__bridge id)CFDictionaryGetValue(map, key);
+}
+
+__attribute__((objc_direct_members))
+@interface GRDrawingDelegate : NSObject<CALayerDelegate>
 @property(nonatomic) gr_drawer_provider *provider;
 @property(nonatomic) gr_layer *identity;
 @property(nonatomic) uint64_t version;
@@ -39,6 +46,7 @@ static NSValue *key(gr_layer *layer)
 
 @end
 
+__attribute__((objc_direct_members))
 @interface GRNode : NSObject
 @property(nonatomic, strong) CALayer *outer;
 @property(nonatomic, strong) CALayer *body;
@@ -49,15 +57,15 @@ static NSValue *key(gr_layer *layer)
 @property(nonatomic) uint64_t version;
 @property(nonatomic) CGRect displayBounds;
 @property(nonatomic) double displayScale;
+@property(nonatomic) gr_layer *identity;
 @property(nonatomic) gr_layer *parent;
-@property(nonatomic, strong) NSMutableArray<NSValue *> *children;
-@property(nonatomic) gr_layer *mask;
-@property(nonatomic) gr_layer *maskOwner;
+@property(nonatomic, strong) NSMutableArray<GRNode *> *children;
 @property(nonatomic) double blur;
 @end
 @implementation GRNode
 @end
 
+__attribute__((objc_direct_members))
 @interface GRImage : NSObject
 @property(nonatomic) CGImageRef image;
 @property(nonatomic) size_t uses;
@@ -72,10 +80,11 @@ static NSValue *key(gr_layer *layer)
 
 @end
 
+__attribute__((objc_direct_members))
 @interface GRBackend : NSObject
 @property(nonatomic, strong) CALayer *host;
-@property(nonatomic, strong) NSMutableDictionary<NSValue *, GRNode *> *nodes;
-@property(nonatomic, strong) NSMutableDictionary<NSNumber *, GRImage *> *images;
+@property(nonatomic) CFMutableDictionaryRef nodes;  /**< gr_layer * to GRNode. */
+@property(nonatomic) CFMutableDictionaryRef images; /**< Image ID to GRImage. */
 @property(nonatomic) gr_scene_link *scene;
 @property(nonatomic) gr_drawer_provider *drawers;
 @property(nonatomic) double scale;
@@ -87,13 +96,10 @@ static NSValue *key(gr_layer *layer)
 - (void)apply:(const gr_commit_batch *)batch;
 @end
 
+/* Shape layers take solid paints only. */
 static gr_color paint_color(gr_paint *paint)
 {
-    gr_paint_desc d = gr_paint_get_desc(paint);
-    if (d.kind == GR_PAINT_SOLID)
-        return d.value.solid;
-    gr_gradient_stop_list stops = d.kind == GR_PAINT_LINEAR ? d.value.linear.stops : d.value.radial.stops;
-    return stops.count ? stops.data[0].color : (gr_color){0};
+    return gr_paint_get_desc(paint).value.solid;
 }
 
 static void apply_shape(CAShapeLayer *layer, const gr_shape_props *s)
@@ -193,6 +199,40 @@ static NSArray *blur_filters(double sigma)
     return filter ? @[ filter ] : nil;
 }
 
+/* The mask layer shares the body's local coordinates and covers its box. */
+static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, double scale)
+{
+    if (!p->has_mask)
+    {
+        body.mask = nil;
+        return;
+    }
+    const gr_mask *m = &p->mask;
+    Class type = m->kind == GR_MASK_PATH ? [CAShapeLayer class] : [CAGradientLayer class];
+    CALayer *mask = body.mask;
+    if (![mask isMemberOfClass:type])
+    {
+        mask = [type layer];
+        mask.anchorPoint = CGPointZero;
+        body.mask = mask;
+    }
+    mask.bounds = local;
+    mask.position = local.origin;
+    mask.contentsScale = scale;
+    if (m->kind == GR_MASK_PATH)
+    {
+        CAShapeLayer *shape = (CAShapeLayer *)mask;
+        CGPathRef path = gr_cg_path(m->value.path.path);
+        shape.path = path;
+        CGPathRelease(path);
+        shape.fillColor = CGColorGetConstantColor(kCGColorBlack);
+        shape.fillRule = m->value.path.rule == GR_FILL_EVEN_ODD ? kCAFillRuleEvenOdd : kCAFillRuleNonZero;
+    }
+    else
+        apply_gradient((CAGradientLayer *)mask, m->value.gradient);
+}
+
+__attribute__((objc_direct_members))
 @implementation GRBackend
 
 - (instancetype)init
@@ -200,8 +240,8 @@ static NSArray *blur_filters(double sigma)
     self = [super init];
     if (self)
     {
-        _nodes = [NSMutableDictionary dictionary];
-        _images = [NSMutableDictionary dictionary];
+        _nodes = new_map();
+        _images = new_map();
         _scale = 1;
     }
     return self;
@@ -215,13 +255,13 @@ static NSArray *blur_filters(double sigma)
         CFRelease(_observer);
         _observer = NULL;
     }
-    for (GRNode *node in _nodes.allValues)
+    for (GRNode *node in ((__bridge NSDictionary *)_nodes).allValues)
     {
         node.body.delegate = nil;
         [node.outer removeFromSuperlayer];
     }
-    [_nodes removeAllObjects];
-    [_images removeAllObjects];
+    CFDictionaryRemoveAllValues(_nodes);
+    CFDictionaryRemoveAllValues(_images);
 }
 
 - (void)dealloc
@@ -229,6 +269,8 @@ static NSArray *blur_filters(double sigma)
     [self shutdown];
     if (_runLoop)
         CFRelease(_runLoop);
+    CFRelease(_nodes);
+    CFRelease(_images);
     gr_drawer_provider_unref(_drawers);
     gr_scene_link_unref(_scene);
 }
@@ -263,10 +305,31 @@ static NSArray *blur_filters(double sigma)
 
 - (GRNode *)node:(gr_layer *)identity
 {
-    GRNode *node = _nodes[key(identity)];
+    GRNode *node = lookup(_nodes, identity);
     if (!node)
         abort();
     return node;
+}
+
+/* Wraps the body in a new outer layer that takes over its place in the tree; update reapplies the outer properties. */
+- (void)split:(GRNode *)node
+{
+    CALayer *body = node.body, *outer = [CALayer layer];
+    outer.allowsGroupOpacity = YES;
+    outer.allowsEdgeAntialiasing = YES;
+    outer.contentsScale = _scale;
+    outer.anchorPoint = CGPointZero;
+    if (body.superlayer)
+        [body.superlayer replaceSublayer:body with:outer];
+    body.transform = CATransform3DIdentity;
+    body.opacity = 1;
+    body.hidden = NO;
+    body.filters = nil;
+    body.shadowOpacity = 0;
+    body.shadowPath = NULL;
+    [outer addSublayer:body];
+    node.outer = outer;
+    node.blur = 0;
 }
 
 - (void)syncChildren:(gr_layer *)identity
@@ -275,34 +338,23 @@ static NSArray *blur_filters(double sigma)
     NSMutableArray *layers = [NSMutableArray arrayWithCapacity:node.children.count + 1];
     if (node.imageLayer)
         [layers addObject:node.imageLayer];
-    for (NSValue *child in node.children)
-        [layers addObject:[self node:child.pointerValue].outer];
+    for (GRNode *child in node.children)
+        [layers addObject:child.outer];
     node.body.sublayers = layers;
-}
-
-- (void)clearMaskOwner:(gr_layer *)identity
-{
-    GRNode *node = [self node:identity];
-    if (node.maskOwner)
-    {
-        GRNode *owner = [self node:node.maskOwner];
-        owner.mask = NULL;
-        owner.body.mask = nil;
-        node.maskOwner = NULL;
-    }
 }
 
 - (void)releaseImage:(uint64_t)identity
 {
-    GRImage *image = _images[@(identity)];
+    const void *key = (const void *)(uintptr_t)identity;
+    GRImage *image = lookup(_images, key);
     if (image && --image.uses == 0)
-        [_images removeObjectForKey:@(identity)];
+        CFDictionaryRemoveValue(_images, key);
 }
 
 - (CGImageRef)acquireImage:(gr_image *)image
 {
-    NSNumber *identity = @(gr_image_get_id(image));
-    GRImage *entry = _images[identity];
+    const void *key = (const void *)(uintptr_t)gr_image_get_id(image);
+    GRImage *entry = lookup(_images, key);
     if (entry)
     {
         ++entry.uses;
@@ -314,13 +366,14 @@ static NSArray *blur_filters(double sigma)
     entry = [GRImage new];
     entry.image = cg;
     entry.uses = 1;
-    _images[identity] = entry;
+    CFDictionarySetValue(_images, key, (__bridge const void *)entry);
     return cg;
 }
 
 - (void)content:(const gr_resolved_content *)content identity:(gr_layer *)identity
 {
     GRNode *node = [self node:identity];
+    CALayer *body = node.body;
     gr_image *image = content->kind == GR_CONTENT_IMAGE ? content->value.image.image : NULL;
     uint64_t wanted = image ? gr_image_get_id(image) : 0;
     if (node.imageID != wanted)
@@ -348,16 +401,15 @@ static NSArray *blur_filters(double sigma)
     }
     if (image)
         node.imageLayer.contentsScale = gr_image_get_scale(image);
-    node.body.contentsScale = _scale;
-    if ([node.body isKindOfClass:[CAShapeLayer class]])
+    body.contentsScale = _scale;
+    if ([body isKindOfClass:[CAShapeLayer class]])
     {
         if (content->kind == GR_CONTENT_SHAPE)
-            apply_shape((CAShapeLayer *)node.body, &content->value.shape);
+            apply_shape((CAShapeLayer *)body, &content->value.shape);
     }
-    else if ([node.body isKindOfClass:[CAGradientLayer class]])
+    else if ([body isKindOfClass:[CAGradientLayer class]])
     {
-        apply_gradient((CAGradientLayer *)node.body,
-                       content->kind == GR_CONTENT_GRADIENT ? content->value.gradient : NULL);
+        apply_gradient((CAGradientLayer *)body, content->kind == GR_CONTENT_GRADIENT ? content->value.gradient : NULL);
     }
     else if (content->kind == GR_CONTENT_DRAWN)
     {
@@ -366,15 +418,15 @@ static NSArray *blur_filters(double sigma)
             node.drawing = [GRDrawingDelegate new];
             node.drawing.provider = gr_drawer_provider_ref(_drawers);
             node.drawing.identity = identity;
-            node.body.delegate = node.drawing;
+            body.delegate = node.drawing;
             node.hasDisplayKey = false;
         }
         node.drawing.version = content->value.display_version;
     }
     else
     {
-        node.body.delegate = nil;
-        node.body.contents = nil;
+        body.delegate = nil;
+        body.contents = nil;
         node.drawing = nil;
         node.hasDisplayKey = false;
     }
@@ -384,52 +436,59 @@ static NSArray *blur_filters(double sigma)
 {
     gr_layer *identity = update->layer;
     GRNode *node = [self node:identity];
+    CALayer *body = node.body;
     const gr_resolved *r = &update->resolved;
     const gr_layer_props *p = &r->props;
     gr_dirty_bits dirty = update->changed;
-    CGRect local = CGRectMake(-r->bounds_offset.x, -r->bounds_offset.y, r->size.width, r->size.height);
+    CGRect local = gr_cg_rect(p->bounds);
+    /* Clips and masks would clip the layer's own shadow and blur, so such a layer moves its shadow, transform,
+     * opacity and blur to an outer layer, once and for good. */
+    if ((p->has_shadow || p->blur_sigma > 0) && (p->masks_to_bounds || p->has_mask) && node.outer == body)
+    {
+        [self split:node];
+        dirty |= GR_DIRTY_GEOMETRY | GR_DIRTY_APPEARANCE | GR_DIRTY_SHADOW;
+    }
+    bool split = node.outer != body;
     if (dirty & GR_DIRTY_GEOMETRY)
     {
-        node.outer.bounds = CGRectMake(0, 0, r->size.width, r->size.height);
-        if (identity == _root)
-        {
-            node.outer.anchorPoint = CGPointZero;
-            node.outer.position = CGPointZero;
-            node.outer.transform = CATransform3DIdentity;
-        }
-        else
-        {
-            node.outer.anchorPoint = gr_cg_point(p->anchor_point);
-            node.outer.position = CGPointMake(p->position.x + r->snap_offset.x, p->position.y + r->snap_offset.y);
-            node.outer.transform = CATransform3DMakeAffineTransform(gr_cg_affine(p->transform));
-        }
-        node.body.bounds = local;
+        /* The resolved transform places the box with anchor points at zero: its translation becomes the position and
+         * only the linear part stays a transform, so translated layers keep an identity transform, which Core Animation
+         * stores and commits more cheaply. A single layer's bounds start at the bounds origin, which lands on the box's
+         * corner just the same. */
+        CGAffineTransform m = gr_cg_affine(r->transform);
+        body.bounds = local;
+        if (split)
+            node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
+        node.outer.position = CGPointMake(m.tx, m.ty);
+        m.tx = m.ty = 0;
+        node.outer.transform = CATransform3DMakeAffineTransform(m);
     }
     if (dirty & GR_DIRTY_APPEARANCE)
     {
         node.outer.opacity = p->opacity;
         node.outer.hidden = p->hidden;
-        node.body.masksToBounds = p->masks_to_bounds;
-        node.body.cornerRadius = p->corner_radius;
-        node.body.maskedCorners = gr_ca_corners(p->masked_corners);
+        body.masksToBounds = p->masks_to_bounds;
+        body.cornerRadius = p->corner_radius;
+        body.maskedCorners = gr_ca_corners(p->masked_corners);
         CGColorRef color = p->has_background ? gr_cg_color(p->background) : NULL;
-        node.body.backgroundColor = color;
+        body.backgroundColor = color;
         if (color)
             CGColorRelease(color);
-        color = r->has_border ? gr_cg_color(r->border.color) : NULL;
-        node.body.borderColor = color;
+        color = p->has_border ? gr_cg_color(p->border.color) : NULL;
+        body.borderColor = color;
         if (color)
             CGColorRelease(color);
-        node.body.borderWidth = r->has_border ? r->border.width : 0;
+        body.borderWidth = p->has_border ? p->border.width : 0;
         if (node.blur != p->blur_sigma)
         {
             node.blur = p->blur_sigma;
             node.outer.filters = blur_filters(p->blur_sigma);
         }
     }
-    if (dirty & GR_DIRTY_SHADOW)
+    /* A single layer's shadow path is in local space, so it also follows the bounds origin. */
+    if (dirty & (GR_DIRTY_SHADOW | (split ? 0 : GR_DIRTY_GEOMETRY)))
     {
-        if (p->has_shadow && r->has_shadow)
+        if (p->has_shadow)
         {
             gr_color color = p->shadow.color;
             color.a = 1;
@@ -439,8 +498,15 @@ static NSArray *blur_filters(double sigma)
             node.outer.shadowOpacity = p->shadow.color.a;
             node.outer.shadowOffset = CGSizeMake(p->shadow.offset.x, p->shadow.offset.y);
             node.outer.shadowRadius = p->shadow.blur_sigma;
-            gr_path *outline = gr_shadow_shape_new_path(&r->shadow_shape, r->bounds_offset);
+            gr_path *outline = gr_resolved_new_shadow_path(r);
             CGPathRef path = outline ? gr_cg_path(outline) : NULL;
+            if (path && !split)
+            {
+                CGAffineTransform shift = CGAffineTransformMakeTranslation(local.origin.x, local.origin.y);
+                CGPathRef moved = CGPathCreateCopyByTransformingPath(path, &shift);
+                CGPathRelease(path);
+                path = moved;
+            }
             node.outer.shadowPath = path;
             if (path)
                 CGPathRelease(path);
@@ -452,21 +518,8 @@ static NSArray *blur_filters(double sigma)
             node.outer.shadowPath = NULL;
         }
     }
-    if ((dirty & GR_DIRTY_MASK) && node.mask != r->mask)
-    {
-        if (node.mask)
-            [self node:node.mask].maskOwner = NULL;
-        if (r->mask)
-        {
-            [self clearMaskOwner:r->mask];
-            GRNode *mask = [self node:r->mask];
-            [mask.outer removeFromSuperlayer];
-            mask.parent = NULL;
-            mask.maskOwner = identity;
-        }
-        node.mask = r->mask;
-        node.body.mask = r->mask ? [self node:r->mask].outer : nil;
-    }
+    if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_MASK))
+        apply_mask(body, p, local, _scale);
     if (dirty & GR_DIRTY_CONTENT)
         [self content:&r->content identity:identity];
     if (dirty & (GR_DIRTY_GEOMETRY | GR_DIRTY_CONTENT))
@@ -489,7 +542,7 @@ static NSArray *blur_filters(double sigma)
                 node.version = version;
                 node.displayBounds = local;
                 node.displayScale = _scale;
-                [node.body setNeedsDisplay];
+                [body setNeedsDisplay];
             }
         }
     }
@@ -497,27 +550,18 @@ static NSArray *blur_filters(double sigma)
 
 - (void)releaseNode:(gr_layer *)identity
 {
-    GRNode *node = _nodes[key(identity)];
+    GRNode *node = lookup(_nodes, identity);
     if (!node)
         return;
-    [_nodes removeObjectForKey:key(identity)];
+    CFDictionaryRemoveValue(_nodes, identity);
     [node.outer removeFromSuperlayer];
     node.body.delegate = nil;
     if (node.imageID)
         [self releaseImage:node.imageID];
-    GRNode *owner = node.maskOwner ? _nodes[key(node.maskOwner)] : nil;
-    if (owner && owner.mask == identity)
-    {
-        owner.mask = NULL;
-        owner.body.mask = nil;
-    }
-    if (node.mask)
-        _nodes[key(node.mask)].maskOwner = NULL;
     if (node.parent)
-        [_nodes[key(node.parent)].children removeObject:key(identity)];
-    for (NSValue *childID in node.children)
+        [((GRNode *)lookup(_nodes, node.parent)).children removeObjectIdenticalTo:node];
+    for (GRNode *child in node.children)
     {
-        GRNode *child = _nodes[childID];
         if (child.parent == identity)
         {
             child.parent = NULL;
@@ -535,31 +579,30 @@ static NSArray *blur_filters(double sigma)
     if (_scale != batch->backing_scale)
     {
         _scale = batch->backing_scale;
-        for (GRNode *node in _nodes.allValues)
+        for (GRNode *node in ((__bridge NSDictionary *)_nodes).allValues)
         {
             node.outer.contentsScale = _scale;
             node.body.contentsScale = _scale;
+            node.body.mask.contentsScale = _scale;
         }
     }
     for (size_t i = 0; i < batch->realized.count; ++i)
     {
         gr_realized_layer value = batch->realized.data[i];
         GRNode *node = [GRNode new];
-        node.outer = [CALayer layer];
-        node.body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
-                    : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
-                                                      : [CALayer layer];
+        node.identity = value.layer;
+        /* One layer until a shadow needs an outer layer (see split:). */
+        CALayer *body = value.kind == GR_LAYER_SHAPE      ? [CAShapeLayer layer]
+                        : value.kind == GR_LAYER_GRADIENT ? [CAGradientLayer layer]
+                                                          : [CALayer layer];
+        body.allowsGroupOpacity = YES;
+        body.allowsEdgeAntialiasing = YES;
+        body.contentsScale = _scale;
+        body.anchorPoint = CGPointZero;
+        node.body = body;
+        node.outer = body;
         node.children = [NSMutableArray array];
-        for (CALayer *layer in @[ node.outer, node.body ])
-        {
-            layer.allowsGroupOpacity = YES;
-            layer.allowsEdgeAntialiasing = YES;
-            layer.contentsScale = _scale;
-        }
-        node.body.anchorPoint = CGPointZero;
-        node.body.position = CGPointZero;
-        [node.outer addSublayer:node.body];
-        _nodes[key(value.layer)] = node;
+        CFDictionarySetValue(_nodes, value.layer, (__bridge const void *)node);
     }
     if (batch->root)
     {
@@ -573,12 +616,11 @@ static NSArray *blur_filters(double sigma)
     {
         const gr_children_update *u = &batch->children.data[i];
         GRNode *parent = [self node:u->parent];
-        for (NSValue *old in parent.children)
+        for (GRNode *child in parent.children)
         {
             bool found = false;
             for (size_t j = 0; j < u->children.count; ++j)
-                found |= old.pointerValue == u->children.data[j];
-            GRNode *child = [self node:old.pointerValue];
+                found |= child.identity == u->children.data[j];
             if (!found && child.parent == u->parent)
             {
                 child.parent = NULL;
@@ -593,12 +635,11 @@ static NSArray *blur_filters(double sigma)
         for (size_t j = 0; j < u->children.count; ++j)
         {
             gr_layer *identity = u->children.data[j];
-            [self clearMaskOwner:identity];
             GRNode *child = [self node:identity];
             if (child.parent && child.parent != u->parent)
-                [_nodes[key(child.parent)].children removeObject:key(identity)];
+                [((GRNode *)lookup(_nodes, child.parent)).children removeObjectIdenticalTo:child];
             child.parent = u->parent;
-            [children addObject:key(identity)];
+            [children addObject:child];
         }
         [self node:u->parent].children = children;
         [self syncChildren:u->parent];

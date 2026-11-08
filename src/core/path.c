@@ -129,17 +129,37 @@ gr_path *gr_path_builder_finish(gr_path_builder *b)
     return p;
 }
 
+/* Reserves room for up to n elements built here, which need no validation; returns where they go. */
+static gr_path_element *room(gr_path_builder *b, size_t n)
+{
+    void *data = b->data;
+    gr_reserve(&data, &b->capacity, b->count + n, sizeof(*b->data));
+    b->data = data;
+    return b->data + b->count;
+}
+
+static gr_path_element *point_to(gr_path_element *e, gr_path_verb verb, double x, double y)
+{
+    *e = (gr_path_element){verb, {{x, y}}};
+    return e + 1;
+}
+
+static gr_path_element *cubic_to(gr_path_element *e, double x1, double y1, double x2, double y2, double x, double y)
+{
+    *e = (gr_path_element){GR_PATH_CUBIC, {{x1, y1}, {x2, y2}, {x, y}}};
+    return e + 1;
+}
+
+static gr_result close_path(gr_path_builder *b, gr_path_element *e)
+{
+    e = point_to(e, GR_PATH_CLOSE, 0, 0);
+    b->count = (size_t)(e - b->data);
+    return GR_OK;
+}
+
 gr_result gr_path_builder_add_rect(gr_path_builder *b, gr_rect r)
 {
-    if (!gr_valid_rect(r))
-        return GR_ERROR_ARGUMENT;
-    double x = r.origin.x, y = r.origin.y, right = x + r.size.width, bottom = y + r.size.height;
-    gr_path_element e[] = {{GR_PATH_MOVE, {{x, y}}},
-                           {GR_PATH_LINE, {{right, y}}},
-                           {GR_PATH_LINE, {{right, bottom}}},
-                           {GR_PATH_LINE, {{x, bottom}}},
-                           {GR_PATH_CLOSE, {{0, 0}}}};
-    return gr_path_builder_append(b, (gr_path_element_list){e, 5});
+    return gr_path_builder_add_rounded_rect(b, r, 0, 0);
 }
 
 gr_result gr_path_builder_add_ellipse(gr_path_builder *b, gr_rect r)
@@ -149,13 +169,13 @@ gr_result gr_path_builder_add_ellipse(gr_path_builder *b, gr_rect r)
     const double k = 0.5522847498307936;
     double rx = r.size.width / 2, ry = r.size.height / 2;
     double cx = r.origin.x + rx, cy = r.origin.y + ry, ox = rx * k, oy = ry * k;
-    gr_path_element e[] = {{GR_PATH_MOVE, {{cx + rx, cy}}},
-                           {GR_PATH_CUBIC, {{cx + rx, cy + oy}, {cx + ox, cy + ry}, {cx, cy + ry}}},
-                           {GR_PATH_CUBIC, {{cx - ox, cy + ry}, {cx - rx, cy + oy}, {cx - rx, cy}}},
-                           {GR_PATH_CUBIC, {{cx - rx, cy - oy}, {cx - ox, cy - ry}, {cx, cy - ry}}},
-                           {GR_PATH_CUBIC, {{cx + ox, cy - ry}, {cx + rx, cy - oy}, {cx + rx, cy}}},
-                           {GR_PATH_CLOSE, {{0, 0}}}};
-    return gr_path_builder_append(b, (gr_path_element_list){e, 6});
+    gr_path_element *e = room(b, 6);
+    e = point_to(e, GR_PATH_MOVE, cx + rx, cy);
+    e = cubic_to(e, cx + rx, cy + oy, cx + ox, cy + ry, cx, cy + ry);
+    e = cubic_to(e, cx - ox, cy + ry, cx - rx, cy + oy, cx - rx, cy);
+    e = cubic_to(e, cx - rx, cy - oy, cx - ox, cy - ry, cx, cy - ry);
+    e = cubic_to(e, cx + ox, cy - ry, cx + rx, cy - oy, cx + rx, cy);
+    return close_path(b, e);
 }
 
 gr_result gr_path_builder_add_rounded_rect(gr_path_builder *b, gr_rect r, double radius, gr_corners corners)
@@ -163,29 +183,27 @@ gr_result gr_path_builder_add_rounded_rect(gr_path_builder *b, gr_rect r, double
     if (!gr_valid_rect(r) || !isfinite(radius) || radius < 0 || (corners & ~GR_CORNERS_ALL))
         return GR_ERROR_ARGUMENT;
     radius = fmin(radius, fmin(r.size.width, r.size.height) / 2);
-    if (radius == 0 || corners == 0)
-        return gr_path_builder_add_rect(b, r);
     double x = r.origin.x, y = r.origin.y, right = x + r.size.width, bottom = y + r.size.height;
     double tl = corners & GR_CORNER_TOP_LEFT ? radius : 0;
     double tr = corners & GR_CORNER_TOP_RIGHT ? radius : 0;
     double bl = corners & GR_CORNER_BOTTOM_LEFT ? radius : 0;
     double br = corners & GR_CORNER_BOTTOM_RIGHT ? radius : 0;
     double k = radius * (1 - 0.5522847498307936);
-    gr_path_element e[10];
-    size_t n = 0;
-    e[n++] = (gr_path_element){GR_PATH_MOVE, {{x + tl, y}}};
-    e[n++] = (gr_path_element){GR_PATH_LINE, {{right - tr, y}}};
+    bool round = radius > 0 && corners; /* A plain rectangle closes from its last corner. */
+    gr_path_element *e = room(b, 10);
+    e = point_to(e, GR_PATH_MOVE, x + tl, y);
+    e = point_to(e, GR_PATH_LINE, right - tr, y);
     if (tr)
-        e[n++] = (gr_path_element){GR_PATH_CUBIC, {{right - k, y}, {right, y + k}, {right, y + tr}}};
-    e[n++] = (gr_path_element){GR_PATH_LINE, {{right, bottom - br}}};
+        e = cubic_to(e, right - k, y, right, y + k, right, y + tr);
+    e = point_to(e, GR_PATH_LINE, right, bottom - br);
     if (br)
-        e[n++] = (gr_path_element){GR_PATH_CUBIC, {{right, bottom - k}, {right - k, bottom}, {right - br, bottom}}};
-    e[n++] = (gr_path_element){GR_PATH_LINE, {{x + bl, bottom}}};
+        e = cubic_to(e, right, bottom - k, right - k, bottom, right - br, bottom);
+    e = point_to(e, GR_PATH_LINE, x + bl, bottom);
     if (bl)
-        e[n++] = (gr_path_element){GR_PATH_CUBIC, {{x + k, bottom}, {x, bottom - k}, {x, bottom - bl}}};
-    e[n++] = (gr_path_element){GR_PATH_LINE, {{x, y + tl}}};
+        e = cubic_to(e, x + k, bottom, x, bottom - k, x, bottom - bl);
+    if (round)
+        e = point_to(e, GR_PATH_LINE, x, y + tl);
     if (tl)
-        e[n++] = (gr_path_element){GR_PATH_CUBIC, {{x, y + k}, {x + k, y}, {x + tl, y}}};
-    e[n++] = (gr_path_element){GR_PATH_CLOSE, {{0, 0}}};
-    return gr_path_builder_append(b, (gr_path_element_list){e, n});
+        e = cubic_to(e, x, y + k, x + k, y, x + tl, y);
+    return close_path(b, e);
 }

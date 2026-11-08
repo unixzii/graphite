@@ -364,9 +364,9 @@ void set_gradient(gr_layer *l, bool radial, gr_point start, gr_point end, double
     gr_paint_unref(p);
 }
 
-void set_shadow(gr_layer *l, double x, double y, double sigma, double spread)
+void set_shadow(gr_layer *l, double x, double y, double sigma)
 {
-    gr_shadow shadow = {.color = color(BLACK), .offset = {x, y}, .blur_sigma = sigma, .spread = spread};
+    gr_shadow shadow = {.color = color(BLACK), .offset = {x, y}, .blur_sigma = sigma};
     API(gr_layer_set_shadow(l, &shadow));
 }
 

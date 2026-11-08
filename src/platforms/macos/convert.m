@@ -1,42 +1,8 @@
 #include "internal.h"
 
-CGPoint gr_cg_point(gr_point p)
-{
-    return CGPointMake(p.x, p.y);
-}
-
-CGRect gr_cg_rect(gr_rect r)
-{
-    return CGRectMake(r.origin.x, r.origin.y, r.size.width, r.size.height);
-}
-
-gr_rect gr_from_cg_rect(CGRect r)
-{
-    return (gr_rect){{r.origin.x, r.origin.y}, {r.size.width, r.size.height}};
-}
-
-CGAffineTransform gr_cg_affine(gr_affine m)
-{
-    return CGAffineTransformMake(m.a, m.b, m.c, m.d, m.tx, m.ty);
-}
-
 CGColorRef gr_cg_color(gr_color c)
 {
     return CGColorCreateSRGB(c.r, c.g, c.b, c.a);
-}
-
-CACornerMask gr_ca_corners(gr_corners c)
-{
-    CACornerMask mask = 0;
-    if (c & GR_CORNER_TOP_LEFT)
-        mask |= kCALayerMinXMinYCorner;
-    if (c & GR_CORNER_TOP_RIGHT)
-        mask |= kCALayerMaxXMinYCorner;
-    if (c & GR_CORNER_BOTTOM_LEFT)
-        mask |= kCALayerMinXMaxYCorner;
-    if (c & GR_CORNER_BOTTOM_RIGHT)
-        mask |= kCALayerMaxXMaxYCorner;
-    return mask;
 }
 
 CGPathRef gr_cg_path(const gr_path *path)
@@ -68,16 +34,24 @@ CGPathRef gr_cg_path(const gr_path *path)
     return p;
 }
 
-CGImageRef gr_cg_image(const gr_image *image)
+static void release_pixels(void *image, const void *data, size_t size)
+{
+    (void)data;
+    (void)size;
+    gr_image_unref(image);
+}
+
+/* Images are immutable, so the CGImage borrows their pixels and holds a reference instead of copying them. */
+CGImageRef gr_cg_image(gr_image *image)
 {
     gr_bytes pixels = gr_image_get_pixels(image);
-    CFDataRef data = CFDataCreate(NULL, pixels.data, (CFIndex)pixels.count);
-    if (!data)
-        return NULL;
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
-    CFRelease(data);
+    CGDataProviderRef provider =
+        CGDataProviderCreateWithData(gr_image_ref(image), pixels.data, pixels.count, release_pixels);
     if (!provider)
+    {
+        gr_image_unref(image);
         return NULL;
+    }
     CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     size_t w = gr_image_get_width(image), h = gr_image_get_height(image);
     CGImageRef result =

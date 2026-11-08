@@ -17,7 +17,6 @@ static NSString *const family_key = @"GRFontFamily";
 static NSString *const size_key = @"GRFontSize";
 static NSString *const weight_key = @"GRFontWeight";
 static NSString *const italic_key = @"GRFontItalic";
-static NSString *const decorations_key = @"GRDecorations";
 
 #define CT_KEY(name) ((__bridge NSString *)(name))
 
@@ -202,8 +201,7 @@ static void apply_style(NSMutableAttributedString *s, NSRange range, const gr_te
         [s addAttribute:italic_key value:@(style->slant == GR_FONT_SLANT_ITALIC) range:range];
     if (fields & GR_TEXT_STYLE_DECORATIONS)
     {
-        /* Underlines are CoreText's own (they skip descenders); strikethrough is drawn here. */
-        [s addAttribute:decorations_key value:@(style->decorations) range:range];
+        /* Underlines are CoreText's own (they skip descenders). */
         bool underline = style->decorations & GR_TEXT_DECORATION_UNDERLINE;
         [s addAttribute:CT_KEY(kCTUnderlineStyleAttributeName)
                   value:@(underline ? kCTUnderlineStyleSingle : kCTUnderlineStyleNone)
@@ -393,10 +391,8 @@ static void build(ct_layout *l)
         CFIndex length;
         if (!o->has_max_width || o->wrap == GR_TEXT_WRAP_NONE)
             length = CTTypesetterSuggestClusterBreak(ts, start, unbounded);
-        else if (o->wrap == GR_TEXT_WRAP_WORD)
-            length = CTTypesetterSuggestLineBreak(ts, start, o->max_width);
         else
-            length = CTTypesetterSuggestClusterBreak(ts, start, o->max_width);
+            length = CTTypesetterSuggestLineBreak(ts, start, o->max_width);
         if (length < 1)
             length = 1;
         if (length > paragraph_stop - start)
@@ -960,37 +956,6 @@ const gr_text_layout_vtable gr_ct_layout_vtable = {
 
 /* Drawing */
 
-/* Draws strikethrough from the run's font metrics; CoreText draws none. */
-static void strike(CGContextRef c, CTLineRef line, double x, double baseline, CGColorRef fallback)
-{
-    NSArray *runs = (__bridge NSArray *)CTLineGetGlyphRuns(line);
-    for (id object in runs)
-    {
-        CTRunRef run = (__bridge CTRunRef)object;
-        NSDictionary *attributes = (__bridge NSDictionary *)CTRunGetAttributes(run);
-        unsigned decorations = [attributes[decorations_key] unsignedIntValue];
-        CTFontRef font = (__bridge CTFontRef)attributes[CT_KEY(kCTFontAttributeName)];
-        CFIndex count = CTRunGetGlyphCount(run);
-        if (!(decorations & GR_TEXT_DECORATION_STRIKETHROUGH) || !font || !count)
-            continue;
-        CGPoint *positions = zalloc((size_t)count, sizeof(*positions));
-        CTRunGetPositions(run, CFRangeMake(0, 0), positions);
-        double left = INFINITY;
-        for (CFIndex i = 0; i < count; ++i)
-            left = fmin(left, positions[i].x);
-        free(positions);
-        double width = CTRunGetTypographicBounds(run, CFRangeMake(0, 0), NULL, NULL, NULL);
-        bool from_context = [attributes[CT_KEY(kCTForegroundColorFromContextAttributeName)] boolValue];
-        CGColorRef color =
-            from_context ? fallback : (__bridge CGColorRef)attributes[CT_KEY(kCTForegroundColorAttributeName)];
-        CGContextSetFillColorWithColor(c, color ? color : fallback);
-        double thickness = fmax(CTFontGetUnderlineThickness(font), 0.5);
-        double y = baseline - CTFontGetXHeight(font) / 2;
-        CGContextFillRect(c, CGRectMake(x + left, y - thickness / 2, width, thickness));
-    }
-    CGContextSetFillColorWithColor(c, fallback);
-}
-
 static bool underlined(CTLineRef line)
 {
     for (id object in (__bridge NSArray *)CTLineGetGlyphRuns(line))
@@ -1025,7 +990,6 @@ static void draw_line(CGContextRef c, CTLineRef line, double x, double baseline,
         CTLineDraw(line, c);
         CGContextRestoreGState(c);
     }
-    strike(c, line, x, baseline, color);
 }
 
 void gr_ct_draw_layout(CGContextRef c, gr_text_layout *layout, gr_point origin, gr_color color)

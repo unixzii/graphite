@@ -5,7 +5,7 @@ addToLibrary({
   web_test_layer_tree__deps: ['$stringToNewUTF8'],
   web_test_layer_tree: () => {
     const walk = (el, depth) => {
-      const subs = [...(el.querySelector(':scope > div > .gr-sublayers')?.children ?? [])];
+      const subs = [...(el.querySelector(':scope > div > div > .gr-sublayers')?.children ?? [])];
       return depth + subs.map((s) => '(' + walk(s, depth + 1) + ')').join('');
     };
     const root = document.querySelector('#host > .gr-host')?.firstChild;

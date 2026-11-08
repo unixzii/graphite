@@ -1,6 +1,6 @@
 # Backend conformance
 
-The suite contains **28 semantic cases, 8 measured cases and 18 text cases**,
+The suite contains **28 semantic cases, 7 measured cases and 18 text cases**,
 each at **1×, 1.5× and 2×**.
 
 ## Organization
@@ -76,8 +76,8 @@ acceptance is defined by the cases; cross-platform pixels may differ.
 Linux uses `graphite_gtk_conformance` with `GRAPHITE_GSK_RENDERERS=gl,vulkan,cairo`.
 The Web backend uses `graphite_web_conformance`, which runs in headless Chromium
 through `tests/web/run.mjs`; see the [Web backend guide](../src/platforms/web/README.md).
-A harness can list features its backend lacks in `unsupported` (`GR_CONF_MASKS`,
-`GR_CONF_THREADS` for text systems used from several threads);
+A harness can list features its backend lacks in `unsupported` (`GR_CONF_THREADS`
+for text systems used from several threads);
 cases needing them report as skipped, as text cases do without a text system.
 Windows uses `graphite_windows_conformance` in an interactive desktop. See the
 [GTK](../src/platforms/gtk/README.md) and

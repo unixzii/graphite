@@ -14,8 +14,8 @@ headers in `include/graphite`, and backend-independent rendering tests in
 ## Ownership
 
 `gr_scene *` and `gr_layer *` are stable opaque handles. `new` returns one owned
-reference; `ref` acquires one and `unref` releases one. Parents own children,
-mask owners own masks, and the Scene owns its root. The tree keeps a child alive
+reference; `ref` acquires one and `unref` releases one. Parents own children
+and the Scene owns its root. The tree keeps a child alive
 after the caller releases its local reference.
 
 Layer back-pointers do not own the Scene. Final Scene release invalidates
@@ -41,7 +41,7 @@ that recognize them by vtable address and return NULL/false for other hosts.
 Hosts with a native input surface are interactive: they deliver input and frame events from
 [event.h](../include/graphite/event.h) to one handler. Graphite normalizes events into host coordinates and paces
 frames; hit testing, routing, gestures and focus chains stay with the application. Core owns the handler and the
-delivery rules (validation, frame request coalescing, queueing events dispatched from inside a handler, deferred
+delivery rules (event validation in debug builds, frame request coalescing, queueing events dispatched from inside a handler, deferred
 handler destruction); platforms report native events through `gr_scene_host_dispatch_event` and implement the
 optional event callbacks of `gr_scene_host_vtable`.
 
@@ -87,7 +87,7 @@ deferred drawing; it safely becomes inactive when its Scene disappears.
 Backends cache native rendering using display version, bounds and scale. They
 can drop the recording after replay. macOS uses a CALayer delegate/backing store;
 Windows uses composition drawing surfaces; GTK caches immutable GSK nodes and
-invalidates ancestors of changed children or masks. Scene mutation and nested
+invalidates ancestors of changed children. Scene mutation and nested
 drawing are rejected while a drawer runs.
 
 ## Text
@@ -104,20 +104,26 @@ recoloring needs no relayout.
 
 ## Coordinates and pixel snapping
 
-Box space runs from `(0,0)` to the resolved size. Background, border, image,
-clipping and default shadow use it. Local space includes `bounds.origin` and is
-used by children, paths, drawings, custom shadows and masks. `bounds_offset` is
-`-bounds.origin`, translating local content into box space.
+A `gr_resolved` is the layer's properties plus what core derives from them:
+`props` with its bounds and border width snapped, the composed `transform` and
+the kind's `content`. Box space runs from `(0,0)` to `props.bounds.size`.
+Background, border, image, clipping and default shadow use it. Local space is
+offset by `props.bounds.origin` and is used by children, paths, drawings,
+custom shadows and path masks; translate it by `-bounds.origin` into box space.
 
-The resolved transform is `T(position) * transform * T(-anchor * size)`; the root
-uses identity. Resolved size, border width, shadow shape and image placement are
-computed centrally. Backends using raw position must include `snap_offset`.
+The resolved transform is `T(position) * transform * T(-anchor * size)` with its
+translation snapped; the root uses identity. Every backend places layers with
+it. Core Animation keeps the anchor point at zero, puts the translation in
+`position` and only the linear part in `transform`, so translated layers keep
+the cheaper identity transform. Image
+placement is computed centrally, and `gr_resolved_new_shadow_path` builds the
+box-space shadow outline.
 
-Pixel snapping is enabled by default. Translation, bounds offset, axis-aligned
-size and border width snap to the backing-scale grid. Nonzero box dimensions and
-borders retain at least one device pixel. Snapping is local to each layer, so
-fractional error can accumulate in deep hierarchies. Scale or snapping changes
-invalidate dependent resolved values.
+Pixel snapping is always on. Translation, bounds offset, axis-aligned size and
+border width snap to the backing-scale grid. Nonzero box dimensions and borders
+retain at least one device pixel. Snapping is local to each layer, so
+fractional error can accumulate in deep hierarchies. Scale changes invalidate
+dependent resolved values.
 
 Coordinates use logical points, top-left origin, downward Y and radians. Colors
 are straight-alpha sRGB; images and captures use premultiplied RGBA8. Shadows use

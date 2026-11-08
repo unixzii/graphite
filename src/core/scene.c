@@ -1,14 +1,11 @@
 #include "model.h"
 
-gr_layer_props gr_model_defaults(void)
-{
-    return (gr_layer_props){
-        .anchor_point = {0.5, 0.5}, .transform = {1, 0, 0, 1, 0, 0}, .opacity = 1, .masked_corners = GR_CORNERS_ALL};
-}
+const gr_layer_extras gr_model_no_extras;
 
-gr_result gr_model_writable(const gr_scene *s)
+gr_model_props gr_model_defaults(void)
 {
-    return s && (s->drawing || s->busy) ? GR_ERROR_REENTRANT : GR_OK;
+    return (gr_model_props){
+        .anchor_point = {0.5, 0.5}, .transform = {1, 0, 0, 1, 0, 0}, .opacity = 1, .masked_corners = GR_CORNERS_ALL};
 }
 
 static void dequeue(gr_layer *l)
@@ -66,26 +63,43 @@ void gr_model_attach(gr_layer *l, bool attached)
         stack = data;
         for (size_t i = 0; i < node->child_count; ++i)
             stack[count++] = node->children[i];
-        if (node->mask)
-            stack[count++] = node->mask;
     }
     free(stack);
 }
 
 void gr_model_drop_content(gr_layer *l)
 {
-    gr_drawer drawer = l->drawer;
-    l->drawer = (gr_drawer){0};
-    gr_path *shadow = l->props.has_shadow ? l->props.shadow.path : NULL;
+    /* Reset the layer first; releasing resources and destroying the drawer may run user code. */
+    gr_layer_extras *extras = l->extras;
+    gr_drawer drawer = {0};
+    gr_image *image = NULL;
+    gr_shape_props shape = {0};
+    gr_paint *gradient = NULL;
+    l->extras = NULL;
     l->props = gr_model_defaults();
-    gr_shape_props shape = l->shape;
-    l->shape = (gr_shape_props){.stroke_end = 1};
-    gr_image *image = l->image;
-    gr_paint *gradient = l->gradient;
-    l->image = NULL;
-    l->gradient = NULL;
     l->gravity = GR_GRAVITY_RESIZE;
-    gr_path_unref(shadow);
+    switch (l->kind)
+    {
+        case GR_LAYER_CONTENT:
+            drawer = l->drawer;
+            image = l->image;
+            l->drawer = (gr_drawer){0};
+            l->image = NULL;
+            break;
+        case GR_LAYER_SHAPE:
+            shape = l->shape;
+            l->shape = (gr_shape_props){.stroke_end = 1};
+            break;
+        case GR_LAYER_GRADIENT:
+            gradient = l->gradient;
+            l->gradient = NULL;
+            break;
+    }
+    if (extras && extras->has_shadow)
+        gr_path_unref(extras->shadow.path);
+    if (extras && extras->has_mask)
+        gr_model_mask_refs(&extras->mask, false);
+    free(extras);
     gr_path_unref(shape.path);
     gr_paint_unref(shape.fill);
     gr_stroke_unref(shape.stroke);
@@ -99,23 +113,32 @@ static void clear_edges(gr_layer *l)
 {
     gr_layer **children = l->children;
     size_t count = l->child_count;
-    gr_layer *mask = l->mask;
     l->children = NULL;
     l->child_count = l->child_capacity = 0;
-    l->mask = NULL;
     for (size_t i = 0; i < count; ++i)
     {
         children[i]->parent = NULL;
-        children[i]->mask_parent = false;
         gr_layer_unref(children[i]);
     }
-    if (mask)
-    {
-        mask->parent = NULL;
-        mask->mask_parent = false;
-        gr_layer_unref(mask);
-    }
     free(children);
+}
+
+void gr_model_request(gr_scene *s)
+{
+    if (s->has_backend && !s->requested && !s->closing && !s->busy && !s->drawing && !s->draining &&
+        (s->dirty_head || s->released_count))
+    {
+        s->requested = true;
+        s->busy = true;
+        s->vtable.request_commit(s->backend);
+        s->busy = false;
+    }
+}
+
+void gr_model_changed(gr_layer *l, gr_dirty_bits bits)
+{
+    gr_model_mark(l, bits);
+    gr_model_request(l->scene);
 }
 
 /* Consumes a Scene pin after cleanup and scheduling; callers must not use s afterward. */
@@ -153,13 +176,7 @@ static void flush_owned(gr_scene *s)
             free(l);
     }
     s->draining = false;
-    if (s->has_backend && !s->requested && (s->dirty_head || s->released_count))
-    {
-        s->requested = true;
-        s->busy = true;
-        s->vtable.request_commit(s->backend);
-        s->busy = false;
-    }
+    gr_model_request(s);
     gr_scene_unref(s);
 }
 
@@ -175,7 +192,7 @@ gr_scene *gr_scene_new(gr_size size)
     if (!gr_valid_rect((gr_rect){{0, 0}, size}))
         return NULL;
     gr_scene *s = gr_alloc(1, sizeof(*s));
-    *s = (gr_scene){.refs = 1, .scale = 1, .snapping = true};
+    *s = (gr_scene){.refs = 1, .scale = 1};
     s->link = gr_alloc(1, sizeof(*s->link));
     *s->link = (gr_scene_link){1, s};
     s->provider = gr_alloc(1, sizeof(*s->provider));
@@ -208,7 +225,6 @@ void gr_scene_unref(gr_scene *s)
         ++l->refs;
         l->scene = NULL;
         l->parent = NULL;
-        l->mask_parent = false;
     }
     if (s->has_backend)
         s->vtable.destroy(s->backend);
@@ -244,11 +260,12 @@ gr_layer *gr_layer_new(gr_scene *s, gr_layer_kind kind)
     gr_layer *l = gr_alloc(1, sizeof(*l));
     *l = (gr_layer){.refs = 1,
                     .scene = s,
-                    .kind = kind,
+                    .kind = (uint8_t)kind,
+                    .gravity = GR_GRAVITY_RESIZE,
                     .dirty = GR_DIRTY_ALL,
-                    .props = gr_model_defaults(),
-                    .shape = {.stroke_end = 1},
-                    .gravity = GR_GRAVITY_RESIZE};
+                    .props = gr_model_defaults()};
+    if (kind == GR_LAYER_SHAPE)
+        l->shape.stroke_end = 1;
     l->next = s->layers;
     if (s->layers)
         s->layers->previous = l;
@@ -337,11 +354,6 @@ double gr_scene_get_backing_scale(const gr_scene *s)
     return s->scale;
 }
 
-bool gr_scene_get_pixel_snapping(const gr_scene *s)
-{
-    return s->snapping;
-}
-
 static bool size_content(const gr_layer *l)
 {
     return l->kind == GR_LAYER_GRADIENT || (l->kind == GR_LAYER_CONTENT && (l->image || l->drawer.draw));
@@ -349,7 +361,8 @@ static bool size_content(const gr_layer *l)
 
 gr_dirty_bits gr_model_corner_bits(const gr_layer *l)
 {
-    return l->props.has_shadow && !l->props.shadow.path ? GR_DIRTY_SHADOW : 0;
+    const gr_layer_extras *e = gr_model_extras(l);
+    return e->has_shadow && !e->shadow.path ? GR_DIRTY_SHADOW : 0;
 }
 
 gr_dirty_bits gr_model_size_bits(const gr_layer *l)
@@ -359,8 +372,9 @@ gr_dirty_bits gr_model_size_bits(const gr_layer *l)
 
 static gr_dirty_bits snap_bits(const gr_layer *l)
 {
-    return GR_DIRTY_GEOMETRY | (l->props.has_border ? GR_DIRTY_APPEARANCE : 0) |
-           (l->props.has_shadow ? GR_DIRTY_SHADOW : 0) | (size_content(l) ? GR_DIRTY_CONTENT : 0);
+    const gr_layer_extras *e = gr_model_extras(l);
+    return GR_DIRTY_GEOMETRY | (e->has_border ? GR_DIRTY_APPEARANCE : 0) | (e->has_shadow ? GR_DIRTY_SHADOW : 0) |
+           (size_content(l) ? GR_DIRTY_CONTENT : 0);
 }
 
 gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
@@ -373,20 +387,7 @@ gr_result gr_scene_set_backing_scale(gr_scene *s, double scale)
         return GR_OK;
     s->scale = scale;
     for (gr_layer *l = s->layers; l; l = l->next)
-        gr_model_mark(l, (s->snapping ? snap_bits(l) : 0) | (l->kind != GR_LAYER_CONTAINER ? GR_DIRTY_CONTENT : 0));
-    gr_model_flush(s);
-    return GR_OK;
-}
-
-gr_result gr_scene_set_pixel_snapping(gr_scene *s, bool enabled)
-{
-    if (gr_model_writable(s) != GR_OK)
-        return GR_ERROR_REENTRANT;
-    if (s->snapping == enabled)
-        return GR_OK;
-    s->snapping = enabled;
-    for (gr_layer *l = s->layers; l; l = l->next)
-        gr_model_mark(l, snap_bits(l));
+        gr_model_mark(l, snap_bits(l) | (l->kind != GR_LAYER_CONTAINER ? GR_DIRTY_CONTENT : 0));
     gr_model_flush(s);
     return GR_OK;
 }
@@ -417,7 +418,7 @@ gr_result gr_drawer_provider_draw(gr_drawer_provider *p, gr_layer *l, uint64_t v
         return GR_ERROR_REENTRANT;
     if (l->scene && l->scene != s)
         return GR_ERROR_SCENE;
-    if (!l->refs || l->scene != s || !l->drawer.draw || l->display_version != version)
+    if (!l->refs || l->scene != s || !gr_model_has_drawer(l) || l->display_version != version)
         return GR_ERROR_STATE;
     if (!info || !gr_valid_rect(info->bounds) || !isfinite(info->scale) || info->scale <= 0)
         return GR_ERROR_ARGUMENT;
