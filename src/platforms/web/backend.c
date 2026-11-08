@@ -331,16 +331,16 @@ static void push_update(gr_web_backend *b, const gr_commit_batch *batch, const g
     {
         push(b, GR_WEB_GEOMETRY);
         push_id(b, u->layer);
-        push(b, r->size.width);
-        push(b, r->size.height);
+        push(b, p->bounds.size.width);
+        push(b, p->bounds.size.height);
         push(b, r->transform.a);
         push(b, r->transform.b);
         push(b, r->transform.c);
         push(b, r->transform.d);
         push(b, r->transform.tx);
         push(b, r->transform.ty);
-        push(b, r->bounds_offset.x);
-        push(b, r->bounds_offset.y);
+        push(b, -p->bounds.origin.x);
+        push(b, -p->bounds.origin.y);
     }
     if (u->changed & GR_DIRTY_APPEARANCE)
     {
@@ -353,15 +353,14 @@ static void push_update(gr_web_backend *b, const gr_commit_batch *batch, const g
         push(b, p->masked_corners);
         push(b, p->has_background);
         push_color(b, p->background);
-        push(b, r->has_border);
-        push(b, r->border.width);
-        push_color(b, r->border.color);
+        push(b, p->has_border);
+        push(b, p->border.width);
+        push_color(b, p->border.color);
         push(b, p->blur_sigma);
     }
     if (u->changed & GR_DIRTY_SHADOW)
     {
-        gr_path *outline =
-            p->has_shadow && r->has_shadow ? gr_shadow_shape_new_path(&r->shadow_shape, r->bounds_offset) : NULL;
+        gr_path *outline = gr_resolved_new_shadow_path(r);
         push(b, GR_WEB_SHADOW);
         push_id(b, u->layer);
         push(b, outline != NULL);
@@ -384,7 +383,7 @@ static void push_update(gr_web_backend *b, const gr_commit_batch *batch, const g
         if (p->has_mask && p->mask.kind == GR_MASK_PATH)
         {
             push(b, p->mask.value.path.rule == GR_FILL_EVEN_ODD);
-            push_path_at(b, p->mask.value.path.path, r->bounds_offset);
+            push_path_at(b, p->mask.value.path.path, (gr_point){-p->bounds.origin.x, -p->bounds.origin.y});
         }
         else if (p->has_mask)
             push_paint(b, p->mask.value.gradient);

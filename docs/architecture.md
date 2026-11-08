@@ -104,14 +104,18 @@ recoloring needs no relayout.
 
 ## Coordinates and pixel snapping
 
-Box space runs from `(0,0)` to the resolved size. Background, border, image,
-clipping and default shadow use it. Local space includes `bounds.origin` and is
-used by children, paths, drawings, custom shadows and masks. `bounds_offset` is
-`-bounds.origin`, translating local content into box space.
+A `gr_resolved` is the layer's properties plus what core derives from them:
+`props` with its bounds and border width snapped, the composed `transform` and
+the kind's `content`. Box space runs from `(0,0)` to `props.bounds.size`.
+Background, border, image, clipping and default shadow use it. Local space is
+offset by `props.bounds.origin` and is used by children, paths, drawings,
+custom shadows and path masks; translate it by `-bounds.origin` into box space.
 
-The resolved transform is `T(position) * transform * T(-anchor * size)`; the root
-uses identity. Resolved size, border width, shadow shape and image placement are
-computed centrally. Backends using raw position must include `snap_offset`.
+The resolved transform is `T(position) * transform * T(-anchor * size)` with its
+translation snapped; the root uses identity. Every backend places layers with
+it, Core Animation included (its anchor point and position stay zero). Image
+placement is computed centrally, and `gr_resolved_new_shadow_path` builds the
+box-space shadow outline.
 
 Pixel snapping is always on. Translation, bounds offset, axis-aligned size and
 border width snap to the backing-scale grid. Nonzero box dimensions and borders

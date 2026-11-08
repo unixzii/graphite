@@ -28,7 +28,7 @@ enum
     GR_WEB_REALIZE = 2,    /* layer kind */
     GR_WEB_CHILDREN = 3,   /* parent count children... */
     GR_WEB_RELEASE = 4,    /* layer */
-    GR_WEB_GEOMETRY = 5,   /* layer width height a b c d tx ty bounds_offset_x bounds_offset_y */
+    GR_WEB_GEOMETRY = 5,   /* layer width height a b c d tx ty offset_x offset_y (-bounds.origin) */
     GR_WEB_APPEARANCE = 6, /* layer opacity hidden masks_to_bounds radius corners has_background color has_border
                             * width color blur */
     GR_WEB_SHADOW = 7,     /* layer has; if set: color offset_x offset_y sigma path (box space) */

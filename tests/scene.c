@@ -453,8 +453,8 @@ static void geometry(void)
     const gr_resolved *v = &update(&r, l)->resolved;
     CHECK_NEAR(v->transform.tx, 11);
     CHECK_NEAR(v->transform.ty, 27);
-    CHECK_NEAR(v->bounds_offset.x, -3);
-    CHECK_NEAR(v->bounds_offset.y, -4);
+    CHECK_NEAR(v->props.bounds.origin.x, 3);
+    CHECK_NEAR(v->props.bounds.origin.y, 4);
     OK(gr_layer_set_transform(l, (gr_affine){1, 0, 0, 1, 0, 0}));
     OK(gr_layer_set_frame(l, (gr_rect){{5, 6}, {11, 12}}));
     gr_rect frame = gr_layer_get_frame(l);
@@ -470,10 +470,10 @@ static void geometry(void)
     OK(gr_scene_set_backing_scale(s, 1.5));
     OK(gr_scene_commit(s));
     v = &update(&r, l)->resolved;
-    CHECK_NEAR(v->size.width, 10);
-    CHECK_NEAR(v->size.height, 4);
-    CHECK_NEAR(v->border.width, 2.0 / 3);
-    gr_path *outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
+    CHECK_NEAR(v->props.bounds.size.width, 10);
+    CHECK_NEAR(v->props.bounds.size.height, 4);
+    CHECK_NEAR(v->props.border.width, 2.0 / 3);
+    gr_path *outline = gr_resolved_new_shadow_path(v);
     CHECK(outline);
     gr_path_element_list el = gr_path_get_elements(outline);
     CHECK_NEAR(el.data[0].p[0].x, 2);
@@ -489,7 +489,7 @@ static void geometry(void)
     OK(gr_scene_commit(s));
     CHECK(update(&r, l)->changed == (GR_DIRTY_GEOMETRY | GR_DIRTY_SHADOW));
     v = &update(&r, l)->resolved;
-    outline = gr_shadow_shape_new_path(&v->shadow_shape, v->bounds_offset);
+    outline = gr_resolved_new_shadow_path(v);
     el = gr_path_get_elements(outline);
     CHECK_NEAR(el.data[0].p[0].x, 4 - 4.0 / 3);
     CHECK_NEAR(el.data[0].p[0].y, 3);

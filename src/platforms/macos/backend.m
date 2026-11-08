@@ -403,22 +403,12 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     const gr_resolved *r = &update->resolved;
     const gr_layer_props *p = &r->props;
     gr_dirty_bits dirty = update->changed;
-    CGRect local = CGRectMake(-r->bounds_offset.x, -r->bounds_offset.y, r->size.width, r->size.height);
+    CGRect local = gr_cg_rect(p->bounds);
     if (dirty & GR_DIRTY_GEOMETRY)
     {
-        node.outer.bounds = CGRectMake(0, 0, r->size.width, r->size.height);
-        if (identity == _root)
-        {
-            node.outer.anchorPoint = CGPointZero;
-            node.outer.position = CGPointZero;
-            node.outer.transform = CATransform3DIdentity;
-        }
-        else
-        {
-            node.outer.anchorPoint = gr_cg_point(p->anchor_point);
-            node.outer.position = CGPointMake(p->position.x + r->snap_offset.x, p->position.y + r->snap_offset.y);
-            node.outer.transform = CATransform3DMakeAffineTransform(gr_cg_affine(p->transform));
-        }
+        /* The resolved transform already places the box, so the outer layer's own anchor and position stay zero. */
+        node.outer.bounds = CGRectMake(0, 0, local.size.width, local.size.height);
+        node.outer.transform = CATransform3DMakeAffineTransform(gr_cg_affine(r->transform));
         node.body.bounds = local;
     }
     if (dirty & GR_DIRTY_APPEARANCE)
@@ -432,11 +422,11 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
         node.body.backgroundColor = color;
         if (color)
             CGColorRelease(color);
-        color = r->has_border ? gr_cg_color(r->border.color) : NULL;
+        color = p->has_border ? gr_cg_color(p->border.color) : NULL;
         node.body.borderColor = color;
         if (color)
             CGColorRelease(color);
-        node.body.borderWidth = r->has_border ? r->border.width : 0;
+        node.body.borderWidth = p->has_border ? p->border.width : 0;
         if (node.blur != p->blur_sigma)
         {
             node.blur = p->blur_sigma;
@@ -445,7 +435,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
     }
     if (dirty & GR_DIRTY_SHADOW)
     {
-        if (p->has_shadow && r->has_shadow)
+        if (p->has_shadow)
         {
             gr_color color = p->shadow.color;
             color.a = 1;
@@ -455,7 +445,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
             node.outer.shadowOpacity = p->shadow.color.a;
             node.outer.shadowOffset = CGSizeMake(p->shadow.offset.x, p->shadow.offset.y);
             node.outer.shadowRadius = p->shadow.blur_sigma;
-            gr_path *outline = gr_shadow_shape_new_path(&r->shadow_shape, r->bounds_offset);
+            gr_path *outline = gr_resolved_new_shadow_path(r);
             CGPathRef path = outline ? gr_cg_path(outline) : NULL;
             node.outer.shadowPath = path;
             if (path)
@@ -552,6 +542,7 @@ static void apply_mask(CALayer *body, const gr_layer_props *p, CGRect local, dou
             layer.allowsEdgeAntialiasing = YES;
             layer.contentsScale = _scale;
         }
+        node.outer.anchorPoint = CGPointZero;
         node.body.anchorPoint = CGPointZero;
         node.body.position = CGPointZero;
         [node.outer addSublayer:node.body];

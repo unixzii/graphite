@@ -68,47 +68,29 @@ static gr_rect place(gr_gravity gravity, gr_size content, gr_size size)
     return (gr_rect){{x, y}, {w, h}};
 }
 
+/* Snapping is local to each layer: translation, bounds origin, axis-aligned size and border width move to the
+ * device-pixel grid, keeping at least one pixel for nonzero lengths. */
 gr_resolved gr_model_resolve(const gr_layer *l)
 {
-    const gr_layer_props *p = &l->props;
     double scale = l->scene->scale;
-    bool axis_aligned = p->transform.a == 1 && p->transform.d == 1 && p->transform.b == 0 && p->transform.c == 0;
-    gr_resolved r = {.props = *p,
-                     .size = p->bounds.size,
-                     .has_border = p->has_border,
-                     .border = p->border,
-                     .bounds_offset = {-p->bounds.origin.x, -p->bounds.origin.y},
-                     .has_shadow = p->has_shadow};
-    if (axis_aligned)
+    gr_resolved r = {.props = l->props};
+    gr_layer_props *p = &r.props;
+    if (p->transform.a == 1 && p->transform.d == 1 && p->transform.b == 0 && p->transform.c == 0)
     {
-        r.size.width = snap_length(r.size.width, scale);
-        r.size.height = snap_length(r.size.height, scale);
+        p->bounds.size.width = snap_length(p->bounds.size.width, scale);
+        p->bounds.size.height = snap_length(p->bounds.size.height, scale);
     }
-    if (r.has_border)
-        r.border.width = snap_length(r.border.width, scale);
-    r.transform = l == l->scene->root ? (gr_affine){1, 0, 0, 1, 0, 0} : gr_model_transform(p, r.size);
+    p->bounds.origin.x = snap(p->bounds.origin.x, scale);
+    p->bounds.origin.y = snap(p->bounds.origin.y, scale);
+    if (p->has_border)
+        p->border.width = snap_length(p->border.width, scale);
+    if (l == l->scene->root)
+        r.transform = (gr_affine){1, 0, 0, 1, 0, 0};
+    else
     {
-        double tx = snap(r.transform.tx, scale), ty = snap(r.transform.ty, scale);
-        r.snap_offset = (gr_point){tx - r.transform.tx, ty - r.transform.ty};
-        r.transform.tx = tx;
-        r.transform.ty = ty;
-        r.bounds_offset.x = snap(r.bounds_offset.x, scale);
-        r.bounds_offset.y = snap(r.bounds_offset.y, scale);
-    }
-    if (p->has_shadow)
-    {
-        if (p->shadow.path)
-        {
-            r.shadow_shape.kind = GR_SHADOW_PATH;
-            r.shadow_shape.value.path = p->shadow.path;
-        }
-        else
-        {
-            r.shadow_shape.kind = GR_SHADOW_ROUNDED_RECT;
-            r.shadow_shape.value.rounded_rect.rect = (gr_rect){{0, 0}, r.size};
-            r.shadow_shape.value.rounded_rect.radius = p->corner_radius;
-            r.shadow_shape.value.rounded_rect.corners = p->masked_corners;
-        }
+        r.transform = gr_model_transform(&l->props, p->bounds.size);
+        r.transform.tx = snap(r.transform.tx, scale);
+        r.transform.ty = snap(r.transform.ty, scale);
     }
     switch (l->kind)
     {
@@ -125,7 +107,7 @@ gr_resolved gr_model_resolve(const gr_layer *l)
                 double image_scale = gr_image_get_scale(l->image);
                 gr_size size = {gr_image_get_width(l->image) / image_scale,
                                 gr_image_get_height(l->image) / image_scale};
-                r.content.value.image.rect = place(l->gravity, size, r.size);
+                r.content.value.image.rect = place(l->gravity, size, p->bounds.size);
             }
             break;
         case GR_LAYER_SHAPE:
@@ -147,34 +129,30 @@ gr_resolved gr_model_resolve(const gr_layer *l)
 
 gr_draw_info gr_resolved_get_draw_info(const gr_resolved *r, double scale)
 {
-    return (gr_draw_info){{{-r->bounds_offset.x, -r->bounds_offset.y}, r->size}, scale};
+    return (gr_draw_info){r->props.bounds, scale};
 }
 
-gr_path *gr_shadow_shape_new_path(const gr_shadow_shape *shape, gr_point offset)
+gr_path *gr_resolved_new_shadow_path(const gr_resolved *r)
 {
-    if (!shape || !gr_valid_point(offset))
+    const gr_layer_props *p = &r->props;
+    if (!p->has_shadow)
         return NULL;
     gr_path_builder *b = gr_path_builder_new();
-    gr_result result = GR_ERROR_ARGUMENT;
-    if (shape->kind == GR_SHADOW_ROUNDED_RECT)
+    gr_result result = GR_OK;
+    if (!p->shadow.path)
+        result =
+            gr_path_builder_add_rounded_rect(b, (gr_rect){{0, 0}, p->bounds.size}, p->corner_radius, p->masked_corners);
+    else
     {
-        gr_rect r = shape->value.rounded_rect.rect;
-        double radius = shape->value.rounded_rect.radius;
-        if (gr_valid_rect(r) && isfinite(radius) && radius >= 0)
-            result = gr_path_builder_add_rounded_rect(b, r, radius, shape->value.rounded_rect.corners);
-    }
-    else if (shape->kind == GR_SHADOW_PATH && shape->value.path)
-    {
-        gr_path_element_list elements = gr_path_get_elements(shape->value.path);
-        result = GR_OK;
+        gr_path_element_list elements = gr_path_get_elements(p->shadow.path);
         for (size_t i = 0; i < elements.count && result == GR_OK; ++i)
         {
             gr_path_element e = elements.data[i];
             unsigned count = e.verb == GR_PATH_CLOSE ? 0 : e.verb == GR_PATH_CUBIC ? 3 : e.verb == GR_PATH_QUAD ? 2 : 1;
             for (unsigned j = 0; j < count; ++j)
             {
-                e.p[j].x += offset.x;
-                e.p[j].y += offset.y;
+                e.p[j].x -= p->bounds.origin.x;
+                e.p[j].y -= p->bounds.origin.y;
             }
             result = gr_path_builder_append(b, (gr_path_element_list){&e, 1});
         }

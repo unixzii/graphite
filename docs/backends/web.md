@@ -57,7 +57,7 @@ div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
    ├─ div.body  clip-path: the rounded box, when masks_to_bounds
    │  ├─ svg    background: the rounded box, filled
    │  ├─ content image, shape, gradient or drawing
-   │  └─ div    sublayers, translated by bounds_offset
+   │  └─ div    sublayers, translated by -bounds.origin
    └─ svg       border: the rounded box minus its inset, inside the box and above everything
 ```
 
@@ -75,7 +75,7 @@ div.layer       transform: matrix(...) (origin 0 0), opacity, filter: blur(σpx)
   the one CSS box size in the tree: Chromium ignores a mask on an empty element
   and WebKit clips the mask to the border box.
 - **Shadows** are an SVG path of the resolved shadow shape
-  (`gr_shadow_shape_new_path`),
+  (`gr_resolved_new_shadow_path`),
   offset and blurred with `filter: blur(σpx)`. They are not `box-shadow`:
   CSS clips a box shadow away under its own box, but in Graphite the whole
   shape casts the shadow, also beneath a transparent background. WebKit's

@@ -22,15 +22,38 @@ static bool same_rect(gr_rect a, gr_rect b)
            a.size.height == b.size.height;
 }
 
-static bool same_shadow(gr_shadow_shape const &a, gr_shadow_shape const &b)
+static gr_size box_size(gr_resolved const &r)
 {
-    if (a.kind != b.kind)
-        return false;
-    if (a.kind == GR_SHADOW_PATH)
-        return a.value.path == b.value.path;
-    auto &x = a.value.rounded_rect;
-    auto &y = b.value.rounded_rect;
-    return same_rect(x.rect, y.rect) && x.radius == y.radius && x.corners == y.corners;
+    return r.props.bounds.size;
+}
+
+/* Translates local space into box space. */
+static gr_point local_offset(gr_resolved const &r)
+{
+    return {-r.props.bounds.origin.x, -r.props.bounds.origin.y};
+}
+
+/* What a shadow's outline depends on: a custom path moves with the bounds origin; the rounded box follows the size
+ * and corners. */
+struct ShadowKey
+{
+    gr_path *path = nullptr;
+    gr_rect bounds{};
+    double radius = 0;
+    gr_corners corners = 0;
+};
+
+static ShadowKey shadow_key(gr_resolved const &r)
+{
+    auto &p = r.props;
+    if (p.shadow.path)
+        return {p.shadow.path, {p.bounds.origin, {}}, 0, 0};
+    return {nullptr, {{0, 0}, p.bounds.size}, p.corner_radius, p.masked_corners};
+}
+
+static bool same_key(ShadowKey const &a, ShadowKey const &b)
+{
+    return a.path == b.path && same_rect(a.bounds, b.bounds) && a.radius == b.radius && a.corners == b.corners;
 }
 
 /* Box-space bounding box; empty until a rectangle with area is added. */
@@ -143,30 +166,29 @@ struct ShadowParts
     SpriteVisual sprite{nullptr};
     DropShadow drop{nullptr};
     CompositionDrawingSurface surface{nullptr};
-    bool valid = false;
-    gr_shadow_shape shape{};
-    gr_point offset{};
-    double scale = 0;
-    gr_rect area{};   /**< Box-space bounds of the masked sprite. */
-    gr_point cast{};  /**< Shadow offset. */
-    double bleed = 0; /**< Reach of the shadow blur. */
+    bool keyed = false;
+    ShadowKey key{};
+    gr_path *outline = nullptr; /**< Owned box-space outline. */
+    double scale = 0;           /**< Scale the mask was rasterized at; 0 when it needs rasterizing. */
+    gr_rect area{};             /**< Box-space bounds of the masked sprite. */
+    gr_point cast{};            /**< Shadow offset. */
+    double bleed = 0;           /**< Reach of the shadow blur. */
 
     ~ShadowParts()
     {
-        if (valid && shape.kind == GR_SHADOW_PATH)
-            gr_path_unref(shape.value.path);
+        gr_path_unref(key.path);
+        gr_path_unref(outline);
     }
 
-    void remember(gr_shadow_shape const &next, gr_point at, double factor)
+    void remember(ShadowKey const &next, gr_path *owned)
     {
-        if (next.kind == GR_SHADOW_PATH)
-            gr_path_ref(next.value.path);
-        if (valid && shape.kind == GR_SHADOW_PATH)
-            gr_path_unref(shape.value.path);
-        shape = next;
-        offset = at;
-        scale = factor;
-        valid = true;
+        gr_path_ref(next.path);
+        gr_path_unref(key.path);
+        gr_path_unref(outline);
+        key = next;
+        outline = owned;
+        keyed = true;
+        scale = 0;
     }
 };
 
@@ -330,7 +352,7 @@ struct Backend
     CompositionClip rounded_clip(gr_rect r, double radius, gr_corners corners);
     void decoration(Node &n, gr_resolved const &r);
     void shadow(Node &n, gr_resolved const &r);
-    void raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offset);
+    void raster_shadow(Node &n);
     void apply_mask(gr_layer *id, Node &n, gr_resolved const &r);
     void apply_blur(gr_layer *id, double sigma);
     double effective_scale(gr_layer *id);
@@ -404,9 +426,9 @@ CompositionClip Backend::rounded_clip(gr_rect r, double radius, gr_corners corne
 void Backend::decoration(Node &n, gr_resolved const &r)
 {
     auto &p = r.props;
-    bool has_border = r.has_border && r.border.width > 0;
-    double amount = has_border && r.border.color.a >= 1 ? r.border.width / 2 : 0;
-    gr_rect inner = inset({{0, 0}, r.size}, amount);
+    bool has_border = r.props.has_border && r.props.border.width > 0;
+    double amount = has_border && r.props.border.color.a >= 1 ? r.props.border.width / 2 : 0;
+    gr_rect inner = inset({{0, 0}, box_size(r)}, amount);
     double radius = p.corner_radius > 0 ? std::max(0.0, p.corner_radius - amount) : 0;
     bool rounded = radius > 0 && p.masked_corners && inner.size.width > 0 && inner.size.height > 0;
     n.clipped.Clip(p.masks_to_bounds ? rounded_clip(inner, radius, p.masked_corners) : nullptr);
@@ -437,15 +459,15 @@ void Backend::decoration(Node &n, gr_resolved const &r)
             n.body.Children().InsertAtTop(n.border_visual);
         }
         auto b = gr_path_builder_new();
-        gr_path_builder_add_rounded_rect(b, {{0, 0}, r.size}, p.corner_radius, p.masked_corners);
-        gr_path_builder_add_rounded_rect(b, inset({{0, 0}, r.size}, r.border.width),
-                                         std::max(0.0, p.corner_radius - r.border.width), p.masked_corners);
+        gr_path_builder_add_rounded_rect(b, {{0, 0}, box_size(r)}, p.corner_radius, p.masked_corners);
+        gr_path_builder_add_rounded_rect(b, inset({{0, 0}, box_size(r)}, r.props.border.width),
+                                         std::max(0.0, p.corner_radius - r.props.border.width), p.masked_corners);
         path_owner ring(gr_path_builder_finish(b), gr_path_unref);
         gr_path_builder_unref(b);
         n.border_shape.Geometry(
             comp().CreatePathGeometry(composition_path(ctx.factory.get(), ring.get(), GR_FILL_EVEN_ODD)));
-        n.border_shape.FillBrush(comp().CreateColorBrush(color(r.border.color)));
-        n.border_visual.Size(vec(r.size.width, r.size.height));
+        n.border_shape.FillBrush(comp().CreateColorBrush(color(r.props.border.color)));
+        n.border_visual.Size(vec(box_size(r).width, box_size(r).height));
     }
     else if (n.border_visual)
     {
@@ -455,18 +477,18 @@ void Backend::decoration(Node &n, gr_resolved const &r)
     }
 }
 
-void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offset)
+/* Rasterizes the outline into the DropShadow's mask once per outline and scale. */
+void Backend::raster_shadow(Node &n)
 {
     auto &p = *n.shadow;
-    if (p.valid && p.scale == scale && p.offset.x == offset.x && p.offset.y == offset.y && same_shadow(p.shape, shape))
+    if (p.scale == scale)
         return;
-    path_owner outline(gr_shadow_shape_new_path(&shape, offset), gr_path_unref);
-    auto bbox = control_bounds(outline.get());
+    p.scale = scale;
+    auto bbox = p.outline ? control_bounds(p.outline) : std::nullopt;
     if (!bbox)
     {
         p.sprite.Size({0, 0});
         p.area = {};
-        p.remember(shape, offset, scale);
         return;
     }
     auto area = inset(*bbox, -1);
@@ -484,7 +506,7 @@ void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offs
                  desc.kind = GR_PAINT_SOLID;
                  desc.value.solid = {1, 1, 1, 1};
                  auto white = gr_paint_new(&desc);
-                 gr_canvas_fill_path(c, outline.get(), GR_FILL_NONZERO, white);
+                 gr_canvas_fill_path(c, p.outline, GR_FILL_NONZERO, white);
                  gr_paint_unref(white);
                  list_owner list(gr_canvas_finish(c), gr_display_list_unref);
                  gr_canvas_unref(c);
@@ -497,12 +519,11 @@ void Backend::raster_shadow(Node &n, gr_shadow_shape const &shape, gr_point offs
     p.sprite.Size(vec(w / scale, h / scale));
     p.area = {area.origin, {w / scale, h / scale}};
     p.surface = surface;
-    p.remember(shape, offset, scale);
 }
 
 void Backend::shadow(Node &n, gr_resolved const &r)
 {
-    if (!r.props.has_shadow || !r.has_shadow)
+    if (!r.props.has_shadow)
     {
         if (n.shadow)
         {
@@ -528,7 +549,10 @@ void Backend::shadow(Node &n, gr_resolved const &r)
     n.shadow->drop.BlurRadius(static_cast<float>(s.blur_sigma * 3));
     n.shadow->cast = s.offset;
     n.shadow->bleed = s.blur_sigma * 3;
-    raster_shadow(n, r.shadow_shape, r.bounds_offset);
+    auto key = shadow_key(r);
+    if (!n.shadow->keyed || !same_key(key, n.shadow->key))
+        n.shadow->remember(key, gr_resolved_new_shadow_path(&r));
+    raster_shadow(n);
 }
 
 void Backend::apply_mask(gr_layer *id, Node &n, gr_resolved const &r)
@@ -574,16 +598,16 @@ void Backend::apply_mask(gr_layer *id, Node &n, gr_resolved const &r)
         visual.Offset({static_cast<float>(e.origin.x), static_cast<float>(e.origin.y), 0});
         visual.Size(vec(e.size.width, e.size.height));
         m.host.Children().InsertAtTop(visual);
-        m.area = {{e.origin.x + r.bounds_offset.x, e.origin.y + r.bounds_offset.y}, e.size};
+        m.area = {{e.origin.x + local_offset(r).x, e.origin.y + local_offset(r).y}, e.size};
     }
     else
     {
         auto sprite = comp().CreateSpriteVisual();
         sprite.Brush(paint_brush(p.mask.value.gradient));
-        sprite.Offset({static_cast<float>(-r.bounds_offset.x), static_cast<float>(-r.bounds_offset.y), 0});
-        sprite.Size(vec(r.size.width, r.size.height));
+        sprite.Offset({static_cast<float>(-local_offset(r).x), static_cast<float>(-local_offset(r).y), 0});
+        sprite.Size(vec(box_size(r).width, box_size(r).height));
         m.host.Children().InsertAtTop(sprite);
-        m.area = {{0, 0}, r.size};
+        m.area = {{0, 0}, box_size(r)};
     }
 }
 
@@ -652,7 +676,7 @@ void Backend::update_shape(Node &n, gr_shape_props const &s, gr_resolved const &
     auto &p = *n.shape;
     auto e = p.extent;
     p.visual.Offset(
-        {static_cast<float>(r.bounds_offset.x + e.origin.x), static_cast<float>(r.bounds_offset.y + e.origin.y), 0});
+        {static_cast<float>(local_offset(r).x + e.origin.x), static_cast<float>(local_offset(r).y + e.origin.y), 0});
     p.visual.Size(vec(e.size.width, e.size.height));
     p.container.Offset(vec(-e.origin.x, -e.origin.y));
 }
@@ -690,7 +714,7 @@ void Backend::drawing(gr_layer *id, gr_resolved const &r)
     if (n.drawing && n.drawing->version == version && same_rect(n.drawing->bounds, info.bounds) &&
         n.drawing->scale == scale)
         return;
-    double width = std::ceil(r.size.width * scale), height = std::ceil(r.size.height * scale);
+    double width = std::ceil(box_size(r).width * scale), height = std::ceil(box_size(r).height * scale);
     gr_display_list *raw = nullptr;
     if (width >= 1 && height >= 1)
         gr_drawer_provider_draw(drawers, id, version, &info, &raw);
@@ -708,7 +732,7 @@ void Backend::drawing(gr_layer *id, gr_resolved const &r)
              [&](ID2D1DeviceContext *dc, POINT at)
              {
                  replay(dc, ctx.factory.get(), list.get(),
-                        {scale, 0, 0, scale, r.bounds_offset.x * scale + at.x, r.bounds_offset.y * scale + at.y});
+                        {scale, 0, 0, scale, local_offset(r).x * scale + at.x, local_offset(r).y * scale + at.y});
              });
     auto sprite = content_sprite(n);
     auto brush = comp().CreateSurfaceBrush(surface);
@@ -764,7 +788,7 @@ void Backend::content(gr_layer *id, gr_resolved const &r, bool changed)
             auto s = content_sprite(n);
             if (changed)
                 s.Brush(paint_brush(c.value.gradient));
-            s.Size(vec(r.size.width, r.size.height));
+            s.Size(vec(box_size(r).width, box_size(r).height));
             break;
         }
         case GR_CONTENT_SHAPE:
@@ -893,11 +917,11 @@ void Backend::update(gr_layer_update const &u)
     auto bits = u.changed;
     if (bits & GR_DIRTY_GEOMETRY)
     {
-        n.transform = u.layer == root ? gr_affine{1, 0, 0, 1, 0, 0} : r.transform;
-        n.size = r.size;
-        n.bounds_offset = r.bounds_offset;
+        n.transform = r.transform;
+        n.size = box_size(r);
+        n.bounds_offset = local_offset(r);
         n.outer.TransformMatrix(matrix4(n.transform));
-        n.sublayers.Offset({static_cast<float>(r.bounds_offset.x), static_cast<float>(r.bounds_offset.y), 0});
+        n.sublayers.Offset({static_cast<float>(local_offset(r).x), static_cast<float>(local_offset(r).y), 0});
     }
     if (bits & GR_DIRTY_APPEARANCE)
     {
@@ -923,7 +947,7 @@ void Backend::update(gr_layer_update const &u)
             n.content_box = c.value.image.rect;
         else if (c.kind == GR_CONTENT_SHAPE && n.shape)
             n.content_box = {
-                {n.shape->extent.origin.x + r.bounds_offset.x, n.shape->extent.origin.y + r.bounds_offset.y},
+                {n.shape->extent.origin.x + local_offset(r).x, n.shape->extent.origin.y + local_offset(r).y},
                 n.shape->extent.size};
     }
 }
@@ -1031,8 +1055,8 @@ void Backend::apply(gr_commit_batch const &b)
         for (auto &entry : nodes)
         {
             auto &n = *entry.second;
-            if (n.shadow && n.shadow->valid && n.shadow->scale != scale)
-                raster_shadow(n, n.shadow->shape, n.shadow->offset);
+            if (n.shadow)
+                raster_shadow(n);
             if (n.blurring)
                 apply_blur(entry.first, n.blur);
         }
