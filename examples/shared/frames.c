@@ -40,8 +40,18 @@ static bool on_frame(example_frames *f, const gr_event *event)
         f->finished(f);
         return true;
     }
-    gr_scene_host_request_frame(f->host);
+    /* Selftests and FPS reports run every frame; otherwise the host sleeps while the scene is still. */
+    if (f->selftest || f->fps || example_animating(f->content))
+        gr_scene_host_request_frame(f->host);
     return true;
+}
+
+/* Events between frames may start an animation. */
+static bool wake(example_frames *f, bool handled)
+{
+    if (!f->done && example_animating(f->content))
+        gr_scene_host_request_frame(f->host);
+    return handled;
 }
 
 static bool handle(void *userdata, const gr_event *event)
@@ -55,14 +65,14 @@ static bool handle(void *userdata, const gr_event *event)
         case GR_EVENT_FOCUS_OUT:
             f->changed_between_frames = true;
             example_focus(f->content, event->type == GR_EVENT_FOCUS_IN);
-            return true;
+            return wake(f, true);
         case GR_EVENT_VIEWPORT:
             f->changed_between_frames = true;
             example_viewport(f->content, event->value.viewport.size);
-            return false;
+            return wake(f, false);
         default:
             f->changed_between_frames = true;
-            return example_input(f->content, event);
+            return wake(f, example_input(f->content, event));
     }
 }
 

@@ -281,7 +281,6 @@ static void set_cell_color(text_cell *t, gr_color color)
 typedef struct
 {
     example *ex;
-    double now;
     gr_layer *pad, *dot, *hline, *vline, *list_content, *scrollbar;
     gr_layer *ripples[RIPPLES], *tile_layers[TILES], *chip_layers[CHIPS];
     double ripple_start[RIPPLES];
@@ -384,9 +383,10 @@ static void *build(example *ex)
 static void update(void *state, double t)
 {
     input_scene *d = state;
-    d->now = t;
     for (size_t i = 0; i < RIPPLES; ++i)
     {
+        if (isnan(d->ripple_start[i]))
+            d->ripple_start[i] = t; /* Spawned since the last frame. */
         if (d->ripple_start[i] < 0)
             continue;
         double p = (t - d->ripple_start[i]) / RIPPLE_TIME;
@@ -432,7 +432,16 @@ static void spawn_ripple(input_scene *d, gr_point at, gr_button button)
     EX_OK(gr_layer_set_transform(r, scaling(0.3)));
     EX_OK(gr_layer_set_opacity(r, 1));
     EX_OK(gr_layer_set_hidden(r, false));
-    d->ripple_start[i] = d->now;
+    d->ripple_start[i] = NAN; /* Starts with the next frame: between animations no frames run to keep time. */
+}
+
+static bool animating(void *state)
+{
+    const input_scene *d = state;
+    for (size_t i = 0; i < RIPPLES; ++i)
+        if (d->ripple_start[i] >= 0 || isnan(d->ripple_start[i]))
+            return true;
+    return false;
 }
 
 /* Index of the tile under p (pad coordinates), or -1. */
@@ -631,6 +640,6 @@ static bool input(void *state, const gr_event *e)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"input", {900, 624}, build, update, free, NULL, input, NULL};
+    static const example_desc desc = {"input", {900, 624}, build, update, free, NULL, input, NULL, animating};
     return example_main(argc, argv, &desc);
 }

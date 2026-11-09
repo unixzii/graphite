@@ -129,6 +129,6 @@ static void free_state(void *state)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"mines", {920, 720}, build, update, free_state, focus, input, viewport};
+    static const example_desc desc = {"mines", {920, 720}, build, update, free_state, focus, input, viewport, NULL};
     return example_main(argc, argv, &desc);
 }

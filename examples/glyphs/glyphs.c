@@ -647,6 +647,6 @@ static void free_state(void *state)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"glyphs", {960, 600}, build, update, free_state, NULL, NULL, NULL};
+    static const example_desc desc = {"glyphs", {960, 600}, build, update, free_state, NULL, NULL, NULL, NULL};
     return example_main(argc, argv, &desc);
 }

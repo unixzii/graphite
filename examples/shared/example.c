@@ -301,6 +301,11 @@ bool example_input(example *ex, const gr_event *event)
     return ex->desc->input && ex->desc->input(ex->state, event);
 }
 
+bool example_animating(example *ex)
+{
+    return !ex->desc->animating || ex->desc->animating(ex->state);
+}
+
 void example_viewport(example *ex, gr_size size)
 {
     if (ex->desc->viewport)

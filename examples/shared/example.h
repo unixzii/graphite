@@ -55,6 +55,9 @@ typedef struct
     /** Reports the window's size in logical points once it is known and whenever it changes; called on the Scene
      * thread. The root keeps the size it was built with unless the scene resizes it. May be NULL. */
     void (*viewport)(void *state, gr_size size);
+    /** Returns whether the scene is animating and needs another frame. Windows request frames only while it does,
+     * and ask again after input, focus, viewport and timer events. NULL animates continuously. */
+    bool (*animating)(void *state);
 } example_desc;
 
 struct example
@@ -84,6 +87,8 @@ void example_update(example *ex, double time);
 void example_focus(example *ex, bool focused);
 /** Passes an input event to the scene; returns whether it was consumed. */
 bool example_input(example *ex, const gr_event *event);
+/** Returns whether the scene needs another frame. */
+bool example_animating(example *ex);
 /** Tells the scene the window's size in logical points. */
 void example_viewport(example *ex, gr_size size);
 /** Destroys the Scene before releasing tracked layers and scene state. */

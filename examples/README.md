@@ -41,9 +41,13 @@ Every example accepts the same options: `--selftest`, `--fps` or
 
 `--snapshot` poses the scene at 2.4 seconds and renders at 1x.
 Every shell attaches an interactive host and drives the scene from its
-`GR_EVENT_FRAME` events (`shared/frames.c`), requesting the next frame from each
-one: the host's display link on macOS, its frame clock's update phase on GTK,
-its compositor clock on Windows and animation frames on the Web. Animations use frame time rather than an
+`GR_EVENT_FRAME` events (`shared/frames.c`): the host's display link on macOS,
+its frame clock's update phase on GTK, its compositor clock on Windows and
+animation frames on the Web. A frame requests the next one while the scene's
+optional `animating` callback says it is still moving (scenes without one move
+continuously), and input, focus, viewport and timer events request one when
+they start an animation, so a still scene leaves the host asleep. Selftests and
+`--fps` request every frame. Animations use frame time rather than an
 assumed 60 Hz, so slow rendering or refresh-rate changes do not change animation
 speed. Closing the window releases the host, and with it the frame handler,
 before releasing state.
@@ -71,15 +75,16 @@ Create `examples/<name>/` with a source file that defines its state, build and
 update callbacks, and `main`:
 
 ```c
-static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL, NULL, NULL};
+static const example_desc desc = {"name", {800, 600}, build, update, free_state, NULL, NULL, NULL, NULL};
 return example_main(argc, argv, &desc);
 ```
 
-The last three fields are optional focus, input and viewport callbacks: the
-shells pass keyboard focus changes, pointer, scroll and key events, and the
-window's size to them (`ui` grays its accent color while the window is
+The last four fields are optional focus, input, viewport and animating
+callbacks: the shells pass keyboard focus changes, input and timer events, and
+the window's size to them (`ui` grays its accent color while the window is
 unfocused; `input` visualizes input; `mines` resizes its root and lays out
-again). The root keeps its build size unless the scene resizes it.
+again), and request frames only while `animating` returns true (`input` animates
+only its click ripples). The root keeps its build size unless the scene resizes it.
 Scenes start focused, which is how snapshots render. While a window runs,
 `ex->host` is its interactive host, for setting cursors.
 
