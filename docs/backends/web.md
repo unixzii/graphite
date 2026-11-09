@@ -37,6 +37,10 @@ needs the DOM (see [Text](#text)).
   for the next animation frame: Chromium can run a callback requested during
   another in the same display frame (seen after an editable element had
   focus), and each frame event stands for its own display frame.
+- The host's timer is a `setTimeout`, cleared when the host is released. Its
+  delay is capped at setTimeout's 32-bit range, and core sets a deadline beyond
+  it again when the early timeout arrives. Changes made for a timer commit in
+  the next animation frame, like changes made for input.
 - `apply` encodes the batch as a stream of doubles in linear memory (opcodes
   and operands are documented in `internal.h`) and makes one call into
   JavaScript. JavaScript then applies it in the commit-contract order: realize,

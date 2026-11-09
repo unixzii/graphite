@@ -54,7 +54,10 @@ and a static `gr_scene_host_vtable`; functions for your hosts compare
 Hosts with a native input surface fill in the event callbacks of the vtable and
 report native events with `gr_scene_host_dispatch_event`: deliver a requested
 `GR_EVENT_FRAME` before the frame's commit point, report size/scale changes as
-`GR_EVENT_VIEWPORT` (repeats are dropped by core) and keyboard focus changes.
+`GR_EVENT_VIEWPORT` (repeats are dropped by core) and keyboard focus changes,
+and dispatch `GR_EVENT_TIMER` from the event loop when the timer set with
+`set_timer` fires (core holds the deadline, drops early timers and sets them
+again, and fills the payload).
 Core passes `set_text_input` through as is: a backend with text input keeps its
 own copy of the shared state, answers the input method from it, and applies its
 own `GR_EVENT_TEXT_EDIT` events to that copy before dispatching them.

@@ -56,6 +56,7 @@ void gr_gtk_widget_request(GtkWidget *widget);
 /* Points the widget's events at host (borrowed), or detaches it with NULL. */
 void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host);
 void gr_gtk_widget_request_frame(GtkWidget *widget);
+void gr_gtk_widget_set_timer(GtkWidget *widget, double deadline);
 void gr_gtk_widget_set_cursor(GtkWidget *widget, gr_cursor cursor);
 /* Shares the application's text input state with the widget's input method (NULL turns it off). */
 void gr_gtk_widget_set_text_input(GtkWidget *widget, const gr_text_input *input);

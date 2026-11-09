@@ -385,7 +385,6 @@ static void update(void *state, double t)
 {
     input_scene *d = state;
     d->now = t;
-    text_field_update(d->field, t);
     for (size_t i = 0; i < RIPPLES; ++i)
     {
         if (d->ripple_start[i] < 0)
@@ -623,6 +622,8 @@ static bool input(void *state, const gr_event *e)
                      e->value.command.extend ? " (extend)" : "");
             return text_field_event(d->field, e);
         }
+        case GR_EVENT_TIMER:
+            return text_field_event(d->field, e);
         default:
             return false;
     }

@@ -9,6 +9,7 @@ typedef struct
     GdkSurface *surface;
     GtkWindow *window;
     gulong layout_handler, update_handler, scale_handler, active_handler;
+    guint timer; /* The timeout source of the host's timer, or 0. */
     /* Input state. */
     bool inside, scrolling;
     uint32_t buttons; /* Pressed buttons, 1u << gr_button. */
@@ -55,7 +56,30 @@ void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host)
     GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
     w->host = host;
     if (!host)
+    {
+        g_clear_handle_id(&w->timer, g_source_remove);
         clear_text_input(w);
+    }
+}
+
+/* Timers: a timeout on the default main context, which counts on the monotonic clock the frame clock uses. */
+static gboolean timer_fired(gpointer userdata)
+{
+    GrGraphiteWidget *w = userdata;
+    w->timer = 0;
+    dispatch(w, (gr_event){.type = GR_EVENT_TIMER, .time = seconds(g_get_monotonic_time())});
+    return G_SOURCE_REMOVE;
+}
+
+void gr_gtk_widget_set_timer(GtkWidget *widget, double deadline)
+{
+    GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
+    g_clear_handle_id(&w->timer, g_source_remove);
+    if (!w->host || deadline == INFINITY)
+        return;
+    /* Round up to whole milliseconds so the timeout does not fire early; core reschedules one that does. */
+    double ms = ceil((deadline - seconds(g_get_monotonic_time())) * 1000);
+    w->timer = g_timeout_add((guint)fmin(fmax(ms, 0), G_MAXUINT), timer_fired, w);
 }
 
 /* Frames run in the update phase, before the layout phase where the backend commits. */
@@ -969,6 +993,7 @@ static void dispose(GObject *object)
 {
     GrGraphiteWidget *w = (GrGraphiteWidget *)object;
     disconnect_signals(w);
+    g_clear_handle_id(&w->timer, g_source_remove);
     use_im_context(w, NULL);
     store_text_input(w, NULL);
     if (w->shared)

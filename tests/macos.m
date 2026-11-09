@@ -277,6 +277,13 @@ static void spin_until(const event_log *log, gr_event_type type, size_t count)
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
+static void spin_for(double seconds)
+{
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    while ([deadline timeIntervalSinceNow] > 0)
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:deadline];
+}
+
 /* A window whose key status the test controls, since a test process is usually not the active application. */
 @interface GRTestWindow : NSWindow
 @property(nonatomic) bool forceKey;
@@ -359,6 +366,29 @@ static void view_events(void)
         spin_until(&log, GR_EVENT_FRAME, 2);
         CHECK(count_events(&log, GR_EVENT_FRAME) == 2);
 
+        /* A timer fires once, not before its deadline, with the deadline it was set for. */
+        double deadline = gr_scene_host_get_time(host) + 0.05;
+        OK(gr_scene_host_set_timer(host, deadline));
+        spin_until(&log, GR_EVENT_TIMER, 1);
+        const gr_event *timer = last_event(&log, GR_EVENT_TIMER);
+        CHECK(timer && timer->value.timer.deadline == deadline && timer->time >= deadline);
+        CHECK(gr_scene_host_timer_deadline(host) == INFINITY);
+        /* Setting replaces; INFINITY cancels; a past deadline fires from the run loop, not during the call. */
+        OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 10));
+        deadline = gr_scene_host_get_time(host) + 0.02;
+        OK(gr_scene_host_set_timer(host, deadline));
+        spin_until(&log, GR_EVENT_TIMER, 2);
+        CHECK(count_events(&log, GR_EVENT_TIMER) == 2 &&
+              last_event(&log, GR_EVENT_TIMER)->value.timer.deadline == deadline);
+        OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 0.02));
+        OK(gr_scene_host_set_timer(host, INFINITY));
+        spin_for(0.1);
+        CHECK(count_events(&log, GR_EVENT_TIMER) == 2);
+        OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) - 1));
+        CHECK(count_events(&log, GR_EVENT_TIMER) == 2);
+        spin_until(&log, GR_EVENT_TIMER, 3);
+        CHECK(count_events(&log, GR_EVENT_TIMER) == 3);
+
         /* Focus follows first responder status in the key window. */
         CHECK(!window.isKeyWindow);
         OK(gr_scene_host_request_focus(host));
@@ -375,13 +405,14 @@ static void view_events(void)
         CHECK(gr_scene_host_has_focus(host));
         set_key(window, false);
 
-        /* A request outstanding at release stops with the host. */
+        /* Requests outstanding at release stop with the host. */
         OK(gr_scene_host_request_frame(host));
-        size_t frames = count_events(&log, GR_EVENT_FRAME);
+        OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host)));
+        size_t frames = count_events(&log, GR_EVENT_FRAME), timers = count_events(&log, GR_EVENT_TIMER);
         gr_scene_host_unref(host);
         CHECK(!view.acceptsFirstResponder);
-        spin();
-        CHECK(count_events(&log, GR_EVENT_FRAME) == frames);
+        spin_for(0.05);
+        CHECK(count_events(&log, GR_EVENT_FRAME) == frames && count_events(&log, GR_EVENT_TIMER) == timers);
         gr_scene_unref(scene);
         [window close];
     }

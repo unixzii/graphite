@@ -69,6 +69,11 @@ static double now(void *data)
     return (double)g_get_monotonic_time() / G_TIME_SPAN_SECOND;
 }
 
+static void set_timer(void *data, double deadline)
+{
+    gr_gtk_widget_set_timer(((gr_gtk_host *)data)->widget, deadline);
+}
+
 static void set_cursor(void *data, gr_cursor cursor)
 {
     gr_gtk_widget_set_cursor(((gr_gtk_host *)data)->widget, cursor);
@@ -85,7 +90,7 @@ static void request_focus(void *data)
 }
 
 static const gr_scene_host_vtable widget_host_vtable = {
-    destroy_host, request_frame, now, set_cursor, set_text_input, request_focus,
+    destroy_host, request_frame, now, set_timer, set_cursor, set_text_input, request_focus,
 };
 
 gr_gtk_host *gr_gtk_host_data(const gr_scene_host *host)

@@ -101,6 +101,8 @@ bool install(gr_scene *scene, ContainerVisual const &scaled);
 HWND create_window(gr_scene *scene, bool track_dpi, DWORD ex, DWORD style, int x, int y, int w, int h, HWND parent);
 /* Points a host window's events at host (borrowed), or detaches them with nullptr. */
 void set_window_host(HWND hwnd, gr_scene_host *host);
+/* Schedules the host's timer on a host window for deadline on the seconds_now clock, or cancels it with INFINITY. */
+void set_window_timer(HWND hwnd, double deadline);
 /* Sets the cursor shown over a host window. */
 void set_window_cursor(HWND hwnd, gr_cursor cursor);
 /* Shares the application's text input state with a host window's input method (nullptr turns it off). */

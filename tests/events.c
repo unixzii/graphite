@@ -9,7 +9,8 @@
 
 typedef struct
 {
-    int frame_requests, focus_requests, cursor_sets, text_input_sets;
+    int frame_requests, focus_requests, cursor_sets, text_input_sets, timer_sets;
+    double timer;
     gr_cursor cursor;
     const gr_text_input *text_input;
     char log[64];
@@ -39,6 +40,13 @@ static double platform_now(void *data)
     return 42.5;
 }
 
+static void platform_set_timer(void *data, double deadline)
+{
+    platform *p = data;
+    ++p->timer_sets;
+    p->timer = deadline;
+}
+
 static void platform_set_cursor(void *data, gr_cursor cursor)
 {
     platform *p = data;
@@ -58,8 +66,9 @@ static void platform_request_focus(void *data)
     ++((platform *)data)->focus_requests;
 }
 
-static const gr_scene_host_vtable interactive = {platform_destroy,    platform_request_frame,  platform_now,
-                                                 platform_set_cursor, platform_set_text_input, platform_request_focus};
+static const gr_scene_host_vtable interactive = {platform_destroy,      platform_request_frame, platform_now,
+                                                 platform_set_timer,    platform_set_cursor,    platform_set_text_input,
+                                                 platform_request_focus};
 static const gr_scene_host_vtable passive = {.destroy = platform_destroy};
 
 typedef struct recorder recorder;
@@ -72,6 +81,7 @@ struct recorder
     bool result;
     gr_event_type types[16];
     char texts[16][16];
+    double deadline; /* Of the last TIMER. */
     size_t count;
     void (*react)(recorder *r, const gr_event *event); /* Optional. */
     int destroyed;
@@ -90,6 +100,8 @@ static bool record(void *userdata, const gr_event *event)
             memcpy(r->texts[r->count], text.data, text.count);
         r->texts[r->count][text.count] = 0;
     }
+    if (event->type == GR_EVENT_TIMER)
+        r->deadline = event->value.timer.deadline;
     ++r->count;
     note(r->log, r->name);
     if (r->react)
@@ -151,6 +163,7 @@ static void passive_hosts(void)
     CHECK(gr_scene_host_set_event_handler(host, NULL) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_request_frame(host) == GR_ERROR_UNSUPPORTED && !gr_scene_host_frame_requested(host));
     CHECK(isnan(gr_scene_host_get_time(host)));
+    CHECK(gr_scene_host_set_timer(host, 1) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_set_cursor(host, GR_CURSOR_TEXT) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_request_focus(host) == GR_ERROR_UNSUPPORTED);
     CHECK(gr_scene_host_set_text_input(host, NULL) == GR_ERROR_UNSUPPORTED);
@@ -266,6 +279,79 @@ static void frame_requests(void)
     OK(gr_scene_host_set_event_handler(host, NULL));
     CHECK(!gr_scene_host_dispatch_event(host, &f));
     CHECK(!gr_scene_host_frame_requested(host));
+    gr_scene_host_unref(host);
+    gr_scene_unref(scene);
+}
+
+static gr_event timer(double time)
+{
+    return (gr_event){.type = GR_EVENT_TIMER, .time = time};
+}
+
+static void set_next_timer(recorder *r, const gr_event *event)
+{
+    if (event->type == GR_EVENT_TIMER)
+    {
+        CHECK(gr_scene_host_timer_deadline(r->host) == INFINITY);
+        OK(gr_scene_host_set_timer(r->host, event->value.timer.deadline + 0.5));
+    }
+}
+
+static void timers(void)
+{
+    platform p = {0};
+    gr_scene *scene = gr_scene_new((gr_size){10, 10});
+    gr_scene_host *host = gr_scene_host_new(scene, &interactive, &p);
+    recorder r = {.name = 'a', .log = p.log, .host = host, .result = true};
+    gr_event_handler h = handler(&r);
+    OK(gr_scene_host_set_event_handler(host, &h));
+    CHECK(gr_scene_host_timer_deadline(host) == INFINITY);
+
+    gr_event t = timer(5);
+    CHECK(!gr_scene_host_dispatch_event(host, &t)); /* Not set: dropped. */
+    CHECK(gr_scene_host_set_timer(host, NAN) == GR_ERROR_ARGUMENT);
+    CHECK(gr_scene_host_set_timer(host, -INFINITY) == GR_ERROR_ARGUMENT);
+    CHECK(p.timer_sets == 0);
+
+    /* Setting replaces; repeating the deadline does not reach the platform. */
+    OK(gr_scene_host_set_timer(host, 3));
+    OK(gr_scene_host_set_timer(host, 2));
+    OK(gr_scene_host_set_timer(host, 2));
+    CHECK(p.timer_sets == 2 && p.timer == 2 && gr_scene_host_timer_deadline(host) == 2);
+
+    /* An early timer is scheduled again and not delivered. */
+    t = timer(1.99);
+    CHECK(!gr_scene_host_dispatch_event(host, &t));
+    CHECK(r.count == 0 && p.timer_sets == 3 && p.timer == 2 && gr_scene_host_timer_deadline(host) == 2);
+
+    /* Delivery carries the deadline, clears it, and fires once. */
+    t = timer(2.01);
+    t.value.timer.deadline = 7; /* Core fills the payload. */
+    CHECK(gr_scene_host_dispatch_event(host, &t));
+    CHECK(r.count == 1 && r.deadline == 2 && gr_scene_host_timer_deadline(host) == INFINITY);
+    CHECK(!gr_scene_host_dispatch_event(host, &t));
+    CHECK(r.count == 1);
+
+    /* Setting from the TIMER handler schedules the next one. */
+    r.react = set_next_timer;
+    OK(gr_scene_host_set_timer(host, 4));
+    t = timer(4);
+    CHECK(gr_scene_host_dispatch_event(host, &t));
+    CHECK(r.deadline == 4 && gr_scene_host_timer_deadline(host) == 4.5 && p.timer == 4.5);
+    r.react = NULL;
+
+    /* INFINITY cancels. */
+    OK(gr_scene_host_set_timer(host, INFINITY));
+    CHECK(p.timer == INFINITY && gr_scene_host_timer_deadline(host) == INFINITY);
+    t = timer(9);
+    CHECK(!gr_scene_host_dispatch_event(host, &t));
+    CHECK(r.count == 2);
+
+    /* Without a handler a passed deadline is consumed. */
+    OK(gr_scene_host_set_timer(host, 1));
+    OK(gr_scene_host_set_event_handler(host, NULL));
+    CHECK(!gr_scene_host_dispatch_event(host, &t));
+    CHECK(gr_scene_host_timer_deadline(host) == INFINITY);
     gr_scene_host_unref(host);
     gr_scene_unref(scene);
 }
@@ -403,7 +489,7 @@ static void event_validation(void)
 #ifndef NDEBUG /* Release builds trust backends to send valid events. */
     gr_event bad[17];
     size_t n = 0;
-    bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_COMMAND + 1);
+    bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TIMER + 1);
     bad[n] = press(), bad[n++].time = NAN;
     bad[n] = press(), bad[n++].modifiers = 32;
     bad[n] = down, bad[n++].value.pointer.button = GR_BUTTON_NONE;
@@ -483,6 +569,7 @@ int main(int argc, char **argv)
         GR_TEST_CASE(host_commands),
         GR_TEST_CASE(handler_ownership),
         GR_TEST_CASE(frame_requests),
+        GR_TEST_CASE(timers),
         GR_TEST_CASE(reentrant_dispatch),
         GR_TEST_CASE(replacement_during_delivery),
         GR_TEST_CASE(release_during_delivery),

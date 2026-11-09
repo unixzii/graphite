@@ -18,6 +18,7 @@ struct gr_scene_host
     gr_event_handler handler;
     bool has_handler, frame_requested, dispatching, focused, has_viewport;
     gr_viewport_event viewport;
+    double timer; /* The deadline set and not yet delivered, or INFINITY. */
     queued_event *queue;
     size_t queue_count, queue_capacity;
     gr_event_handler *retired; /* Handlers replaced during delivery, destroyed when it ends. */
@@ -26,12 +27,12 @@ struct gr_scene_host
 
 static bool interactive_vtable(const gr_scene_host_vtable *v)
 {
-    return v->request_frame && v->now && v->set_cursor && v->set_text_input && v->request_focus;
+    return v->request_frame && v->now && v->set_timer && v->set_cursor && v->set_text_input && v->request_focus;
 }
 
 static bool passive_vtable(const gr_scene_host_vtable *v)
 {
-    return !v->request_frame && !v->now && !v->set_cursor && !v->set_text_input && !v->request_focus;
+    return !v->request_frame && !v->now && !v->set_timer && !v->set_cursor && !v->set_text_input && !v->request_focus;
 }
 
 gr_scene_host *gr_scene_host_new(gr_scene *scene, const gr_scene_host_vtable *vtable, void *data)
@@ -39,8 +40,12 @@ gr_scene_host *gr_scene_host_new(gr_scene *scene, const gr_scene_host_vtable *vt
     if (!scene || !vtable || !vtable->destroy || !(interactive_vtable(vtable) || passive_vtable(vtable)))
         return NULL;
     gr_scene_host *host = gr_alloc(1, sizeof(*host));
-    *host = (gr_scene_host){
-        .refs = 1, .scene = gr_scene_get_link(scene), .identity = vtable, .vtable = *vtable, .data = data};
+    *host = (gr_scene_host){.refs = 1,
+                            .scene = gr_scene_get_link(scene),
+                            .identity = vtable,
+                            .vtable = *vtable,
+                            .data = data,
+                            .timer = INFINITY};
     return host;
 }
 
@@ -133,6 +138,25 @@ gr_result gr_scene_host_request_frame(gr_scene_host *host)
 bool gr_scene_host_frame_requested(const gr_scene_host *host)
 {
     return host->frame_requested;
+}
+
+gr_result gr_scene_host_set_timer(gr_scene_host *host, double deadline)
+{
+    if (!gr_scene_host_is_interactive(host))
+        return GR_ERROR_UNSUPPORTED;
+    if (isnan(deadline) || deadline == -INFINITY)
+        return GR_ERROR_ARGUMENT;
+    if (deadline != host->timer)
+    {
+        host->timer = deadline;
+        host->vtable.set_timer(host->data, deadline);
+    }
+    return GR_OK;
+}
+
+double gr_scene_host_timer_deadline(const gr_scene_host *host)
+{
+    return host->timer;
 }
 
 bool gr_scene_host_get_viewport(const gr_scene_host *host, gr_viewport_event *out)
@@ -230,7 +254,7 @@ static bool valid_event(const gr_event *e)
 {
     const gr_modifiers modifiers =
         GR_MODIFIER_SHIFT | GR_MODIFIER_CONTROL | GR_MODIFIER_ALT | GR_MODIFIER_SUPER | GR_MODIFIER_CAPS_LOCK;
-    if ((unsigned)e->type > GR_EVENT_TEXT_COMMAND || !isfinite(e->time) || (e->modifiers & ~modifiers))
+    if ((unsigned)e->type > GR_EVENT_TIMER || !isfinite(e->time) || (e->modifiers & ~modifiers))
         return false;
     switch (e->type)
     {
@@ -239,6 +263,8 @@ static bool valid_event(const gr_event *e)
             const gr_frame_event *f = &e->value.frame;
             return isfinite(f->target_time) && isfinite(f->interval) && f->interval >= 0;
         }
+        case GR_EVENT_TIMER:
+            return true; /* Core fills the payload. */
         case GR_EVENT_VIEWPORT:
         {
             const gr_viewport_event *v = &e->value.viewport;
@@ -280,11 +306,27 @@ static bool valid_event(const gr_event *e)
 
 static bool deliver(gr_scene_host *host, const gr_event *event)
 {
+    gr_event timer;
     if (event->type == GR_EVENT_FRAME)
     {
         if (!host->frame_requested)
             return false;
         host->frame_requested = false;
+    }
+    else if (event->type == GR_EVENT_TIMER)
+    {
+        if (host->timer == INFINITY)
+            return false;
+        if (event->time < host->timer)
+        {
+            /* The platform timer fired early; schedule it again. */
+            host->vtable.set_timer(host->data, host->timer);
+            return false;
+        }
+        timer = *event;
+        timer.value.timer.deadline = host->timer;
+        host->timer = INFINITY;
+        event = &timer;
     }
     if (!host->has_handler)
         return false;

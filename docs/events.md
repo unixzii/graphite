@@ -24,8 +24,8 @@ its backend vtable.
 ## Interactive hosts
 
 A host is interactive when it has a native input surface. Its vtable then sets
-every event callback (`request_frame`, `now`, `set_cursor`, `set_text_input`,
-`request_focus`); a partial set makes `gr_scene_host_new` fail.
+every event callback (`request_frame`, `now`, `set_timer`, `set_cursor`,
+`set_text_input`, `request_focus`); a partial set makes `gr_scene_host_new` fail.
 
 | Host | Interactive |
 |---|---|
@@ -69,8 +69,8 @@ with a vtable that records requests.
 
 Positions are in host space: logical points from the host's top-left corner,
 y down, which is the Scene root's box space. Times are seconds on a monotonic
-clock, meaningful only as differences. Frame times use the frame clock that
-`gr_scene_host_get_time` reads. Input times use the platform's input clock,
+clock, meaningful only as differences. Frame and timer times use the frame
+clock that `gr_scene_host_get_time` reads. Input times use the platform's input clock,
 which can differ from it (GTK reports compositor milliseconds), so compute
 velocities from input times alone.
 
@@ -79,6 +79,7 @@ velocities from input times alone.
 | Type | Payload | Meaning |
 |---|---|---|
 | `FRAME` | target time, interval | A requested display refresh |
+| `TIMER` | deadline | The deadline the application set passed |
 | `VIEWPORT` | size, scale | Host size or backing scale changed; the scale is already applied to the Scene, and the root's size is the application's choice |
 | `FOCUS_IN`, `FOCUS_OUT` | none | Keyboard focus |
 | `POINTER_DOWN`, `UP`, `MOVE` | pointer | Mouse and pen, in the style of W3C Pointer Events |
@@ -88,6 +89,8 @@ velocities from input times alone.
 | `KEY_DOWN`, `KEY_UP` | key | Physical and logical keys |
 | `TEXT_EDIT` | edit | Text input changed the shared editing state |
 | `TEXT_COMMAND` | command | An editing command from the platform's key bindings |
+
+Event types keep their numeric values: new types go at the end of the enum.
 
 Every input event carries `modifiers`, the state after the event: pressing
 Shift reports `SHIFT`.
@@ -110,6 +113,41 @@ FRAME → the handler changes the Scene → commit point → the compositor pres
 Each frame stands for one display refresh: `time` is the frame's start,
 `target_time` the expected presentation, and `interval` the current refresh
 interval.
+
+## Timers
+
+Work that only needs to happen at some later time (a caret blink, a tooltip
+delay, a long press, a clock that ticks once a second) uses the host's timer
+instead of frames, so the host sleeps in between instead of waking at the
+display rate.
+
+- `gr_scene_host_set_timer` sets one deadline on the frame clock; the host
+  delivers one `TIMER` once it passes. The deadline is absolute, so periodic
+  work schedules the next deadline from the one that fired
+  (`deadline + period`) and does not drift when timers fire late.
+- Each host has one timer. Setting it replaces the deadline set before, and
+  `INFINITY` cancels it. An application with several timers keeps its own
+  queue and sets the earliest deadline, the same split as hit testing and
+  focus: the host provides one wake-up, and the application decides what it
+  means.
+- A timer never fires early. Core holds the deadline and drops a `TIMER` that
+  arrives before it, setting the platform timer again, so platforms can use
+  timers of coarse resolution. It may fire late: by the platform's timer
+  resolution, and by much more while the platform throttles a hidden or idle
+  application. A deadline in the past fires soon after, from the event loop,
+  never during the call that sets it. Core clears the deadline before
+  delivery, and the event carries the deadline that passed while `time` says
+  when it was delivered.
+- Changes made in a `TIMER` handler commit at the next commit point, as for
+  input. Work that must line up with the display requests a frame from the
+  `TIMER` handler and changes the Scene in that `FRAME`.
+
+| Platform | Timer |
+|---|---|
+| macOS | A one-shot `NSTimer` on the main run loop in common modes |
+| GTK | A GLib timeout on the default main context |
+| Windows | A window timer (`SetTimer`) on the host window |
+| Web | `setTimeout` |
 
 ## Pointer
 
@@ -227,6 +265,10 @@ static bool on_event(void *userdata, const gr_event *e)
             if (app_is_animating(a))
                 gr_scene_host_request_frame(a->host);
             return true;
+        case GR_EVENT_TIMER:
+            app_blink_caret(a); /* Blinking from the last deadline does not drift. */
+            gr_scene_host_set_timer(a->host, e->value.timer.deadline + 0.5);
+            return true;
         case GR_EVENT_POINTER_DOWN:
             return app_press(a, e->value.pointer.position); /* The application hit tests. */
         case GR_EVENT_KEY_DOWN:
@@ -249,7 +291,8 @@ gr_scene_host_request_frame(host);
 ```
 
 `examples/input` shows every event, and its text field
-(`examples/input/field.c`) is a complete text input client.
+(`examples/input/field.c`) is a complete text input client that blinks its
+caret on the host's timer.
 
 ## Not covered
 

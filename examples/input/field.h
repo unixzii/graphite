@@ -9,12 +9,11 @@ typedef struct text_field text_field;
 
 /** Adds a field filling frame (parent coordinates); host_origin is frame's origin in host space. */
 text_field *text_field_new(example *ex, gr_layer *parent, gr_rect frame, gr_point host_origin, const char *placeholder);
-/** Blinks the caret. */
-void text_field_update(text_field *f, double time);
 /** Handles a pointer event at a host-space position: presses inside focus the field and place the caret, drags
  * select, presses outside blur it. Returns whether the field consumed the event. */
 bool text_field_pointer(text_field *f, const gr_event *event);
-/** Handles TEXT_EDIT and TEXT_COMMAND events, and shortcuts among KEY_DOWN events while focused. */
+/** Handles TEXT_EDIT and TEXT_COMMAND events, shortcuts among KEY_DOWN events, and the TIMER events that blink the
+ * caret while focused. The field sets the host's timer; it is the only one using it. */
 bool text_field_event(text_field *f, const gr_event *event);
 bool text_field_focused(const text_field *f);
 /** Whether a host-space point lies in the field. */

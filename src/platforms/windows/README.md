@@ -52,7 +52,10 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   posts each tick to the host window; the UI thread delivers `GR_EVENT_FRAME`
   (QPC time, compositor frame period) and then commits at once, so the frame's
   changes reach the next compositor frame instead of waiting for the
-  DispatcherQueue. `WM_SIZE`/DPI changes report `GR_EVENT_VIEWPORT` and
+  DispatcherQueue. The host's timer is a window timer (`SetTimer`) that
+  `WM_TIMER` kills and reports; window timers tick at the system timer
+  resolution and may fire early, which core corrects.
+  `WM_SIZE`/DPI changes report `GR_EVENT_VIEWPORT` and
   `WM_SETFOCUS`/`WM_KILLFOCUS` report focus. Interactive host windows answer
   `WM_NCHITTEST` with the client area (others stay `HTTRANSPARENT`) and report
   mouse messages (pen-promoted ones as pens) with `SetCapture` for drags and

@@ -25,7 +25,9 @@ No additional container dependency is introduced: GTK already supplies GLib.
   disconnects clock/surface handlers; callbacks use a weak Scene link.
   Widget hosts are interactive: requested frames run in the frame clock's
   **update** phase, before the layout-phase commit, with times from the frame
-  clock and its refresh info. Allocation and scale changes report
+  clock and its refresh info. The host's timer is a GLib timeout on the
+  default main context, rounded up to whole milliseconds, which counts on the
+  monotonic clock the frame clock uses. Allocation and scale changes report
   `GR_EVENT_VIEWPORT` (first on allocation). The widget is focusable and reports
   focus while it is the focus widget of the active window. A legacy event
   controller turns raw GDK events into pointer (mouse and tablet tools), scroll

@@ -110,6 +110,7 @@ __attribute__((objc_direct_members))
 @implementation GRSceneView
 {
     CADisplayLink *_displayLink;
+    NSTimer *_timer;
     bool _focused;
     bool _inside;      /* The pointer hovers over the view (as last reported). */
     uint32_t _buttons; /* Pressed buttons, 1u << gr_button. */
@@ -149,6 +150,8 @@ __attribute__((objc_direct_members))
     // Invalidation removes the run-loop registration and releases the link's strong reference to this view.
     [_displayLink invalidate];
     _displayLink = nil;
+    [_timer invalidate];
+    _timer = nil;
 }
 
 - (bool)dispatch:(gr_event)event
@@ -476,6 +479,33 @@ __attribute__((objc_direct_members))
                               .value.frame = {.target_time = link.targetTimestamp, .interval = fmax(interval, 0)}}];
     if (!_host || !gr_scene_host_frame_requested(_host))
         link.paused = YES;
+}
+
+/* Timers: a one-shot timer on the main run loop in common modes, so it also fires during tracking. */
+
+- (void)setTimer:(double)deadline
+{
+    [_timer invalidate];
+    _timer = nil;
+    if (!_host || deadline == INFINITY)
+        return;
+    __weak GRSceneView *weak = self;
+    _timer = [NSTimer timerWithTimeInterval:fmax(deadline - CACurrentMediaTime(), 0)
+                                    repeats:NO
+                                      block:^(NSTimer *timer) {
+                                        GRSceneView *view = weak;
+                                        if (view)
+                                            [view timerFired:timer];
+                                      }];
+    [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)timerFired:(NSTimer *)timer
+{
+    if (timer != _timer)
+        return;
+    _timer = nil;
+    [self dispatch:(gr_event){.type = GR_EVENT_TIMER, .time = CACurrentMediaTime()}];
 }
 
 /* Viewport */
@@ -999,6 +1029,11 @@ static double now(void *data)
     return CACurrentMediaTime();
 }
 
+static void set_timer(void *data, double deadline)
+{
+    [host_view(data) setTimer:deadline];
+}
+
 static void set_cursor(void *data, gr_cursor cursor)
 {
     [host_view(data) setCursorKind:cursor];
@@ -1016,7 +1051,7 @@ static void request_focus(void *data)
 }
 
 static const gr_scene_host_vtable view_host_vtable = {
-    destroy_view_host, request_frame, now, set_cursor, set_text_input, request_focus,
+    destroy_view_host, request_frame, now, set_timer, set_cursor, set_text_input, request_focus,
 };
 
 static gr_scene_host *wrap_host(gr_scene *scene, GRHost *object)

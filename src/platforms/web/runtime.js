@@ -889,7 +889,25 @@ addToLibrary({
     if (!host) return;
     host.events = events;
     if (events && !host.listeners) GRWeb.listen(host);
-    else if (!events) GRWeb.unlisten(host);
+    else if (!events) {
+      GRWeb.unlisten(host);
+      clearTimeout(host.timer);
+    }
+  },
+
+  // A deadline beyond setTimeout's 32-bit range fires early, and core schedules it again.
+  gr_web_js_set_timer__deps: ['$GRWeb', '$handleException', 'gr_web_on_timer'],
+  gr_web_js_set_timer: (handle, deadline) => {
+    const host = GRWeb.hosts.get(handle);
+    if (!host) return;
+    clearTimeout(host.timer);
+    host.timer = 0;
+    if (deadline === Infinity) return;
+    const delay = Math.min(Math.max(deadline * 1000 - performance.now(), 0), 0x7fffffff);
+    host.timer = setTimeout(() => {
+      host.timer = 0;
+      if (host.events) GRWeb.call(() => _gr_web_on_timer(host.events));
+    }, delay);
   },
 
   gr_web_js_now: () => performance.now() / 1000,
@@ -927,6 +945,7 @@ addToLibrary({
     const host = GRWeb.hosts.get(handle);
     if (!host) return;
     if (host.frame) cancelAnimationFrame(host.frame);
+    clearTimeout(host.timer);
     GRWeb.unlisten(host);
     for (const node of host.nodes.values()) if (node.image) GRWeb.releaseImage(node.image);
     host.element.remove();

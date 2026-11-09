@@ -4,6 +4,7 @@
 #define FIELD_PADDING 12.0
 #define FIELD_CAPACITY 1024
 #define LINE_COLOR 0xD1D1D6
+#define BLINK 0.5 /* Seconds the caret stays shown or hidden. */
 
 struct text_field
 {
@@ -18,7 +19,6 @@ struct text_field
     gr_text_layout *layout, *placeholder;
     double layout_y, scroll; /* scroll: how far the text is scrolled left to keep the caret in view. */
     bool focused, dragging, caret_on;
-    double blink_start, now;
 };
 
 static size_t min_size(size_t a, size_t b)
@@ -95,6 +95,15 @@ static void update_caret(text_field *f)
         f->caret, EX_RECT(FIELD_PADDING + o.x + caret.origin.x - 0.75, o.y + caret.origin.y, 1.5, caret.size.height)));
 }
 
+/* The caret blinks on the host's timer while the field is focused; the field is the only user of that timer. */
+static void restart_blink(text_field *f)
+{
+    f->caret_on = true;
+    if (f->ex->host)
+        EX_OK(
+            gr_scene_host_set_timer(f->ex->host, f->focused ? gr_scene_host_get_time(f->ex->host) + BLINK : INFINITY));
+}
+
 /* Shares the editing state with the host's text input while focused. */
 static void share(text_field *f)
 {
@@ -121,8 +130,7 @@ static void changed(text_field *f)
     if (f->layout)
         f->layout_y = (f->frame.size.height - gr_text_layout_get_metrics(f->layout).size.height) / 2;
     follow_caret(f);
-    f->blink_start = f->now;
-    f->caret_on = true;
+    restart_blink(f);
     update_caret(f);
     EX_OK(gr_content_layer_set_needs_display(f->content));
     share(f);
@@ -228,19 +236,10 @@ static void set_focused(text_field *f, bool focused)
         f->composition = (gr_text_range){0, 0};
         if (f->ex->host)
             EX_OK(gr_scene_host_set_text_input(f->ex->host, NULL));
+        restart_blink(f);
         update_caret(f);
         EX_OK(gr_content_layer_set_needs_display(f->content));
     }
-}
-
-void text_field_update(text_field *f, double time)
-{
-    f->now = time;
-    bool on = !f->focused || fmod(time - f->blink_start, 1.0) < 0.5;
-    if (on == f->caret_on)
-        return;
-    f->caret_on = on;
-    update_caret(f);
 }
 
 /* Text offset under a host-space point. */
@@ -452,6 +451,12 @@ bool text_field_event(text_field *f, const gr_event *e)
         }
         case GR_EVENT_TEXT_COMMAND:
             return command(f, e->value.command);
+        case GR_EVENT_TIMER:
+            /* Each blink follows from the last deadline, so late timers do not drift. */
+            f->caret_on = !f->caret_on;
+            update_caret(f);
+            EX_OK(gr_scene_host_set_timer(f->ex->host, e->value.timer.deadline + BLINK));
+            return true;
         case GR_EVENT_KEY_DOWN:
         {
             /* Select all with the platform's shortcut modifier; other keys go on to text input. */

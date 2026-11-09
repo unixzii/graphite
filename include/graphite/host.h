@@ -43,6 +43,13 @@ GR_API gr_result gr_scene_host_set_event_handler(gr_scene_host *host, const gr_e
  * not wake for frames. */
 GR_API gr_result gr_scene_host_request_frame(gr_scene_host *host);
 
+/** Sets the host's one timer to deliver GR_EVENT_TIMER once deadline passes on the gr_scene_host_get_time clock,
+ * replacing the deadline set before; INFINITY clears it. A past deadline fires soon after, never during this call.
+ * The timer never fires early and may fire late by the platform's timer resolution, and much later while the
+ * platform throttles a hidden or idle application. Applications that need several timers keep their own queue and
+ * set its earliest deadline. NAN and -INFINITY return GR_ERROR_ARGUMENT. */
+GR_API gr_result gr_scene_host_set_timer(gr_scene_host *host, double deadline);
+
 /** Copies the host size and scale last reported by GR_EVENT_VIEWPORT, which the host sends whenever they change.
  * Returns false and zeros out before the first report (some platforms report on first layout) and for
  * non-interactive hosts. */

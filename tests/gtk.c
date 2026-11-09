@@ -173,8 +173,8 @@ typedef struct
 {
     gr_scene *scene;
     gr_layer *layer;
-    unsigned frames, missed, viewports, focus_ins, focus_outs;
-    gr_event last_frame;
+    unsigned frames, missed, viewports, focus_ins, focus_outs, timers;
+    gr_event last_frame, last_timer;
 } event_state;
 
 static bool on_event(void *userdata, const gr_event *event)
@@ -193,6 +193,10 @@ static bool on_event(void *userdata, const gr_event *event)
         case GR_EVENT_VIEWPORT:
             ++state->viewports;
             return true;
+        case GR_EVENT_TIMER:
+            ++state->timers;
+            state->last_timer = *event;
+            return true;
         case GR_EVENT_FOCUS_IN:
             ++state->focus_ins;
             return true;
@@ -204,14 +208,26 @@ static bool on_event(void *userdata, const gr_event *event)
     }
 }
 
-static void wait_frames(event_state *state, unsigned frames)
+static void wait_count(const unsigned *count, unsigned target)
 {
     gint64 deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
-    while (state->frames < frames)
+    while (*count < target)
     {
         CHECK(g_get_monotonic_time() < deadline);
         iterate();
     }
+}
+
+static void wait_frames(event_state *state, unsigned frames)
+{
+    wait_count(&state->frames, frames);
+}
+
+static void settle(void)
+{
+    gint64 end = g_get_monotonic_time() + 200000;
+    while (g_get_monotonic_time() < end)
+        iterate();
 }
 
 static void widget_events(void)
@@ -251,10 +267,23 @@ static void widget_events(void)
     gr_frame_event frame = state.last_frame.value.frame;
     CHECK(state.last_frame.time <= gr_scene_host_get_time(host));
     CHECK(frame.interval > 0 && frame.interval < 0.5 && frame.target_time > state.last_frame.time);
-    gint64 settle = g_get_monotonic_time() + 200000;
-    while (g_get_monotonic_time() < settle)
-        iterate();
+    settle();
     CHECK(state.frames == 10 && state.missed == 0);
+
+    /* A timer fires once, not before its deadline, with the deadline it was set for; setting replaces. */
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 10));
+    double deadline = gr_scene_host_get_time(host) + 0.05;
+    OK(gr_scene_host_set_timer(host, deadline));
+    wait_count(&state.timers, 1);
+    CHECK(state.last_timer.value.timer.deadline == deadline && state.last_timer.time >= deadline);
+    /* INFINITY cancels; a past deadline fires from the main loop, not during the call. */
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 0.02));
+    OK(gr_scene_host_set_timer(host, INFINITY));
+    settle();
+    CHECK(state.timers == 1);
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) - 1));
+    CHECK(state.timers == 1);
+    wait_count(&state.timers, 2);
 
     /* Focus follows the focus widget of the active window. */
     OK(gr_scene_host_request_focus(host));
@@ -276,13 +305,12 @@ static void widget_events(void)
     OK(gr_scene_host_set_cursor(host, GR_CURSOR_DEFAULT));
     CHECK(!gtk_widget_get_cursor(widget));
 
-    /* A request outstanding at release stops with the host; the widget keeps rendering. */
+    /* Requests outstanding at release stop with the host; the widget keeps rendering. */
     OK(gr_scene_host_request_frame(host));
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host)));
     gr_scene_host_unref(host);
-    settle = g_get_monotonic_time() + 200000;
-    while (g_get_monotonic_time() < settle)
-        iterate();
-    CHECK(state.frames == 10);
+    settle();
+    CHECK(state.frames == 10 && state.timers == 2);
     OK(gr_layer_set_position(state.layer, (gr_point){30, 30}));
     wait_clean(scene, widget);
     gtk_window_destroy(GTK_WINDOW(window));

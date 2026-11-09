@@ -62,6 +62,11 @@ static double now(void *)
     return seconds_now();
 }
 
+static void set_timer(void *data, double deadline)
+{
+    set_window_timer(static_cast<gr_windows_host *>(data)->hwnd, deadline);
+}
+
 static void set_cursor(void *data, gr_cursor cursor)
 {
     set_window_cursor(static_cast<gr_windows_host *>(data)->hwnd, cursor);
@@ -78,7 +83,7 @@ static void request_focus(void *data)
 }
 
 static const gr_scene_host_vtable window_host_vtable = {
-    destroy_window_host, request_frame, now, set_cursor, set_text_input, request_focus,
+    destroy_window_host, request_frame, now, set_timer, set_cursor, set_text_input, request_focus,
 };
 
 gr_windows_host *gr_windows_host_data(gr_scene_host const *host)

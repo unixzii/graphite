@@ -61,6 +61,7 @@ void gr_web_js_host_events(int32_t host, gr_web_host *events);
 double gr_web_js_device_pixel_ratio(void);
 double gr_web_js_now(void);
 void gr_web_js_request_tick(int32_t host);
+void gr_web_js_set_timer(int32_t host, double deadline);
 void gr_web_js_set_cursor(int32_t host, gr_cursor cursor);
 void gr_web_js_request_focus(int32_t host);
 /* Turns text input on with the shared state (UTF-8 text and offsets) and the host-space caret where the hidden field
@@ -78,6 +79,7 @@ void gr_web_host_frame(gr_web_host *host, double time, double interval);
 /* Exported to runtime.js: input and state reports for an event host; see host.c. */
 void gr_web_on_viewport(gr_web_host *host, double width, double height, double scale);
 void gr_web_on_focus(gr_web_host *host, bool focused, double time);
+void gr_web_on_timer(gr_web_host *host);
 bool gr_web_on_pointer(gr_web_host *host, int type, double time, uint32_t modifiers, uint32_t id, int kind, double x,
                        double y, int button, uint32_t buttons, uint32_t clicks, double pressure);
 bool gr_web_on_scroll(gr_web_host *host, double time, uint32_t modifiers, double x, double y, double dx, double dy,

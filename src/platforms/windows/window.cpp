@@ -10,6 +10,7 @@
 namespace gr_win
 {
 constexpr UINT frame_message = WM_APP + 1;
+constexpr UINT_PTR host_timer = 1;
 
 struct WindowData
 {
@@ -727,9 +728,24 @@ void set_window_host(HWND hwnd, gr_scene_host *host)
     if (!data)
         return;
     set_window_text_input(hwnd, nullptr);
+    if (!host)
+        KillTimer(hwnd, host_timer);
     data->host = host;
     /* Input methods engage once a text field turns text input on. */
     ImmAssociateContextEx(hwnd, nullptr, 0);
+}
+
+/* A one-shot window timer: USER timers repeat, so WM_TIMER kills it. They tick at the system timer resolution (about
+ * 15.6 ms) and may fire early, which core corrects by setting the deadline again. */
+void set_window_timer(HWND hwnd, double deadline)
+{
+    if (deadline == INFINITY)
+    {
+        KillTimer(hwnd, host_timer);
+        return;
+    }
+    double ms = std::ceil((deadline - seconds_now()) * 1000);
+    SetTimer(hwnd, host_timer, static_cast<UINT>(std::clamp(ms, 0.0, double(USER_TIMER_MAXIMUM))), nullptr);
 }
 
 void report_viewport(HWND hwnd)
@@ -911,6 +927,18 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
             }
             case frame_message:
                 deliver_frame(window_data(hwnd));
+                return 0;
+            case WM_TIMER:
+                if (wp != host_timer)
+                    break;
+                KillTimer(hwnd, host_timer);
+                if (auto data = window_data(hwnd); data && data->host)
+                {
+                    gr_event event{};
+                    event.type = GR_EVENT_TIMER;
+                    event.time = seconds_now();
+                    dispatch(data, event);
+                }
                 return 0;
         }
     }

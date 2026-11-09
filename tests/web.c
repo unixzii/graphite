@@ -4,6 +4,7 @@
 #include <graphite/web.h>
 
 #include <emscripten/emscripten.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -408,10 +409,59 @@ static struct
     gr_scene *scene;
     gr_scene_host *host;
     gr_layer *layer;
-    unsigned frames;
-    double last;
+    unsigned frames, timers;
+    double last, deadline;
     bool ok;
 } frames;
+
+static void finish(const char *name, bool ok)
+{
+    printf("[ %s ] web.%s\n", ok ? "      OK" : "  FAILED", name);
+    if (!ok)
+        emscripten_force_exit(EXIT_FAILURE);
+}
+
+static void released_timer(void *arg)
+{
+    (void)arg;
+    finish("timers_stop_with_the_host", frames.timers == 2);
+    gr_layer_unref(frames.layer);
+    gr_scene_unref(frames.scene);
+    emscripten_force_exit(EXIT_SUCCESS);
+}
+
+static void timers_finished(void *arg)
+{
+    (void)arg;
+    finish("timers_fire_once_after_their_deadline", frames.ok && frames.timers == 2);
+    OK(gr_scene_host_set_timer(frames.host, gr_scene_host_get_time(frames.host)));
+    gr_scene_host_unref(frames.host);
+    emscripten_async_call(released_timer, NULL, 50);
+}
+
+static bool on_timer(void *userdata, const gr_event *event)
+{
+    (void)userdata;
+    if (event->type != GR_EVENT_TIMER)
+        return false;
+    ++frames.timers;
+    frames.ok &= event->value.timer.deadline == frames.deadline && event->time >= frames.deadline;
+    if (frames.timers == 1)
+    {
+        /* A past deadline fires from the event loop, not during the call. */
+        frames.deadline = gr_scene_host_get_time(frames.host) - 1;
+        OK(gr_scene_host_set_timer(frames.host, frames.deadline));
+        frames.ok &= frames.timers == 1;
+    }
+    else
+    {
+        /* INFINITY cancels. */
+        OK(gr_scene_host_set_timer(frames.host, gr_scene_host_get_time(frames.host) + 0.02));
+        OK(gr_scene_host_set_timer(frames.host, INFINITY));
+        emscripten_async_call(timers_finished, NULL, 100);
+    }
+    return true;
+}
 
 static void scale_changed(void *arg)
 {
@@ -419,14 +469,15 @@ static void scale_changed(void *arg)
     gr_viewport_event viewport;
     bool ok = gr_scene_host_get_viewport(frames.host, &viewport) && viewport.scale == 2 &&
               gr_scene_get_backing_scale(frames.scene) == 2;
-    printf("[ %s ] web.scale_changes_reach_the_scene\n", ok ? "      OK" : "  FAILED");
     if (!ok)
         fprintf(stderr, "viewport scale %g, backing scale %g\n", viewport.scale,
                 gr_scene_get_backing_scale(frames.scene));
-    gr_layer_unref(frames.layer);
-    gr_scene_host_unref(frames.host);
-    gr_scene_unref(frames.scene);
-    emscripten_force_exit(ok ? EXIT_SUCCESS : EXIT_FAILURE);
+    finish("scale_changes_reach_the_scene", ok);
+    /* Timers: a later deadline replaced by an earlier one fires once, with the deadline set. */
+    OK(gr_scene_host_set_event_handler(frames.host, &(gr_event_handler){NULL, on_timer, NULL}));
+    OK(gr_scene_host_set_timer(frames.host, gr_scene_host_get_time(frames.host) + 10));
+    frames.deadline = gr_scene_host_get_time(frames.host) + 0.03;
+    OK(gr_scene_host_set_timer(frames.host, frames.deadline));
 }
 
 static void frames_finished(void *arg)

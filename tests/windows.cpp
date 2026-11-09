@@ -152,9 +152,10 @@ struct EventState
 {
     gr_scene *scene = nullptr;
     gr_layer *layer = nullptr;
-    unsigned frames = 0, missed = 0, viewports = 0, focus_ins = 0, focus_outs = 0;
+    unsigned frames = 0, missed = 0, viewports = 0, focus_ins = 0, focus_outs = 0, timers = 0;
     gr_event last_frame{};
     gr_event last_viewport{};
+    gr_event last_timer{};
 };
 
 static bool on_event(void *userdata, gr_event const *event)
@@ -174,6 +175,10 @@ static bool on_event(void *userdata, gr_event const *event)
             ++s.viewports;
             s.last_viewport = *event;
             return true;
+        case GR_EVENT_TIMER:
+            ++s.timers;
+            s.last_timer = *event;
+            return true;
         case GR_EVENT_FOCUS_IN:
             ++s.focus_ins;
             return true;
@@ -185,14 +190,29 @@ static bool on_event(void *userdata, gr_event const *event)
     }
 }
 
-static void wait_frames(EventState &s, unsigned frames)
+static void wait_count(unsigned const &count, unsigned target)
 {
     auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (s.frames < frames)
+    while (count < target)
     {
         CHECK(std::chrono::steady_clock::now() < end);
         pump();
         Sleep(1);
+    }
+}
+
+static void wait_frames(EventState &s, unsigned frames)
+{
+    wait_count(s.frames, frames);
+}
+
+static void settle()
+{
+    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+    while (std::chrono::steady_clock::now() < end)
+    {
+        pump();
+        Sleep(5);
     }
 }
 
@@ -244,13 +264,23 @@ static void window_events()
     auto frame = s.last_frame.value.frame;
     CHECK(s.last_frame.time <= gr_scene_host_get_time(host));
     CHECK(frame.interval > 0 && frame.interval < 0.5 && frame.target_time > s.last_frame.time);
-    auto settle = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
-    while (std::chrono::steady_clock::now() < settle)
-    {
-        pump();
-        Sleep(5);
-    }
+    settle();
     CHECK(s.frames == 10 && s.missed == 0);
+
+    /* A timer fires once, not before its deadline, with the deadline it was set for; setting replaces. */
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 10));
+    double deadline = gr_scene_host_get_time(host) + 0.05;
+    OK(gr_scene_host_set_timer(host, deadline));
+    wait_count(s.timers, 1);
+    CHECK(s.last_timer.value.timer.deadline == deadline && s.last_timer.time >= deadline);
+    /* INFINITY cancels; a past deadline fires from the message loop, not during the call. */
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) + 0.02));
+    OK(gr_scene_host_set_timer(host, INFINITY));
+    settle();
+    CHECK(s.timers == 1);
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host) - 1));
+    CHECK(s.timers == 1);
+    wait_count(s.timers, 2);
 
     /* Focus follows the host window's keyboard focus. */
     OK(gr_scene_host_request_focus(host));
@@ -262,17 +292,13 @@ static void window_events()
     OK(gr_scene_host_request_focus(host));
     CHECK(gr_scene_host_has_focus(host));
 
-    /* Release destroys the window without reporting focus loss to a dead host, and stops pending frames. */
+    /* Release destroys the window without reporting focus loss to a dead host, and stops pending frames and timers. */
     OK(gr_scene_host_request_frame(host));
+    OK(gr_scene_host_set_timer(host, gr_scene_host_get_time(host)));
     gr_scene_host_unref(host);
     CHECK(!IsWindow(child) && s.focus_outs == 1);
-    settle = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
-    while (std::chrono::steady_clock::now() < settle)
-    {
-        pump();
-        Sleep(5);
-    }
-    CHECK(s.frames == 10);
+    settle();
+    CHECK(s.frames == 10 && s.timers == 2);
     gr_layer_unref(s.layer);
     gr_scene_unref(s.scene);
     DestroyWindow(parent);

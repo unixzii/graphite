@@ -67,6 +67,7 @@ __attribute__((objc_direct_members))
 - (void)syncBackingScale;
 - (void)reportViewport;
 - (void)requestFrame;
+- (void)setTimer:(double)deadline;
 - (void)detachHost;
 - (void)setCursorKind:(gr_cursor)cursor;
 - (void)setTextInput:(const gr_text_input *)input;

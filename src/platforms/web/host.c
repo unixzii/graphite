@@ -35,6 +35,11 @@ EMSCRIPTEN_KEEPALIVE void gr_web_on_focus(gr_web_host *h, bool focused, double t
     dispatch(h, (gr_event){.type = focused ? GR_EVENT_FOCUS_IN : GR_EVENT_FOCUS_OUT, .time = time});
 }
 
+EMSCRIPTEN_KEEPALIVE void gr_web_on_timer(gr_web_host *h)
+{
+    dispatch(h, (gr_event){.type = GR_EVENT_TIMER, .time = gr_web_js_now()});
+}
+
 EMSCRIPTEN_KEEPALIVE bool gr_web_on_pointer(gr_web_host *h, int type, double time, uint32_t modifiers, uint32_t id,
                                             int kind, double x, double y, int button, uint32_t buttons, uint32_t clicks,
                                             double pressure)
@@ -126,6 +131,11 @@ static double now(void *data)
     return gr_web_js_now();
 }
 
+static void set_timer(void *data, double deadline)
+{
+    gr_web_js_set_timer(((gr_web_host *)data)->element, deadline);
+}
+
 static void set_cursor(void *data, gr_cursor cursor)
 {
     gr_web_js_set_cursor(((gr_web_host *)data)->element, cursor);
@@ -159,7 +169,7 @@ static void request_focus(void *data)
     gr_web_js_request_focus(((gr_web_host *)data)->element);
 }
 
-static const gr_scene_host_vtable host_vtable = {destroy_host, request_frame,  now,
+static const gr_scene_host_vtable host_vtable = {destroy_host, request_frame,  now,          set_timer,
                                                  set_cursor,   set_text_input, request_focus};
 
 gr_scene_host *gr_web_attach_to_element(gr_scene *scene, const char *target)

@@ -12,8 +12,8 @@ extern "C" {
 /* Events
  *
  * Positions are in host space: logical points from the host's top-left corner, the Scene root's box space. Times are
- * seconds on a monotonic clock; only differences are meaningful. Frame times use the gr_scene_host_get_time domain;
- * input times use the platform's input clock, which may differ (GTK). */
+ * seconds on a monotonic clock; only differences are meaningful. Frame and timer times use the gr_scene_host_get_time
+ * domain; input times use the platform's input clock, which may differ (GTK). */
 
 typedef enum
 {
@@ -31,7 +31,8 @@ typedef enum
     GR_EVENT_KEY_DOWN,       /**< A key was pressed or auto-repeated. */
     GR_EVENT_KEY_UP,         /**< A key was released. */
     GR_EVENT_TEXT_EDIT,      /**< The platform's text input edited the shared text input state; see host.h. */
-    GR_EVENT_TEXT_COMMAND    /**< An editing command from the platform's key bindings, such as delete backward. */
+    GR_EVENT_TEXT_COMMAND,   /**< An editing command from the platform's key bindings, such as delete backward. */
+    GR_EVENT_TIMER           /**< The deadline set with gr_scene_host_set_timer passed. */
 } gr_event_type;
 
 typedef uint32_t gr_modifiers;
@@ -50,6 +51,11 @@ typedef struct
     double target_time; /**< Expected presentation time of what this frame commits. */
     double interval;    /**< Current refresh interval; nonnegative. */
 } gr_frame_event;
+
+typedef struct
+{
+    double deadline; /**< The deadline that passed; the event's time is when it was delivered, at or after it. */
+} gr_timer_event;
 
 typedef struct
 {
@@ -367,11 +373,12 @@ typedef struct
     gr_event_type type;
     double time;            /**< Event time; for FRAME, the start of the frame. */
     gr_modifiers modifiers; /**< Modifiers held during input events, including a modifier key's own change (Shift
-                             * down reports SHIFT); 0 for FRAME, VIEWPORT and FOCUS events. */
+                             * down reports SHIFT); 0 for FRAME, TIMER, VIEWPORT and FOCUS events. */
 
     union
     {
         gr_frame_event frame;
+        gr_timer_event timer;
         gr_viewport_event viewport;
         gr_pointer_event pointer; /**< All POINTER_* events. */
         gr_scroll_event scroll;

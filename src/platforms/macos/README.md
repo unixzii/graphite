@@ -33,8 +33,10 @@ View hosts are interactive. Frames come from the view's `CADisplayLink`
 modes and paused after a frame without a new request; it fires before the
 backend's commit observer, so changes made for a frame commit with it. The view
 reports its size and backing scale as `GR_EVENT_VIEWPORT`, and keyboard focus
-while it is the first responder of the key window. Releasing the host
-invalidates the display link and leaves the view inert.
+while it is the first responder of the key window. The host's timer is a
+one-shot `NSTimer` on the main run loop in common modes, so it also fires
+during tracking. Releasing the host invalidates the display link and the timer
+and leaves the view inert.
 
 The view also reports mouse and tablet pointer events (a tracking area gives
 hover moves and crossings; AppKit keeps drags with the view), wheel and touchpad

@@ -171,6 +171,10 @@ GR_API gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *
  * - request_frame schedules one GR_EVENT_FRAME for the next display refresh, delivered with
  *   gr_scene_host_dispatch_event before that frame's commit point. Core calls it once per pending request.
  * - now returns the frame clock's current time in seconds.
+ * - set_timer schedules one GR_EVENT_TIMER for when the frame clock reaches deadline, replacing the one scheduled
+ *   before, or cancels it with INFINITY. The platform dispatches it from its event loop with the current time, never
+ *   from set_timer itself. Core calls it only when the deadline changes, and reschedules a timer that fires early, so
+ *   a platform timer of coarse resolution is enough.
  * - set_cursor and request_focus apply to the native surface.
  * - set_text_input passes on the application's text input state, or NULL to turn text input off. input and what it
  *   points to are borrowed for the call; the platform copies the text and references the layout to keep them. */
@@ -179,6 +183,7 @@ typedef struct
     void (*destroy)(void *data);
     void (*request_frame)(void *data);
     double (*now)(void *data);
+    void (*set_timer)(void *data, double deadline);
     void (*set_cursor)(void *data, gr_cursor cursor);
     void (*set_text_input)(void *data, const gr_text_input *input);
     void (*request_focus)(void *data);
@@ -198,16 +203,20 @@ GR_API void *gr_scene_host_get_data(const gr_scene_host *host);
 /** Delivers event to the handler and returns whether it consumed it; event storage is borrowed for the call.
  * Events must be valid (finite values, known enums, in-range fields); builds without NDEBUG check this and drop
  * invalid ones, release builds trust the backend. Returns false without delivery for non-interactive hosts, a
- * missing handler, FRAME events that were not requested, and VIEWPORT/FOCUS events that repeat the current state,
- * so platforms may report state liberally. VIEWPORT and FOCUS update the state that gr_scene_host_get_viewport and
- * gr_scene_host_has_focus return even without a handler. FRAME clears the pending request before delivery, so the
- * handler can request the next one. Events dispatched while a handler runs (for example focus changes the platform
- * sends synchronously) are copied, delivered in order after it returns, and report false. Holds a host reference until
- * delivery ends. */
+ * missing handler, FRAME events that were not requested, TIMER events with no deadline set or a time before it,
+ * and VIEWPORT/FOCUS events that repeat the current state, so platforms may report state liberally. VIEWPORT and
+ * FOCUS update the state that gr_scene_host_get_viewport and gr_scene_host_has_focus return even without a handler.
+ * FRAME clears the pending request and TIMER the deadline before delivery, so the handler can request the next one;
+ * core fills a TIMER's payload from the deadline it holds. Events dispatched while a handler runs (for example focus
+ * changes the platform sends synchronously) are copied, delivered in order after it returns, and report false. Holds
+ * a host reference until delivery ends. */
 GR_API bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event);
 
 /** Returns whether a frame was requested and not yet delivered. */
 GR_API bool gr_scene_host_frame_requested(const gr_scene_host *host);
+
+/** Returns the timer deadline set and not yet delivered, or INFINITY. */
+GR_API double gr_scene_host_timer_deadline(const gr_scene_host *host);
 
 /* Deferred drawing */
 
