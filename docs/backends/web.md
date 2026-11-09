@@ -267,8 +267,40 @@ independent layout engine (for example HarfBuzz with bundled fonts).
   lowercased key value. Composition keys report `GR_KEY_PROCESS`.
 - A consumed event prevents its default action (scrolling, focus moves, the
   context menu after a consumed secondary press). Cursors are CSS `cursor`.
-- Text input (IME) would come later, through `EditContext` or a hidden text
-  field.
+
+## Text input
+
+Text input works the same way in every engine: a hidden field the browser
+types into. `EditContext` would report edits as ranges, but only Chromium has
+it.
+
+- While a field shares its state, the runtime keeps a copy (`host.text`, in
+  UTF-16) and a transparent, focused `<textarea>` (an `<input type="password">`
+  for passwords, which keeps input methods out) inside the host element at the
+  caret: the composition's start while there is one, else the selection's end.
+  The browser places candidate windows by it. Its value and selection mirror the
+  state, except during a composition, when setting them would end it.
+- Typing, compositions and paste change the field. On each `input` and on
+  `compositionend`, the runtime diffs the field against its copy (the changed
+  span anchored at the old selection or composition, which settles repeated
+  characters, and never splitting a surrogate pair), applies the result to the
+  copy and reports it as one `GR_EVENT_TEXT_EDIT` in UTF-8 offsets. The
+  composition range comes from `compositionstart` (where it began) and
+  `compositionupdate` (its text).
+- Key downs the handler leaves map to `GR_EVENT_TEXT_COMMAND`: macOS bindings
+  on Apple platforms (Option for words, Command for lines and select all,
+  Control for its Emacs keys), the edit control's elsewhere. Their default is
+  prevented whether or not the handler takes them, so the field never edits
+  itself; only Tab and Escape keep theirs when unconsumed. During a composition,
+  keys keep their default whatever the handler returns.
+- The host has focus while it or the field does: focus reports come from
+  `focusin`/`focusout`, and moving between the two is not a change. Presses
+  focus the field and prevent `mousedown`'s default, which would move focus
+  out of it.
+- When the application ends or replaces a composition, the runtime blurs and
+  refocuses the field to end the browser's, ignoring what that reports.
+- Checked in headless Chromium with DevTools input (`Input.imeSetComposition`,
+  `Input.insertText`); WebKit and Firefox are not yet verified.
 
 ## Testing
 
@@ -351,7 +383,7 @@ suite, because the runner uses CDP.
 ## Known gaps
 
 - **No offscreen rendering.**
-- No text input (IME) or touch yet.
+- No touch yet.
 - The text system works on the main thread only, glyph identities are
   approximations (one glyph per grapheme cluster), and grapheme directions
   come from a simplified bidi resolution.
@@ -366,9 +398,9 @@ suite, because the runner uses CDP.
    skeleton with a browser test, and CI running both.
 2. **Rendering** (done): host attachment, rAF commits, the
    command stream, layers, drawn contents, and Playwright-driven conformance.
-3. **Events and examples** (done apart from IME and touch): input, frame,
-   viewport and focus events, and a Web shell under `examples/shared/platform`
+3. **Events and examples** (done apart from touch): input, frame, viewport
+   and focus events, text input through a hidden field, and a Web shell under `examples/shared/platform`
    with the examples driven by animation frames rather than a blocking loop.
 4. **Text** (done): the DOM text system (layout, metrics, truncation, carets,
    hit testing, range rectangles and approximated glyphs) and its replay.
-5. **Gaps**: IME and performance work.
+5. **Gaps**: touch, and performance work.

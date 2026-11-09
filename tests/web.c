@@ -21,6 +21,12 @@ void web_test_focus(bool focused);
 char *web_test_cursor(void);
 void web_test_set_scale(double scale);
 char *web_test_host_text(void);
+char *web_test_field(void);
+void web_test_type(const char *text);
+void web_test_compose(const char *type, const char *text);
+bool web_test_field_key(const char *code, const char *key, int modifiers);
+bool web_test_host_focused(void);
+bool web_test_apple(void);
 
 static bool tree_is(const char *expected)
 {
@@ -252,6 +258,150 @@ static void events_reach_the_handler(void)
     gr_scene_unref(scene);
 }
 
+/* A minimal text field model: applies edits, records commands, consumes the Q key and shares its state. */
+typedef struct
+{
+    gr_scene_host *host;
+    char text[64];
+    size_t length;
+    gr_text_range selection, composition;
+    gr_text_input_kind kind;
+    gr_text_command_event commands[8];
+    size_t command_count;
+    unsigned focus_outs;
+} field;
+
+static void share(field *f)
+{
+    gr_text_input input = {.kind = f->kind,
+                           .text = {f->text, f->length},
+                           .selection = f->selection,
+                           .composition = f->composition,
+                           .caret = {{10, 20}, {1, 16}}};
+    OK(gr_scene_host_set_text_input(f->host, &input));
+}
+
+static bool on_field_event(void *userdata, const gr_event *event)
+{
+    field *f = userdata;
+    switch (event->type)
+    {
+        case GR_EVENT_TEXT_EDIT:
+        {
+            const gr_text_edit_event *e = &event->value.edit;
+            size_t removed = e->replace.end - e->replace.start;
+            CHECK(e->replace.end <= f->length && f->length - removed + e->text.count < sizeof(f->text));
+            memmove(f->text + e->replace.start + e->text.count, f->text + e->replace.end, f->length - e->replace.end);
+            memcpy(f->text + e->replace.start, e->text.data, e->text.count);
+            f->length = f->length - removed + e->text.count;
+            f->selection = e->selection;
+            f->composition = e->composition;
+            share(f);
+            return true;
+        }
+        case GR_EVENT_TEXT_COMMAND:
+            if (f->command_count < 8)
+                f->commands[f->command_count++] = event->value.command;
+            return event->value.command.command != GR_TEXT_COMMAND_INSERT_TAB;
+        case GR_EVENT_KEY_DOWN:
+            return event->value.key.character == 'q';
+        case GR_EVENT_FOCUS_OUT:
+            ++f->focus_outs;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool field_is(const field *f, const char *text, size_t caret)
+{
+    bool same = f->length == strlen(text) && memcmp(f->text, text, f->length) == 0 && f->selection.start == caret &&
+                f->selection.end == caret;
+    if (!same)
+        fprintf(stderr, "field \"%.*s\" %zu-%zu, expected \"%s\" at %zu\n", (int)f->length, f->text, f->selection.start,
+                f->selection.end, text, caret);
+    return same;
+}
+
+static bool hidden_field_is(const char *expected)
+{
+    char *state = web_test_field();
+    bool same = strcmp(state, expected) == 0;
+    if (!same)
+        fprintf(stderr, "hidden field %s, expected %s\n", state, expected);
+    free(state);
+    return same;
+}
+
+static void text_input_mirrors_a_hidden_field(void)
+{
+    gr_scene *scene = gr_scene_new((gr_size){100, 100});
+    gr_scene_host *host = gr_web_attach_to_element(scene, "#host");
+    field f = {.host = host};
+    OK(gr_scene_host_set_event_handler(host, &(gr_event_handler){&f, on_field_event, NULL}));
+    web_test_pointer("pointerdown", 10, 20, 0, 1, "mouse", 0.5);
+    web_test_pointer("pointerup", 10, 20, 0, 0, "mouse", 0);
+    CHECK(gr_scene_host_has_focus(host) && hidden_field_is(""));
+
+    /* Turning text input on puts a focused field at the caret; focus stays with the host. */
+    share(&f);
+    CHECK(hidden_field_is("textarea||0|0|10,20|true"));
+    CHECK(web_test_host_focused() && gr_scene_host_has_focus(host) && f.focus_outs == 0);
+
+    /* Typing, surrogate pairs included, arrives as edits in UTF-8 offsets. */
+    web_test_type("ab");
+    CHECK(field_is(&f, "ab", 2));
+    web_test_type("\xF0\x9F\x98\x80");
+    CHECK(field_is(&f, "ab\xF0\x9F\x98\x80", 6) && hidden_field_is("textarea|ab\xF0\x9F\x98\x80|4|4|10,20|true"));
+
+    /* A composition replaces itself, then commits. */
+    web_test_compose("start", "");
+    web_test_compose("update", "n");
+    web_test_compose("update", "ni");
+    CHECK(field_is(&f, "ab\xF0\x9F\x98\x80ni", 8) && f.composition.start == 6 && f.composition.end == 8);
+    web_test_compose("update", "\xE4\xBD\xA0");
+    CHECK(field_is(&f, "ab\xF0\x9F\x98\x80\xE4\xBD\xA0", 9) && f.composition.start == 6 && f.composition.end == 9);
+    web_test_compose("end", "\xE4\xBD\xA0");
+    CHECK(field_is(&f, "ab\xF0\x9F\x98\x80\xE4\xBD\xA0", 9) && f.composition.start == f.composition.end);
+
+    /* Editing keys become commands and keep the field as it is; Tab left unconsumed moves focus as usual. */
+    CHECK(web_test_field_key("Backspace", "Backspace", 0));
+    CHECK(web_test_field_key("ArrowLeft", "ArrowLeft", 1));
+    int word = web_test_apple() ? 4 : 2;
+    CHECK(web_test_field_key("ArrowRight", "ArrowRight", word));
+    CHECK(!web_test_field_key("Tab", "Tab", 0));
+    CHECK(f.command_count == 4 && f.commands[0].command == GR_TEXT_COMMAND_DELETE_BACKWARD);
+    CHECK(f.commands[1].command == GR_TEXT_COMMAND_MOVE_LEFT && f.commands[1].extend);
+    CHECK(f.commands[2].command == GR_TEXT_COMMAND_MOVE_WORD_RIGHT && !f.commands[2].extend);
+    CHECK(f.commands[3].command == GR_TEXT_COMMAND_INSERT_TAB);
+    /* A key the handler consumes types nothing; typing keys it leaves keep their default. */
+    CHECK(web_test_field_key("KeyQ", "q", 0));
+    CHECK(!web_test_field_key("KeyZ", "z", 0));
+
+    /* The field follows the application's own changes, ending a composition it ends without losing focus. */
+    web_test_compose("start", "");
+    web_test_compose("update", "w");
+    CHECK(f.composition.start == 9 && f.composition.end == 10);
+    f.length = 2;
+    f.selection = f.composition = (gr_text_range){1, 1};
+    share(&f);
+    CHECK(hidden_field_is("textarea|ab|1|1|10,20|true") && f.focus_outs == 0);
+    web_test_type("x");
+    CHECK(field_is(&f, "axb", 2));
+
+    /* Password fields use a password input, which keeps input methods out. */
+    f.kind = GR_TEXT_INPUT_PASSWORD;
+    share(&f);
+    CHECK(hidden_field_is("input password|axb|2|2|10,20|true") && f.focus_outs == 0);
+
+    /* Turning text input off gives focus back to the host. */
+    OK(gr_scene_host_set_text_input(host, NULL));
+    CHECK(hidden_field_is("") && web_test_host_focused() && gr_scene_host_has_focus(host) && f.focus_outs == 0);
+
+    gr_scene_host_unref(host);
+    gr_scene_unref(scene);
+}
+
 /* Frames run in animation frames, each followed by the commit of its changes; main starts this after the cases. */
 static struct
 {
@@ -316,7 +466,7 @@ int main(int argc, char **argv)
     const gr_test_case cases[] = {
         GR_TEST_CASE(attach_rejects_bad_arguments),      GR_TEST_CASE(attach_to_registered_element),
         GR_TEST_CASE(commits_mirror_the_tree),           GR_TEST_CASE(events_reach_the_handler),
-        GR_TEST_CASE(text_from_temporary_layouts_draws),
+        GR_TEST_CASE(text_from_temporary_layouts_draws), GR_TEST_CASE(text_input_mirrors_a_hidden_field),
     };
     int status = gr_test_run("web", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
     if (status != EXIT_SUCCESS)

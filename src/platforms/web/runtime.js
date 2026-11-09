@@ -2,7 +2,7 @@
 // backend.c sends each commit as a stream of doubles; internal.h documents the commands and operand groups.
 
 addToLibrary({
-  $GRWeb__deps: ['$GRText'],
+  $GRWeb__deps: ['$GRText', '$lengthBytesUTF8', '$stringToUTF8OnStack', '$withStackSave'],
   $GRWeb: {
     hosts: new Map(),
     nextHost: 1,
@@ -466,6 +466,167 @@ addToLibrary({
     /* The keyboard layout's unshifted characters by code, where the browser exposes them (Chromium). */
     layout: null,
 
+    /* Text input. A focused field's state lives here as host.text, with this host's edits applied: value (UTF-16),
+     * sel and comp (UTF-16 ranges), kind, and the hidden field the browser types into. The field is a transparent
+     * textarea (an input of type password for passwords) at the caret, so input methods place their windows there;
+     * its value and selection mirror the state. Typing, compositions and paste change the field, and pull turns the
+     * difference into a TEXT_EDIT. */
+    /* Whether this is an Apple platform; asked in the page, since library values are evaluated when linking. */
+    apple() {
+      return (GRWeb.isApple ??= /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+    },
+
+    /* Editing key bindings: macOS's on Apple platforms (with its Emacs keys), the edit control's elsewhere. Returns
+     * [gr_text_command, extend], or null for keys that are not commands. */
+    command(e) {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key, shift = e.shiftKey;
+      const ctrl = e.ctrlKey, alt = e.altKey, meta = e.metaKey;
+      const BACK = 3, FORWARD = 4, WORD_BACK = 5, WORD_FORWARD = 6, TO_START = 7, TO_END = 8, LEFT = 9, RIGHT = 10,
+        UP = 11, DOWN = 12, WORD_LEFT = 13, WORD_RIGHT = 14, LINE_START = 15, LINE_END = 16, DOC_START = 17,
+        DOC_END = 18, PAGE_UP = 19, PAGE_DOWN = 20, ALL = 21, CANCEL = 22;
+      const move = (command) => [command, shift], apple = GRWeb.apple();
+      const plain = !ctrl && !alt && !meta;
+      if (plain || (apple && meta && !ctrl && !alt) || (apple && alt && !ctrl && !meta) ||
+        (!apple && ctrl && !alt && !meta)) {
+        const word = apple ? alt : ctrl, line = apple && meta;
+        switch (key) {
+          case 'Backspace': return [line ? TO_START : word ? WORD_BACK : BACK, false];
+          case 'Delete':
+            if (shift && plain && !apple) return null; // Cut.
+            return [line ? TO_END : word ? WORD_FORWARD : FORWARD, false];
+          case 'ArrowLeft': return move(line ? LINE_START : word ? WORD_LEFT : LEFT);
+          case 'ArrowRight': return move(line ? LINE_END : word ? WORD_RIGHT : RIGHT);
+          case 'ArrowUp': return move(line ? DOC_START : UP);
+          case 'ArrowDown': return move(line ? DOC_END : DOWN);
+          case 'Home': return move(apple || ctrl ? DOC_START : LINE_START);
+          case 'End': return move(apple || ctrl ? DOC_END : LINE_END);
+          case 'PageUp': return move(PAGE_UP);
+          case 'PageDown': return move(PAGE_DOWN);
+          case 'a': return (apple ? meta : ctrl) && !shift ? [ALL, false] : null;
+        }
+        if (!plain) return null;
+        switch (key) {
+          case 'Enter': return [0, false];
+          case 'Tab': return [shift ? 2 : 1, false];
+          case 'Escape': return shift ? null : [CANCEL, false];
+        }
+        return null;
+      }
+      if (apple && ctrl && !alt && !meta) {
+        const emacs = { a: LINE_START, e: LINE_END, b: LEFT, f: RIGHT, p: UP, n: DOWN, h: BACK, d: FORWARD, k: TO_END };
+        const command = emacs[key];
+        return command === undefined ? null : [command, shift && command >= LEFT];
+      }
+      return null;
+    },
+
+    /* Applies the application's state (null turns text input off), making or dropping the hidden field. */
+    textInput(host, next) {
+      const t = host.text ??= {
+        on: false, kind: 0, value: '', sel: [0, 0], comp: [0, 0], caret: [0, 0, 0, 0], field: null,
+        composing: false, start: 0, data: '', quiet: false,
+      };
+      if (!next) {
+        if (t.on) GRWeb.setField(host, null);
+        Object.assign(t, { on: false, value: '', sel: [0, 0], comp: [0, 0], composing: false });
+        return;
+      }
+      const restart = !t.on || next.kind !== t.kind;
+      const recompose = t.on && (next.comp[0] !== t.comp[0] || next.comp[1] !== t.comp[1]);
+      Object.assign(t, next, { on: true });
+      if (restart) GRWeb.setField(host, GRWeb.makeField(host, next.kind));
+      else if (recompose && t.composing) {
+        // Blurring the field ends the browser's composition; what that reports is ignored.
+        t.quiet = true;
+        t.field.blur();
+        t.field.focus({ preventScroll: true });
+        t.quiet = false;
+        t.composing = false;
+      }
+      const f = t.field, [x, y, w, h] = t.caret, height = Math.max(h, 1);
+      Object.assign(f.style, {
+        left: `${x}px`, top: `${y}px`, height: `${height}px`, lineHeight: `${height}px`,
+        fontSize: `${Math.max(height * 0.8, 1)}px`,
+      });
+      if (!t.composing) {
+        if (f.value !== t.value) f.value = t.value;
+        if (f.selectionStart !== t.sel[0] || f.selectionEnd !== t.sel[1]) f.setSelectionRange(t.sel[0], t.sel[1]);
+      }
+    },
+
+    makeField(host, kind) {
+      const f = document.createElement(kind === 1 ? 'input' : 'textarea');
+      if (kind === 1) f.type = 'password';
+      else f.wrap = 'off';
+      f.tabIndex = -1;
+      f.spellcheck = false;
+      for (const [name, value] of [['autocomplete', 'off'], ['autocorrect', 'off'], ['autocapitalize', 'off'],
+        ['aria-hidden', 'true']]) f.setAttribute(name, value);
+      f.className = 'gr-text-input';
+      Object.assign(f.style, {
+        position: 'absolute', width: '1px', padding: '0', border: '0', margin: '0', outline: 'none', resize: 'none',
+        overflow: 'hidden', whiteSpace: 'pre', opacity: '0', color: 'transparent', background: 'transparent',
+        caretColor: 'transparent', pointerEvents: 'none',
+      });
+      const t = host.text, time = (e) => e.timeStamp / 1000;
+      f.addEventListener('compositionstart', () => {
+        t.composing = true;
+        t.start = Math.min(f.selectionStart, f.selectionEnd);
+        t.data = '';
+      });
+      f.addEventListener('compositionupdate', (e) => {
+        t.data = e.data ?? '';
+      });
+      f.addEventListener('compositionend', (e) => {
+        t.composing = false;
+        t.data = '';
+        GRWeb.pull(host, time(e));
+      });
+      f.addEventListener('input', (e) => GRWeb.pull(host, time(e)));
+      return f;
+    },
+
+    /* Replaces the hidden field, keeping keyboard focus inside the host. */
+    setField(host, field) {
+      const t = host.text, old = t.field, focused = host.element.contains(document.activeElement);
+      t.quiet = true;
+      if (field) host.element.append(field);
+      if (focused) (field ?? host.element).focus({ preventScroll: true });
+      old?.remove();
+      t.quiet = false;
+      t.field = field;
+      t.composing = false;
+    },
+
+    /* Reports what the browser changed in the field as one TEXT_EDIT, after applying it to the state. */
+    pull(host, time) {
+      const t = host.text, f = t?.field;
+      if (!f || !t.on || t.quiet || !host.events) return;
+      const value = f.value, old = t.value;
+      const sel = [Math.min(f.selectionStart, f.selectionEnd), Math.max(f.selectionStart, f.selectionEnd)];
+      const at = Math.min(t.start, value.length);
+      const comp = t.composing ? [at, Math.min(at + t.data.length, value.length)] : [sel[1], sel[1]];
+      if (value === old && sel[0] === t.sel[0] && sel[1] === t.sel[1] && comp[0] === t.comp[0] &&
+        comp[1] === t.comp[1]) return;
+      // The changed span: edits happen at the selection or composition, which settles repeated characters.
+      const shortest = Math.min(old.length, value.length);
+      const limit = Math.min(t.sel[0], t.comp[0] < t.comp[1] ? t.comp[0] : t.sel[0]);
+      let prefix = 0, suffix = 0;
+      while (prefix < shortest && prefix < limit && old.charCodeAt(prefix) === value.charCodeAt(prefix)) prefix++;
+      while (suffix < shortest - prefix &&
+        old.charCodeAt(old.length - 1 - suffix) === value.charCodeAt(value.length - 1 - suffix)) suffix++;
+      // Never split a surrogate pair.
+      if (prefix && (old.charCodeAt(prefix - 1) & 0xfc00) === 0xd800) prefix--;
+      if (suffix && (old.charCodeAt(old.length - suffix) & 0xfc00) === 0xdc00) suffix--;
+      const inserted = value.slice(prefix, value.length - suffix);
+      const bytes = (text, index) => lengthBytesUTF8(text.slice(0, index));
+      const start = bytes(old, prefix), end = bytes(old, old.length - suffix);
+      Object.assign(t, { value, sel, comp });
+      GRWeb.call(() => withStackSave(() => _gr_web_on_text_edit(host.events, time, start, end,
+        stringToUTF8OnStack(inserted), lengthBytesUTF8(inserted), bytes(value, sel[0]), bytes(value, sel[1]),
+        bytes(value, comp[0]), bytes(value, comp[1]))));
+    },
+
     modifiers(e) {
       return (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0) |
         (e.getModifierState?.('CapsLock') ? 16 : 0);
@@ -547,7 +708,7 @@ addToLibrary({
         state.buttons = buttonsOf(e.buttons);
         const down = !(before & (1 << button)) && !!(state.buttons & (1 << button));
         if (down) {
-          element.focus({ preventScroll: true });
+          (host.text?.field ?? element).focus({ preventScroll: true });
           // Capture keeps moves and the release coming during drags, as native hosts' implicit grabs do. It throws
           // for pointers the browser no longer tracks.
           if (e.type === 'pointerdown') {
@@ -594,6 +755,10 @@ addToLibrary({
         state.buttons = 0;
         send(9, e);
       });
+      // Presses would move focus out of the hidden field and end its composition.
+      on('mousedown', (e) => {
+        if (host.text?.field) e.preventDefault();
+      });
       on('contextmenu', (e) => {
         if (state.menu) e.preventDefault();
       });
@@ -607,7 +772,7 @@ addToLibrary({
         const name = GRWeb.codeAliases[e.code] ?? e.code;
         const code = Math.max(0, GRWeb.codes.indexOf(name));
         const value = GRWeb.keyAliases[e.key] ?? e.key;
-        const composing = e.isComposing || e.key === 'Process' || e.keyCode === 229;
+        const composing = e.isComposing || e.key === 'Process' || e.keyCode === 229 || !!host.text?.composing;
         const index = GRWeb.keys.indexOf(value);
         let named = value === 'Process' ? 2 : index >= 0 ? index + 3 : 0, character = 0;
         if (!named) {
@@ -619,19 +784,39 @@ addToLibrary({
             named = 1;
           }
         }
-        if (call(() => _gr_web_on_key(host.events, down, e.timeStamp / 1000, GRWeb.modifiers(e), code, named,
-          character, e.repeat, composing, e.keyCode >>> 0))) e.preventDefault();
+        const handled = call(() => _gr_web_on_key(host.events, down, e.timeStamp / 1000, GRWeb.modifiers(e), code,
+          named, character, e.repeat, composing, e.keyCode >>> 0));
+        // Keys an input method takes keep their default action whatever the handler returns.
+        if (composing) return;
+        if (handled) {
+          e.preventDefault();
+          return;
+        }
+        // Keys the handler leaves type into the hidden field, or edit as commands.
+        const command = down && host.text?.on && host.events ? GRWeb.command(e) : null;
+        if (!command) return;
+        const took = call(() => _gr_web_on_text_command(host.events, e.timeStamp / 1000, GRWeb.modifiers(e),
+          command[0], command[1]));
+        // Unconsumed commands leave the field alone too, except focus moves (Tab) and Escape.
+        if (took || (command[0] !== 1 && command[0] !== 2 && command[0] !== 22)) e.preventDefault();
       };
       on('keydown', (e) => key(e, true));
       on('keyup', (e) => key(e, false));
-      on('focus', (e) => call(() => _gr_web_on_focus(host.events, true, e.timeStamp / 1000)));
-      on('blur', (e) => call(() => _gr_web_on_focus(host.events, false, e.timeStamp / 1000)));
+      // The host has focus while it or its hidden field does; moving between them is not a change.
+      on('focusin', (e) => {
+        if (!host.text?.quiet) call(() => _gr_web_on_focus(host.events, true, e.timeStamp / 1000));
+      });
+      on('focusout', (e) => {
+        if (!host.text?.quiet && !element.contains(e.relatedTarget))
+          call(() => _gr_web_on_focus(host.events, false, e.timeStamp / 1000));
+      });
       viewport();
-      if (document.activeElement === element && document.hasFocus())
+      if (element.contains(document.activeElement) && document.hasFocus())
         call(() => _gr_web_on_focus(host.events, true, performance.now() / 1000));
     },
 
     unlisten(host) {
+      if (host.text) GRWeb.textInput(host, null);
       for (const [type, handler, options] of host.listeners ?? []) host.element.removeEventListener(type, handler, options);
       host.listeners = null;
       host.viewport = null;
@@ -691,7 +876,7 @@ addToLibrary({
   },
 
   gr_web_js_host_events__deps: ['$GRWeb', '$handleException', 'gr_web_on_viewport', 'gr_web_on_focus',
-    'gr_web_on_pointer', 'gr_web_on_scroll', 'gr_web_on_key'],
+    'gr_web_on_pointer', 'gr_web_on_scroll', 'gr_web_on_key', 'gr_web_on_text_edit', 'gr_web_on_text_command'],
   gr_web_js_host_events: (handle, events) => {
     const host = GRWeb.hosts.get(handle);
     if (!host) return;
@@ -709,7 +894,26 @@ addToLibrary({
   },
 
   gr_web_js_request_focus__deps: ['$GRWeb'],
-  gr_web_js_request_focus: (handle) => GRWeb.hosts.get(handle)?.element.focus({ preventScroll: true }),
+  gr_web_js_request_focus: (handle) => {
+    const host = GRWeb.hosts.get(handle);
+    (host?.text?.field ?? host?.element)?.focus({ preventScroll: true });
+  },
+
+  // UTF-8 offsets convert to UTF-16 by decoding the text up to them.
+  gr_web_js_set_text_input__deps: ['$GRWeb', '$UTF8ToString'],
+  gr_web_js_set_text_input: (handle, on, kind, text, length, selStart, selEnd, compStart, compEnd, x, y, w, h) => {
+    const host = GRWeb.hosts.get(handle);
+    if (!host?.listeners) return;
+    if (!on) {
+      GRWeb.textInput(host, null);
+      return;
+    }
+    const units = (offset) => (offset ? UTF8ToString(text, offset).length : 0);
+    GRWeb.textInput(host, {
+      kind, value: length ? UTF8ToString(text, length) : '', sel: [units(selStart), units(selEnd)],
+      comp: [units(compStart), units(compEnd)], caret: [x, y, w, h],
+    });
+  },
 
   gr_web_js_host_free__deps: ['$GRWeb'],
   gr_web_js_host_free: (handle) => {

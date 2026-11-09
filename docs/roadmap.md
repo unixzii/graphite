@@ -30,10 +30,9 @@
   shared native shell with `--selftest`, `--fps` and `--snapshot`.
 - **Events**: every attachment returns a `gr_scene_host`. View, widget and HWND
   hosts deliver frames paced by the display, viewport, focus, pointer (mouse and
-  pen), scroll and key events through one handler, and apply cursors. macOS,
-  GTK and Windows hosts also take text input (typing, input methods, key
-  bindings) from a field's shared editing state; Web text input, touchscreens
-  and gestures are next.
+  pen), scroll and key events through one handler, apply cursors, and take
+  text input (typing, input methods, key bindings) from a field's shared
+  editing state. Touchscreens and gestures are next.
 
 ## Next
 

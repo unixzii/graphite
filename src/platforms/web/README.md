@@ -11,8 +11,9 @@ geometry, opacity, visibility, background, corner radii, borders,
 `masks_to_bounds`, masks, shadows, blur, and shape, gradient, image and drawn
 contents all render, and `gr_web_text_system_new` lays out and draws text. Hosts are
 interactive: frames, viewport (size and `devicePixelRatio`), focus, mouse and
-pen pointers, wheel and keys, and cursors. Text input (IME) and touch are not
-implemented yet. Every example runs in the browser.
+pen pointers, wheel and keys, cursors, and text input (typing, input methods,
+paste, editing keys). Touch is not implemented yet. Every example runs in the
+browser.
 
 ## Implementation
 
@@ -44,8 +45,11 @@ implemented yet. Every example runs in the browser.
   passes. Each host has one animation-frame tick, requested by frame requests
   and commit requests alike, and its event listeners: pointer events with
   capture during drags, `wheel`, `keydown`/`keyup` (W3C `code` values map
-  straight onto `gr_key_code`), `focus`/`blur`, a `ResizeObserver`, and
+  straight onto `gr_key_code`), `focusin`/`focusout`, a `ResizeObserver`, and
   `devicePixelRatio` changes caught by a media query, `resize` and each tick.
+  Text input keeps the shared state in the runtime (`host.text`) and a hidden
+  field that the browser types into; see the
+  [design](../../../docs/backends/web.md#text-input).
   Calls into C go through `GRWeb.call`, which ends Emscripten's exit and unwind
   exceptions without `callUserCallback`'s implicit exit: events also fire while
   C is calling in (`focus()` from `request_focus`, the first viewport report).

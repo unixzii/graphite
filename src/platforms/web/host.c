@@ -75,6 +75,29 @@ EMSCRIPTEN_KEEPALIVE bool gr_web_on_key(gr_web_host *h, bool down, double time, 
     return dispatch(h, e);
 }
 
+/* Text input edits arrive in UTF-8 offsets, already applied to the runtime's copy of the state. */
+EMSCRIPTEN_KEEPALIVE bool gr_web_on_text_edit(gr_web_host *h, double time, size_t start, size_t end, const char *text,
+                                              size_t length, size_t selection_start, size_t selection_end,
+                                              size_t composition_start, size_t composition_end)
+{
+    gr_event e = {.type = GR_EVENT_TEXT_EDIT, .time = time};
+    e.value.edit = (gr_text_edit_event){
+        .replace = {start, end},
+        .text = {text, length},
+        .selection = {selection_start, selection_end},
+        .composition = {composition_start, composition_end},
+    };
+    return dispatch(h, e);
+}
+
+EMSCRIPTEN_KEEPALIVE bool gr_web_on_text_command(gr_web_host *h, double time, uint32_t modifiers, int command,
+                                                 bool extend)
+{
+    gr_event e = {.type = GR_EVENT_TEXT_COMMAND, .time = time, .modifiers = modifiers};
+    e.value.command = (gr_text_command_event){(gr_text_command)command, extend};
+    return dispatch(h, e);
+}
+
 /* Delivers a requested frame; the backend commits right after it in the same animation frame. */
 void gr_web_host_frame(gr_web_host *h, double time, double interval)
 {
@@ -108,11 +131,27 @@ static void set_cursor(void *data, gr_cursor cursor)
     gr_web_js_set_cursor(((gr_web_host *)data)->element, cursor);
 }
 
-/* Text input is accepted but not applied yet. */
+/* The runtime keeps the state and places its hidden field at the caret: the composition's start while there is one,
+ * else the selection's end, from the shared layout or else the shared caret. */
 static void set_text_input(void *data, const gr_text_input *input)
 {
-    (void)data;
-    (void)input;
+    gr_web_host *h = data;
+    if (!input)
+    {
+        gr_web_js_set_text_input(h->element, false, 0, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        return;
+    }
+    gr_text_range s = input->selection, c = input->composition;
+    gr_rect caret = input->caret;
+    if (input->layout)
+    {
+        size_t at = c.start < c.end ? c.start : s.end;
+        gr_text_layout_get_caret_rect(input->layout, (gr_text_position){at, GR_TEXT_AFFINITY_DOWNSTREAM}, &caret);
+        caret.origin.x += input->origin.x;
+        caret.origin.y += input->origin.y;
+    }
+    gr_web_js_set_text_input(h->element, true, input->kind, input->text.data, input->text.count, s.start, s.end,
+                             c.start, c.end, caret.origin.x, caret.origin.y, caret.size.width, caret.size.height);
 }
 
 static void request_focus(void *data)

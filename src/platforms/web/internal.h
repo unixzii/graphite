@@ -63,6 +63,11 @@ double gr_web_js_now(void);
 void gr_web_js_request_tick(int32_t host);
 void gr_web_js_set_cursor(int32_t host, gr_cursor cursor);
 void gr_web_js_request_focus(int32_t host);
+/* Turns text input on with the shared state (UTF-8 text and offsets) and the host-space caret where the hidden field
+ * goes, or off with on false. */
+void gr_web_js_set_text_input(int32_t host, bool on, int kind, const char *text, size_t length, size_t selection_start,
+                              size_t selection_end, size_t composition_start, size_t composition_end, double x,
+                              double y, double width, double height);
 void gr_web_js_apply(int32_t host, const double *commands, size_t count);
 
 /* Exported to runtime.js: one animation frame. Delivers a requested frame to events (NULL without an event host),
@@ -79,6 +84,10 @@ bool gr_web_on_scroll(gr_web_host *host, double time, uint32_t modifiers, double
                       int unit);
 bool gr_web_on_key(gr_web_host *host, bool down, double time, uint32_t modifiers, int code, int key, uint32_t character,
                    bool repeat, bool composing, uint32_t native_code);
+bool gr_web_on_text_edit(gr_web_host *host, double time, size_t start, size_t end, const char *text, size_t length,
+                         size_t selection_start, size_t selection_end, size_t composition_start,
+                         size_t composition_end);
+bool gr_web_on_text_command(gr_web_host *host, double time, uint32_t modifiers, int command, bool extend);
 
 /* text.js: layouts made by the Web text system. text_new takes the UTF-8 text and the operands text.c encodes; the
  * queries write their results into out as numbers (see text.c for the layouts). */
