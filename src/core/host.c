@@ -169,22 +169,10 @@ gr_result gr_scene_host_request_focus(gr_scene_host *host)
     return GR_OK;
 }
 
-static bool finite_point(gr_point p)
-{
-    return isfinite(p.x) && isfinite(p.y);
-}
-
 gr_result gr_scene_host_set_text_input(gr_scene_host *host, const gr_text_input *input)
 {
     if (!gr_scene_host_is_interactive(host))
         return GR_ERROR_UNSUPPORTED;
-    if (input)
-    {
-        gr_rect c = input->caret;
-        if (!finite_point(c.origin) || !isfinite(c.size.width) || !isfinite(c.size.height) || c.size.width < 0 ||
-            c.size.height < 0)
-            return GR_ERROR_ARGUMENT;
-    }
     host->vtable.set_text_input(host->data, input);
     return GR_OK;
 }
@@ -222,6 +210,11 @@ static bool update_state(gr_scene_host *host, const gr_event *e)
 
 /* Events come from backends, which build them from native input; debug builds check that contract. */
 #ifndef NDEBUG
+static bool finite_point(gr_point p)
+{
+    return isfinite(p.x) && isfinite(p.y);
+}
+
 static bool valid_pointer(gr_event_type type, const gr_pointer_event *p)
 {
     const uint32_t buttons = (1u << GR_BUTTON_PRIMARY) | (1u << GR_BUTTON_SECONDARY) | (1u << GR_BUTTON_MIDDLE) |
@@ -237,7 +230,7 @@ static bool valid_event(const gr_event *e)
 {
     const gr_modifiers modifiers =
         GR_MODIFIER_SHIFT | GR_MODIFIER_CONTROL | GR_MODIFIER_ALT | GR_MODIFIER_SUPER | GR_MODIFIER_CAPS_LOCK;
-    if ((unsigned)e->type > GR_EVENT_TEXT_PREEDIT || !isfinite(e->time) || (e->modifiers & ~modifiers))
+    if ((unsigned)e->type > GR_EVENT_TEXT_COMMAND || !isfinite(e->time) || (e->modifiers & ~modifiers))
         return false;
     switch (e->type)
     {
@@ -275,26 +268,15 @@ static bool valid_event(const gr_event *e)
             return (unsigned)k->code <= GR_KEY_CODE_AUDIO_VOLUME_UP && (unsigned)k->key <= GR_KEY_F24 &&
                    k->character <= 0x10FFFF && !(k->character >= 0xD800 && k->character <= 0xDFFF);
         }
-        case GR_EVENT_TEXT_COMMIT:
-        case GR_EVENT_TEXT_PREEDIT:
-        {
-            const gr_text_event *t = &e->value.text;
-            if (t->length && !t->text)
-                return false;
-            if (e->type == GR_EVENT_TEXT_COMMIT)
-                return t->selection_start == 0 && t->selection_end == 0;
-            return t->selection_start <= t->selection_end && t->selection_end <= t->length;
-        }
+        case GR_EVENT_TEXT_EDIT:
+            return !e->value.edit.text.count || e->value.edit.text.data;
+        case GR_EVENT_TEXT_COMMAND:
+            return (unsigned)e->value.command.command <= GR_TEXT_COMMAND_CANCEL;
     }
     return false;
 }
 
 #endif
-
-static bool is_text(gr_event_type type)
-{
-    return type == GR_EVENT_TEXT_COMMIT || type == GR_EVENT_TEXT_PREEDIT;
-}
 
 static bool deliver(gr_scene_host *host, const gr_event *event)
 {
@@ -326,10 +308,10 @@ bool gr_scene_host_dispatch_event(gr_scene_host *host, const gr_event *event)
         queued_event *q = &host->queue[host->queue_count++];
         q->event = *event;
         q->text = NULL;
-        if (is_text(event->type) && event->value.text.length)
+        if (event->type == GR_EVENT_TEXT_EDIT && event->value.edit.text.count)
         {
-            q->text = gr_copy(event->value.text.text, event->value.text.length, 1);
-            q->event.value.text.text = q->text;
+            q->text = gr_copy(event->value.edit.text.data, event->value.edit.text.count, 1);
+            q->event.value.edit.text.data = q->text;
         }
         return false;
     }

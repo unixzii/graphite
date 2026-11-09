@@ -478,14 +478,228 @@ static void view_input(void)
     }
 }
 
+/* A minimal text field model: applies edits, records commands and shares its state with a CoreText layout. */
+typedef struct
+{
+    gr_scene_host *host;
+    gr_text_system *system;
+    char text[256];
+    size_t length;
+    gr_text_range selection, composition;
+    gr_text_input_kind kind;
+    gr_text_command_event commands[8];
+    size_t command_count, edit_count;
+    gr_event last_key;
+} field;
+
+static void share(field *f)
+{
+    gr_text_style style = gr_text_style_default();
+    gr_attributed_text *text =
+        gr_attributed_text_new((gr_string){f->text, f->length}, &style, (gr_text_span_list){NULL, 0});
+    gr_text_layout_options options = gr_text_layout_options_default();
+    gr_text_layout *layout = gr_text_system_layout(f->system, text, &options);
+    gr_text_input input = {.kind = f->kind,
+                           .text = {f->text, f->length},
+                           .selection = f->selection,
+                           .composition = f->composition,
+                           .layout = layout,
+                           .origin = {20, 30}};
+    OK(gr_scene_host_set_text_input(f->host, &input));
+    gr_text_layout_unref(layout);
+    gr_attributed_text_unref(text);
+}
+
+/* Host-space rectangle of range's first line in the field's layout, as share places it. */
+static gr_rect field_rect(const field *f, gr_text_range range)
+{
+    gr_text_style style = gr_text_style_default();
+    gr_attributed_text *text =
+        gr_attributed_text_new((gr_string){f->text, f->length}, &style, (gr_text_span_list){NULL, 0});
+    gr_text_layout_options options = gr_text_layout_options_default();
+    gr_text_layout *layout = gr_text_system_layout(f->system, text, &options);
+    gr_rect r = {{0, 0}, {0, 0}};
+    CHECK(gr_text_layout_get_range_rects(layout, range, &r, 1));
+    gr_text_layout_unref(layout);
+    gr_attributed_text_unref(text);
+    return (gr_rect){{r.origin.x + 20, r.origin.y + 30}, r.size};
+}
+
+static bool on_field_event(void *userdata, const gr_event *event)
+{
+    field *f = userdata;
+    if (event->type == GR_EVENT_TEXT_EDIT)
+    {
+        const gr_text_edit_event *e = &event->value.edit;
+        size_t removed = e->replace.end - e->replace.start;
+        CHECK(f->length - removed + e->text.count < sizeof(f->text));
+        memmove(f->text + e->replace.start + e->text.count, f->text + e->replace.end, f->length - e->replace.end);
+        memcpy(f->text + e->replace.start, e->text.data, e->text.count);
+        f->length = f->length - removed + e->text.count;
+        f->selection = e->selection;
+        f->composition = e->composition;
+        ++f->edit_count;
+        share(f);
+        return true;
+    }
+    if (event->type == GR_EVENT_TEXT_COMMAND)
+    {
+        if (f->command_count < 8)
+            f->commands[f->command_count++] = event->value.command;
+        return true;
+    }
+    if (event->type == GR_EVENT_KEY_UP)
+        f->last_key = *event;
+    return false;
+}
+
+static bool field_is(const field *f, const char *text)
+{
+    return f->length == strlen(text) && memcmp(f->text, text, f->length) == 0;
+}
+
+static NSRange not_found(void)
+{
+    return NSMakeRange(NSNotFound, 0);
+}
+
+static void view_text_input(void)
+{
+    @autoreleasepool
+    {
+        [NSApplication sharedApplication];
+        NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(100, 100, 300, 120)
+                                                       styleMask:NSWindowStyleMaskTitled
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        window.releasedWhenClosed = NO;
+        gr_scene *scene = gr_scene_new((gr_size){300, 120});
+        gr_scene_host *host = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+        GRSceneView *view = (__bridge GRSceneView *)gr_macos_host_get_view(host);
+        field f = {.host = host, .system = gr_macos_text_system_new()};
+        gr_event_handler handler = {&f, on_field_event, NULL};
+        OK(gr_scene_host_set_event_handler(host, &handler));
+        [window orderFrontRegardless];
+        [window makeFirstResponder:view];
+        spin();
+
+        /* Text input is off until a field shares its state. */
+        CHECK(!view.inputContext && !view.hasMarkedText && view.selectedRange.location == NSNotFound);
+        share(&f);
+        CHECK(view.inputContext && view.inputContext.client == view);
+
+        /* Typing inserts at the caret. */
+        [view insertText:@"ab" replacementRange:not_found()];
+        CHECK(field_is(&f, "ab") && f.selection.start == 2 && f.selection.end == 2);
+        CHECK(NSEqualRanges(view.selectedRange, NSMakeRange(2, 0)) && !view.hasMarkedText);
+
+        /* A composition replaces itself; AppKit ranges count UTF-16 units. */
+        [view setMarkedText:@"ni" selectedRange:NSMakeRange(2, 0) replacementRange:not_found()];
+        CHECK(field_is(&f, "abni") && f.composition.start == 2 && f.composition.end == 4);
+        CHECK(view.hasMarkedText && NSEqualRanges(view.markedRange, NSMakeRange(2, 2)));
+        [view setMarkedText:[[NSAttributedString alloc] initWithString:@"你好"]
+               selectedRange:NSMakeRange(0, 1)
+            replacementRange:not_found()];
+        CHECK(field_is(&f, "ab\xE4\xBD\xA0\xE5\xA5\xBD") && f.composition.start == 2 && f.composition.end == 8);
+        CHECK(f.selection.start == 2 && f.selection.end == 5); /* The clause being converted. */
+        CHECK(NSEqualRanges(view.markedRange, NSMakeRange(2, 2)) &&
+              NSEqualRanges(view.selectedRange, NSMakeRange(2, 1)));
+
+        /* Input methods read the text and place their windows by its characters. */
+        NSRange actual;
+        NSAttributedString *read = [view attributedSubstringForProposedRange:NSMakeRange(1, 50) actualRange:&actual];
+        CHECK([read.string isEqualToString:@"b你好"] && NSEqualRanges(actual, NSMakeRange(1, 3)));
+        NSRect screen = [view firstRectForCharacterRange:view.markedRange actualRange:NULL];
+        gr_rect expected = field_rect(&f, (gr_text_range){2, 8});
+        CHECK(expected.size.width > 0);
+        CHECK(expected.origin.x > 20 && expected.origin.y >= 30); /* After "ab", offset by the shared origin. */
+        NSRect inWindow =
+            [view convertRect:NSMakeRect(expected.origin.x, 120 - expected.origin.y - expected.size.height,
+                                         expected.size.width, expected.size.height)
+                       toView:nil];
+        NSRect wanted = [window convertRectToScreen:inWindow];
+        CHECK_NEAR(screen.origin.x, wanted.origin.x);
+        CHECK_NEAR(screen.origin.y, wanted.origin.y);
+        CHECK_NEAR(screen.size.width, wanted.size.width);
+        NSPoint middle = NSMakePoint(NSMinX(screen) + 1, NSMidY(screen));
+        NSUInteger index = [view characterIndexForPoint:middle];
+        CHECK(index == 2);
+
+        /* While composing, keys are flagged for the input method. */
+        [view keyUp:[NSEvent keyEventWithType:NSEventTypeKeyUp
+                                           location:NSZeroPoint
+                                      modifierFlags:0
+                                          timestamp:1
+                                       windowNumber:window.windowNumber
+                                            context:nil
+                                         characters:@"i"
+                        charactersIgnoringModifiers:@"i"
+                                          isARepeat:NO
+                                            keyCode:0x22]];
+        CHECK(f.last_key.type == GR_EVENT_KEY_UP && f.last_key.value.key.composing);
+
+        /* Committing replaces the composition. */
+        [view insertText:@"你好" replacementRange:not_found()];
+        CHECK(field_is(&f, "ab\xE4\xBD\xA0\xE5\xA5\xBD") && !view.hasMarkedText);
+        CHECK(NSEqualRanges(view.selectedRange, NSMakeRange(4, 0)));
+
+        /* An accent menu replaces the character it was opened on, by its absolute range. */
+        [view insertText:@"é" replacementRange:NSMakeRange(3, 1)];
+        CHECK(field_is(&f, "ab\xE4\xBD\xA0\xC3\xA9") && NSEqualRanges(view.selectedRange, NSMakeRange(4, 0)));
+        [view insertText:@"😀" replacementRange:not_found()];
+        CHECK(NSEqualRanges(view.selectedRange, NSMakeRange(6, 0)) && f.length == 11);
+
+        /* Unmarking keeps the composed text. */
+        [view setMarkedText:@"x" selectedRange:NSMakeRange(1, 0) replacementRange:not_found()];
+        [view unmarkText];
+        CHECK(!view.hasMarkedText && f.length == 12 && f.text[11] == 'x');
+
+        /* A field that ends the composition itself makes the input method drop it. */
+        [view setMarkedText:@"y" selectedRange:NSMakeRange(1, 0) replacementRange:not_found()];
+        f.composition = (gr_text_range){0, 0};
+        share(&f);
+        CHECK(!view.hasMarkedText);
+
+        /* Key bindings arrive as commands. */
+        [view doCommandBySelector:@selector(deleteBackward:)];
+        [view doCommandBySelector:@selector(moveWordLeftAndModifySelection:)];
+        [view doCommandBySelector:@selector(cancelOperation:)];
+        CHECK(f.command_count == 3);
+        CHECK(f.commands[0].command == GR_TEXT_COMMAND_DELETE_BACKWARD && !f.commands[0].extend);
+        CHECK(f.commands[1].command == GR_TEXT_COMMAND_MOVE_WORD_LEFT && f.commands[1].extend);
+        CHECK(f.commands[2].command == GR_TEXT_COMMAND_CANCEL);
+
+        /* Password fields hide their text and allow only Roman input sources. */
+        f.kind = GR_TEXT_INPUT_PASSWORD;
+        share(&f);
+        CHECK([view.inputContext.allowedInputSourceLocales isEqualToArray:@[ NSAllRomanInputSourcesLocaleIdentifier ]]);
+        CHECK(![view attributedSubstringForProposedRange:NSMakeRange(0, 2) actualRange:NULL]);
+        CHECK(IsSecureEventInputEnabled());
+        f.kind = GR_TEXT_INPUT_TEXT;
+        share(&f);
+        CHECK(!view.inputContext.allowedInputSourceLocales && !IsSecureEventInputEnabled());
+
+        OK(gr_scene_host_set_text_input(host, NULL));
+        CHECK(!view.inputContext);
+        size_t edits = f.edit_count;
+        [view insertText:@"z" replacementRange:not_found()];
+        CHECK(f.edit_count == edits);
+
+        gr_scene_host_unref(host);
+        gr_text_system_unref(f.system);
+        gr_scene_unref(scene);
+        [window close];
+    }
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool
     {
-        const gr_test_case cases[] = {GR_TEST_CASE(invalid_arguments),  GR_TEST_CASE(rows_are_top_down),
-                                      GR_TEST_CASE(scaled_rendering),   GR_TEST_CASE(view_hosting),
-                                      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
-                                      GR_TEST_CASE(view_events),        GR_TEST_CASE(view_input)};
+        const gr_test_case cases[] = {
+            GR_TEST_CASE(invalid_arguments), GR_TEST_CASE(rows_are_top_down),  GR_TEST_CASE(scaled_rendering),
+            GR_TEST_CASE(view_hosting),      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
+            GR_TEST_CASE(view_events),       GR_TEST_CASE(view_input),         GR_TEST_CASE(view_text_input)};
         return gr_test_run("macos", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
     }
 }

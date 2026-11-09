@@ -60,8 +60,21 @@ GR_API gr_result gr_scene_host_set_cursor(gr_scene_host *host, gr_cursor cursor)
 /** Asks the platform to give the host keyboard focus; FOCUS_IN follows if it does. */
 GR_API gr_result gr_scene_host_request_focus(gr_scene_host *host);
 
-/** Enables text input with the caret where the input method should place its windows, or disables it with NULL.
- * Call again whenever the caret moves. A nonfinite or negative-size caret returns GR_ERROR_ARGUMENT. */
+/* Text input
+ *
+ * A focused text field turns text input on by sharing its editing state, and off with NULL when it loses focus.
+ * While it is on, unconsumed KEY_DOWN events go to the platform's text input, which answers with TEXT_EDIT events
+ * (typed text, compositions, accent menus) and TEXT_COMMAND events (editing key bindings). While a composition is in
+ * progress, keys go to the input method whatever the handler returns, flagged as composing.
+ *
+ * The platform keeps its own copy of the shared state and applies each TEXT_EDIT to it before delivery, so input
+ * methods see consistent text between the application's updates. The field applies the same edit to its own text and
+ * shares the result, and shares again whenever its text, selection, composition or layout change for any other
+ * reason. Ending or replacing a composition itself (on a click elsewhere, say) makes the input method drop it. */
+
+/** Turns text input on with input, or off with NULL. The platform copies the text and references the layout. input
+ * must be valid: UTF-8 text, ranges in order within it on code point boundaries, a layout of exactly that text and
+ * finite geometry. */
 GR_API gr_result gr_scene_host_set_text_input(gr_scene_host *host, const gr_text_input *input);
 
 #ifdef __cplusplus

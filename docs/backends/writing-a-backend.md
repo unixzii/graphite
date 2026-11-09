@@ -55,6 +55,9 @@ Hosts with a native input surface fill in the event callbacks of the vtable and
 report native events with `gr_scene_host_dispatch_event`: deliver a requested
 `GR_EVENT_FRAME` before the frame's commit point, report size/scale changes as
 `GR_EVENT_VIEWPORT` (repeats are dropped by core) and keyboard focus changes.
+Core passes `set_text_input` through as is: a backend with text input keeps its
+own copy of the shared state, answers the input method from it, and applies its
+own `GR_EVENT_TEXT_EDIT` events to that copy before dispatching them.
 A handler may release the host, so do not touch native state after dispatching.
 Clear the native side's host pointer in `destroy` before tearing it down. Capture top-down premultiplied RGBA8 at the requested scale; verify
 orientation using an asymmetric native scene first. Use `gr_conf_harness` from

@@ -171,7 +171,9 @@ GR_API gr_result gr_scene_set_backend(gr_scene *scene, const gr_backend_vtable *
  * - request_frame schedules one GR_EVENT_FRAME for the next display refresh, delivered with
  *   gr_scene_host_dispatch_event before that frame's commit point. Core calls it once per pending request.
  * - now returns the frame clock's current time in seconds.
- * - set_cursor, set_text_input (NULL disables) and request_focus apply to the native surface. */
+ * - set_cursor and request_focus apply to the native surface.
+ * - set_text_input passes on the application's text input state, or NULL to turn text input off. input and what it
+ *   points to are borrowed for the call; the platform copies the text and references the layout to keep them. */
 typedef struct
 {
     void (*destroy)(void *data);

@@ -1,5 +1,7 @@
 #include "internal.h"
 
+#include <Carbon/Carbon.h>
+
 @implementation GRHost
 @end
 
@@ -113,11 +115,19 @@ __attribute__((objc_direct_members))
     uint32_t _buttons; /* Pressed buttons, 1u << gr_button. */
     NSTrackingArea *_tracking;
     NSCursor *_cursor;
+    NSTextInputContext *_textContext; /* Created when text input first turns on. */
+    bool _secureInput;                /* Secure event input is enabled for a focused password field. */
+    bool _inputMethodMouse;           /* The input method took the current primary-button press. */
+    /* The shared text input state with this view's edits applied; text borrows _text, layout holds a reference. */
+    bool _textOn;
+    gr_text_input _textInput;
+    gr_attributed_text *_text;
 }
 
 - (void)dealloc
 {
     [NSNotificationCenter.defaultCenter removeObserver:self];
+    [self storeTextInput:NULL];
     gr_scene_link_unref(_sceneLink);
 }
 
@@ -127,8 +137,15 @@ __attribute__((objc_direct_members))
     _focused = false;
     _inside = false;
     _buttons = 0;
+    _inputMethodMouse = false;
     _cursor = nil;
     [self.window invalidateCursorRectsForView:self];
+    [_textContext discardMarkedText];
+    if (self.window.firstResponder == self)
+        [_textContext deactivate];
+    _textContext = nil;
+    [self storeTextInput:NULL];
+    [self updateSecureInput];
     // Invalidation removes the run-loop registration and releases the link's strong reference to this view.
     [_displayLink invalidate];
     _displayLink = nil;
@@ -211,15 +228,30 @@ __attribute__((objc_direct_members))
     return [self dispatch:[self pointer:GR_EVENT_POINTER_MOVE event:event]];
 }
 
+/* While composing, the input method sees primary-button presses first, like NSTextView: it may take a click in the
+ * composition, and commits or cancels the composition for clicks elsewhere. Returns whether it took the event; a
+ * press it takes keeps its drags and release. */
+- (bool)mouseToInputMethod:(NSEvent *)event
+{
+    if (event.type == NSEventTypeLeftMouseDown)
+        return _inputMethodMouse = [self hasMarkedText] && [self.inputContext handleEvent:event];
+    if (!_inputMethodMouse)
+        return false;
+    [self.inputContext handleEvent:event];
+    if (event.type == NSEventTypeLeftMouseUp)
+        _inputMethodMouse = false;
+    return true;
+}
+
 - (void)mouseDown:(NSEvent *)event
 {
-    if (![self press:event down:true])
+    if (![self mouseToInputMethod:event] && ![self press:event down:true])
         [super mouseDown:event];
 }
 
 - (void)mouseUp:(NSEvent *)event
 {
-    if (![self press:event down:false])
+    if (![self mouseToInputMethod:event] && ![self press:event down:false])
         [super mouseUp:event];
 }
 
@@ -255,7 +287,7 @@ __attribute__((objc_direct_members))
 
 - (void)mouseDragged:(NSEvent *)event
 {
-    if (![self move:event])
+    if (![self mouseToInputMethod:event] && ![self move:event])
         [super mouseDragged:event];
 }
 
@@ -321,7 +353,7 @@ __attribute__((objc_direct_members))
 
 /* Keys */
 
-- (bool)key:(NSEvent *)event down:(bool)down
+- (bool)key:(NSEvent *)event down:(bool)down composing:(bool)composing
 {
     if (!_host)
         return false;
@@ -355,38 +387,47 @@ __attribute__((objc_direct_members))
         .key = key,
         .character = character,
         .repeat = down && event.type == NSEventTypeKeyDown && event.ARepeat,
+        .composing = composing,
         .native_code = code,
     };
-    return [self dispatch:e];
+    return [self dispatch:e] && !composing;
 }
 
+/* With text input on, keys the handler leaves go to the input context, which turns them into edits and commands.
+ * During a composition the input method owns every key. */
 - (void)keyDown:(NSEvent *)event
 {
-    if (![self key:event down:true])
-        [super keyDown:event];
+    NSTextInputContext *context = self.inputContext;
+    if ([self key:event down:true composing:context && [self hasMarkedText]])
+        return;
+    if (context && self.inputContext == context && [context handleEvent:event])
+        return;
+    [super keyDown:event];
 }
 
 - (void)keyUp:(NSEvent *)event
 {
-    if (![self key:event down:false])
+    if (![self key:event down:false composing:self.inputContext && [self hasMarkedText]])
         [super keyUp:event];
 }
 
 /* Modifier keys arrive as flag changes. Caps Lock reports only its toggles, so each one is a press and release. */
 - (void)flagsChanged:(NSEvent *)event
 {
-    bool handled;
+    bool handled, composing = self.inputContext && [self hasMarkedText];
     if (event.keyCode == 0x39 /* kVK_CapsLock */)
     {
-        bool pressed = [self key:event down:true];
-        handled = [self key:event down:false] || pressed;
+        bool pressed = [self key:event down:true composing:composing];
+        handled = [self key:event down:false composing:composing] || pressed;
     }
     else
     {
         NSUInteger mask = gr_macos_modifier_mask(event.keyCode);
-        handled = mask && [self key:event down:(event.modifierFlags & mask) != 0];
+        handled = mask && [self key:event down:(event.modifierFlags & mask) != 0 composing:composing];
     }
-    if (!handled)
+    /* Input methods watch modifiers too: Shift switches Pinyin between Chinese and English. */
+    NSTextInputContext *context = self.inputContext;
+    if (!handled && !(context && [context handleEvent:event]))
         [super flagsChanged:event];
 }
 
@@ -473,6 +514,7 @@ __attribute__((objc_direct_members))
     if (![super becomeFirstResponder])
         return NO;
     [self updateFocus:self.window.isKeyWindow];
+    [self updateSecureInput];
     return YES;
 }
 
@@ -481,7 +523,381 @@ __attribute__((objc_direct_members))
     if (![super resignFirstResponder])
         return NO;
     [self updateFocus:false];
+    if (_secureInput)
+    {
+        DisableSecureEventInput();
+        _secureInput = false;
+    }
     return YES;
+}
+
+/* Text input. The view keeps a copy of the shared state (see host.h), answers the input context from it in the
+ * UTF-16 offsets AppKit uses, and turns input method calls into TEXT_EDIT and TEXT_COMMAND events. */
+
+static gr_attributed_text *plain_text(gr_string utf8)
+{
+    gr_text_style style = gr_text_style_default();
+    return gr_attributed_text_new(utf8, &style, (gr_text_span_list){NULL, 0});
+}
+
+- (const gr_text_input *)sharedInput
+{
+    return _textOn ? &_textInput : NULL;
+}
+
+/* Replaces the stored state with a copy of input, or clears it with NULL. */
+- (void)storeTextInput:(const gr_text_input *)input
+{
+    gr_attributed_text *text = input ? plain_text(input->text) : NULL;
+    gr_attributed_text_unref(_text);
+    gr_text_layout_unref(_textInput.layout);
+    _text = text;
+    _textOn = text != NULL;
+    _textInput = text ? *input : (gr_text_input){0};
+    if (text)
+    {
+        _textInput.text = gr_attributed_text_get_utf8(text);
+        gr_text_layout_ref(input->layout);
+    }
+}
+
+/* Applies one of this view's TEXT_EDIT events to the stored state. */
+- (void)applyEdit:(const gr_text_edit_event *)e
+{
+    gr_string old = _textInput.text;
+    size_t length = old.count - (e->replace.end - e->replace.start) + e->text.count;
+    char *joined = malloc(length ? length : 1);
+    if (!joined)
+        return;
+    memcpy(joined, old.data, e->replace.start);
+    if (e->text.count)
+        memcpy(joined + e->replace.start, e->text.data, e->text.count);
+    memcpy(joined + e->replace.start + e->text.count, old.data + e->replace.end, old.count - e->replace.end);
+    gr_attributed_text *text = plain_text((gr_string){joined, length});
+    free(joined);
+    if (!text)
+        return;
+    gr_attributed_text_unref(_text);
+    _text = text;
+    _textInput.text = gr_attributed_text_get_utf8(text);
+    _textInput.selection = e->selection;
+    _textInput.composition = e->composition;
+}
+
+/* Host-space rectangle of range's first line, or its caret for an empty range, from the shared layout; without
+ * one, the shared caret. */
+- (gr_rect)textRect:(gr_text_range)range
+{
+    if (!_textInput.layout)
+        return _textInput.caret;
+    /* After edits the layout may lag the text until the field shares again; its own queries clamp. */
+    gr_rect r;
+    if (range.start >= range.end || !gr_text_layout_get_range_rects(_textInput.layout, range, &r, 1))
+        gr_text_layout_get_caret_rect(_textInput.layout, (gr_text_position){range.start, GR_TEXT_AFFINITY_DOWNSTREAM},
+                                      &r);
+    r.origin.x += _textInput.origin.x;
+    r.origin.y += _textInput.origin.y;
+    return r;
+}
+
+- (NSTextInputContext *)inputContext
+{
+    if (![self sharedInput])
+        return nil;
+    if (!_textContext)
+        _textContext = [[NSTextInputContext alloc] initWithClient:self];
+    return _textContext;
+}
+
+/* Password fields hold secure event input while they have focus, like NSSecureTextField. */
+- (void)updateSecureInput
+{
+    const gr_text_input *input = [self sharedInput];
+    bool secure = input && input->kind == GR_TEXT_INPUT_PASSWORD && self.window.firstResponder == self;
+    if (secure == _secureInput)
+        return;
+    _secureInput = secure;
+    if (secure)
+        EnableSecureEventInput();
+    else
+        DisableSecureEventInput();
+}
+
+- (void)setTextInput:(const gr_text_input *)input
+{
+    bool restart = input && (!_textOn || input->kind != _textInput.kind);
+    bool recompose = input && _textOn &&
+                     (input->composition.start != _textInput.composition.start ||
+                      input->composition.end != _textInput.composition.end);
+    [self storeTextInput:input];
+    input = [self sharedInput];
+    bool first = self.window.firstResponder == self;
+    if (!input)
+    {
+        [_textContext discardMarkedText];
+        if (first)
+            [_textContext deactivate];
+        [self updateSecureInput];
+        return;
+    }
+    NSTextInputContext *context = self.inputContext;
+    if (restart)
+    {
+        context.allowedInputSourceLocales =
+            input->kind == GR_TEXT_INPUT_PASSWORD ? @[ NSAllRomanInputSourcesLocaleIdentifier ] : nil;
+        if (first)
+            [context activate];
+        [self updateSecureInput];
+    }
+    else if (recompose)
+        [context discardMarkedText];
+    [context invalidateCharacterCoordinates];
+}
+
+- (NSRange)utf16Range:(gr_text_range)range
+{
+    gr_attributed_text *text = _text;
+    size_t start = gr_attributed_text_utf16_index(text, range.start);
+    return NSMakeRange(start, gr_attributed_text_utf16_index(text, range.end) - start);
+}
+
+/* Clamps an AppKit range to the shared text and converts it to UTF-8 offsets. */
+- (gr_text_range)utf8Range:(NSRange)range clamped:(NSRange *)clamped
+{
+    gr_attributed_text *text = _text;
+    NSUInteger count = gr_attributed_text_get_utf16(text).count;
+    NSUInteger start = range.location < count ? range.location : count;
+    NSUInteger end = start + (range.length < count - start ? range.length : count - start);
+    if (clamped)
+        *clamped = NSMakeRange(start, end - start);
+    return (gr_text_range){gr_attributed_text_utf8_index(text, start), gr_attributed_text_utf8_index(text, end)};
+}
+
+- (NSRect)screenRect:(gr_rect)r
+{
+    NSRect local =
+        NSMakeRect(r.origin.x, self.bounds.size.height - r.origin.y - r.size.height, r.size.width, r.size.height);
+    NSRect inWindow = [self convertRect:local toView:nil];
+    return self.window ? [self.window convertRectToScreen:inWindow] : inWindow;
+}
+
+/* UTF-8 length of the first count UTF-16 units of string, never splitting a surrogate pair. */
+static size_t utf8_prefix(NSString *string, NSUInteger count)
+{
+    if (count > string.length)
+        count = string.length;
+    if (count && count < string.length && CFStringIsSurrogateLowCharacter([string characterAtIndex:count]))
+        --count;
+    return [[string substringToIndex:count] lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+}
+
+/* Replaces replacement (or else the composition, or else the selection) with string, as a composition when marked. */
+- (void)edit:(id)string selected:(NSRange)selected replacement:(NSRange)replacement marked:(bool)marked
+{
+    const gr_text_input *input = [self sharedInput];
+    if (!input)
+        return;
+    NSString *plain = [string isKindOfClass:NSAttributedString.class] ? [(NSAttributedString *)string string] : string;
+    gr_text_range target = replacement.location != NSNotFound ? [self utf8Range:replacement clamped:NULL]
+                           : input->composition.start < input->composition.end ? input->composition
+                                                                               : input->selection;
+    NSData *utf8 = [plain dataUsingEncoding:NSUTF8StringEncoding];
+    size_t length = utf8.length;
+    gr_event e = {.type = GR_EVENT_TEXT_EDIT, .time = CACurrentMediaTime()};
+    e.value.edit.replace = target;
+    e.value.edit.text = (gr_string){utf8.bytes, length};
+    size_t at = target.start;
+    if (marked && length)
+    {
+        e.value.edit.composition = (gr_text_range){at, at + length};
+        size_t from = utf8_prefix(plain, selected.location);
+        size_t to =
+            utf8_prefix(plain, selected.location + (selected.length < plain.length ? selected.length : plain.length));
+        e.value.edit.selection = (gr_text_range){at + from, at + (to > from ? to : from)};
+    }
+    else
+    {
+        e.value.edit.composition = (gr_text_range){at, at};
+        e.value.edit.selection = (gr_text_range){at + length, at + length};
+    }
+    [self applyEdit:&e.value.edit];
+    [self dispatch:e];
+}
+
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange
+{
+    [self edit:string selected:NSMakeRange(0, 0) replacement:replacementRange marked:false];
+}
+
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange
+{
+    [self edit:string selected:selectedRange replacement:replacementRange marked:true];
+}
+
+/* Keeps the composed text as it is and ends the composition. */
+- (void)unmarkText
+{
+    const gr_text_input *input = [self sharedInput];
+    if (!input || input->composition.start == input->composition.end)
+        return;
+    gr_event e = {.type = GR_EVENT_TEXT_EDIT, .time = CACurrentMediaTime()};
+    e.value.edit = (gr_text_edit_event){
+        .replace = {input->selection.start, input->selection.start},
+        .selection = input->selection,
+        .composition = {input->selection.start, input->selection.start},
+    };
+    [self applyEdit:&e.value.edit];
+    [self dispatch:e];
+}
+
+- (BOOL)hasMarkedText
+{
+    const gr_text_input *input = [self sharedInput];
+    return input && input->composition.start < input->composition.end;
+}
+
+- (NSRange)markedRange
+{
+    return [self hasMarkedText] ? [self utf16Range:[self sharedInput]->composition] : NSMakeRange(NSNotFound, 0);
+}
+
+- (NSRange)selectedRange
+{
+    const gr_text_input *input = [self sharedInput];
+    return input ? [self utf16Range:input->selection] : NSMakeRange(NSNotFound, 0);
+}
+
+- (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText
+{
+    return @[];
+}
+
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange
+{
+    const gr_text_input *input = [self sharedInput];
+    if (!input || input->kind == GR_TEXT_INPUT_PASSWORD)
+        return nil;
+    NSRange clamped;
+    [self utf8Range:range clamped:&clamped];
+    if (actualRange)
+        *actualRange = clamped;
+    gr_utf16 units = gr_attributed_text_get_utf16(_text);
+    NSString *text = [[NSString alloc] initWithCharacters:units.data + clamped.location length:clamped.length];
+    return [[NSAttributedString alloc] initWithString:text];
+}
+
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
+{
+    if (![self sharedInput])
+        return NSZeroRect;
+    NSRange clamped;
+    gr_text_range utf8 = [self utf8Range:range clamped:&clamped];
+    if (actualRange)
+        *actualRange = clamped;
+    return [self screenRect:[self textRect:utf8]];
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point
+{
+    if (![self sharedInput] || !_textInput.layout || !self.window)
+        return NSNotFound;
+    NSPoint local = [self convertPoint:[self.window convertPointFromScreen:point] fromView:nil];
+    gr_point at = {local.x - _textInput.origin.x, self.bounds.size.height - local.y - _textInput.origin.y};
+    return gr_attributed_text_utf16_index(_text, gr_text_layout_hit_test(_textInput.layout, at).index);
+}
+
+/* Key bindings: the standard selectors (Option+Delete, Control+A, Shift+arrows, Escape) become TEXT_COMMAND
+ * events; the rest, and commands the handler leaves, go up the responder chain. */
+static bool text_command(SEL selector, gr_text_command_event *out)
+{
+    static const struct
+    {
+        const char *name;
+        gr_text_command command;
+        bool extend;
+    } commands[] = {
+        {"insertNewline:", GR_TEXT_COMMAND_INSERT_NEWLINE, false},
+        {"insertLineBreak:", GR_TEXT_COMMAND_INSERT_NEWLINE, false},
+        {"insertNewlineIgnoringFieldEditor:", GR_TEXT_COMMAND_INSERT_NEWLINE, false},
+        {"insertTab:", GR_TEXT_COMMAND_INSERT_TAB, false},
+        {"insertTabIgnoringFieldEditor:", GR_TEXT_COMMAND_INSERT_TAB, false},
+        {"insertBacktab:", GR_TEXT_COMMAND_INSERT_BACKTAB, false},
+        {"deleteBackward:", GR_TEXT_COMMAND_DELETE_BACKWARD, false},
+        {"deleteBackwardByDecomposingPreviousCharacter:", GR_TEXT_COMMAND_DELETE_BACKWARD, false},
+        {"deleteForward:", GR_TEXT_COMMAND_DELETE_FORWARD, false},
+        {"deleteWordBackward:", GR_TEXT_COMMAND_DELETE_WORD_BACKWARD, false},
+        {"deleteWordForward:", GR_TEXT_COMMAND_DELETE_WORD_FORWARD, false},
+        {"deleteToBeginningOfLine:", GR_TEXT_COMMAND_DELETE_TO_LINE_START, false},
+        {"deleteToBeginningOfParagraph:", GR_TEXT_COMMAND_DELETE_TO_LINE_START, false},
+        {"deleteToEndOfLine:", GR_TEXT_COMMAND_DELETE_TO_LINE_END, false},
+        {"deleteToEndOfParagraph:", GR_TEXT_COMMAND_DELETE_TO_LINE_END, false},
+        {"moveLeft:", GR_TEXT_COMMAND_MOVE_LEFT, false},
+        {"moveBackward:", GR_TEXT_COMMAND_MOVE_LEFT, false},
+        {"moveRight:", GR_TEXT_COMMAND_MOVE_RIGHT, false},
+        {"moveForward:", GR_TEXT_COMMAND_MOVE_RIGHT, false},
+        {"moveUp:", GR_TEXT_COMMAND_MOVE_UP, false},
+        {"moveDown:", GR_TEXT_COMMAND_MOVE_DOWN, false},
+        {"moveWordLeft:", GR_TEXT_COMMAND_MOVE_WORD_LEFT, false},
+        {"moveWordBackward:", GR_TEXT_COMMAND_MOVE_WORD_LEFT, false},
+        {"moveWordRight:", GR_TEXT_COMMAND_MOVE_WORD_RIGHT, false},
+        {"moveWordForward:", GR_TEXT_COMMAND_MOVE_WORD_RIGHT, false},
+        {"moveToBeginningOfLine:", GR_TEXT_COMMAND_MOVE_LINE_START, false},
+        {"moveToLeftEndOfLine:", GR_TEXT_COMMAND_MOVE_LINE_START, false},
+        {"moveToBeginningOfParagraph:", GR_TEXT_COMMAND_MOVE_LINE_START, false},
+        {"moveToEndOfLine:", GR_TEXT_COMMAND_MOVE_LINE_END, false},
+        {"moveToRightEndOfLine:", GR_TEXT_COMMAND_MOVE_LINE_END, false},
+        {"moveToEndOfParagraph:", GR_TEXT_COMMAND_MOVE_LINE_END, false},
+        {"moveToBeginningOfDocument:", GR_TEXT_COMMAND_MOVE_DOCUMENT_START, false},
+        {"moveToEndOfDocument:", GR_TEXT_COMMAND_MOVE_DOCUMENT_END, false},
+        {"pageUp:", GR_TEXT_COMMAND_MOVE_PAGE_UP, false},
+        {"pageDown:", GR_TEXT_COMMAND_MOVE_PAGE_DOWN, false},
+        {"moveLeftAndModifySelection:", GR_TEXT_COMMAND_MOVE_LEFT, true},
+        {"moveBackwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_LEFT, true},
+        {"moveRightAndModifySelection:", GR_TEXT_COMMAND_MOVE_RIGHT, true},
+        {"moveForwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_RIGHT, true},
+        {"moveUpAndModifySelection:", GR_TEXT_COMMAND_MOVE_UP, true},
+        {"moveDownAndModifySelection:", GR_TEXT_COMMAND_MOVE_DOWN, true},
+        {"moveWordLeftAndModifySelection:", GR_TEXT_COMMAND_MOVE_WORD_LEFT, true},
+        {"moveWordBackwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_WORD_LEFT, true},
+        {"moveWordRightAndModifySelection:", GR_TEXT_COMMAND_MOVE_WORD_RIGHT, true},
+        {"moveWordForwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_WORD_RIGHT, true},
+        {"moveToBeginningOfLineAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_START, true},
+        {"moveToLeftEndOfLineAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_START, true},
+        {"moveToBeginningOfParagraphAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_START, true},
+        {"moveParagraphBackwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_START, true},
+        {"moveToEndOfLineAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_END, true},
+        {"moveToRightEndOfLineAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_END, true},
+        {"moveToEndOfParagraphAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_END, true},
+        {"moveParagraphForwardAndModifySelection:", GR_TEXT_COMMAND_MOVE_LINE_END, true},
+        {"moveToBeginningOfDocumentAndModifySelection:", GR_TEXT_COMMAND_MOVE_DOCUMENT_START, true},
+        {"moveToEndOfDocumentAndModifySelection:", GR_TEXT_COMMAND_MOVE_DOCUMENT_END, true},
+        {"pageUpAndModifySelection:", GR_TEXT_COMMAND_MOVE_PAGE_UP, true},
+        {"pageDownAndModifySelection:", GR_TEXT_COMMAND_MOVE_PAGE_DOWN, true},
+        {"selectAll:", GR_TEXT_COMMAND_SELECT_ALL, false},
+        {"cancelOperation:", GR_TEXT_COMMAND_CANCEL, false},
+    };
+
+    const char *name = sel_getName(selector);
+    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i)
+        if (strcmp(name, commands[i].name) == 0)
+        {
+            *out = (gr_text_command_event){commands[i].command, commands[i].extend};
+            return true;
+        }
+    return false;
+}
+
+- (void)doCommandBySelector:(SEL)selector
+{
+    gr_text_command_event command;
+    if ([self sharedInput] && text_command(selector, &command))
+    {
+        gr_event e = {.type = GR_EVENT_TEXT_COMMAND, .time = CACurrentMediaTime()};
+        e.value.command = command;
+        if ([self dispatch:e])
+            return;
+    }
+    [super doCommandBySelector:selector];
 }
 
 - (void)windowKeyChanged:(NSNotification *)notification
@@ -588,11 +1004,9 @@ static void set_cursor(void *data, gr_cursor cursor)
     [host_view(data) setCursorKind:cursor];
 }
 
-/* Text input is accepted but not applied yet. */
 static void set_text_input(void *data, const gr_text_input *input)
 {
-    (void)data;
-    (void)input;
+    [host_view(data) setTextInput:input];
 }
 
 static void request_focus(void *data)

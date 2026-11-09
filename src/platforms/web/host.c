@@ -108,7 +108,7 @@ static void set_cursor(void *data, gr_cursor cursor)
     gr_web_js_set_cursor(((gr_web_host *)data)->element, cursor);
 }
 
-/* TODO: text input (IME). */
+/* Text input is accepted but not applied yet. */
 static void set_text_input(void *data, const gr_text_input *input)
 {
     (void)data;

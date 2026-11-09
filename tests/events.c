@@ -11,8 +11,7 @@ typedef struct
 {
     int frame_requests, focus_requests, cursor_sets, text_input_sets;
     gr_cursor cursor;
-    bool text_input;
-    gr_rect caret;
+    const gr_text_input *text_input;
     char log[64];
 } platform;
 
@@ -51,9 +50,7 @@ static void platform_set_text_input(void *data, const gr_text_input *input)
 {
     platform *p = data;
     ++p->text_input_sets;
-    p->text_input = input != NULL;
-    if (input)
-        p->caret = input->caret;
+    p->text_input = input;
 }
 
 static void platform_request_focus(void *data)
@@ -85,11 +82,13 @@ static bool record(void *userdata, const gr_event *event)
     recorder *r = userdata;
     CHECK(r->count < 16);
     r->types[r->count] = event->type;
-    if (event->type == GR_EVENT_TEXT_COMMIT || event->type == GR_EVENT_TEXT_PREEDIT)
+    if (event->type == GR_EVENT_TEXT_EDIT)
     {
-        CHECK(event->value.text.length < 16);
-        memcpy(r->texts[r->count], event->value.text.text, event->value.text.length);
-        r->texts[r->count][event->value.text.length] = 0;
+        gr_string text = event->value.edit.text;
+        CHECK(text.count < 16);
+        if (text.count)
+            memcpy(r->texts[r->count], text.data, text.count);
+        r->texts[r->count][text.count] = 0;
     }
     ++r->count;
     note(r->log, r->name);
@@ -122,11 +121,12 @@ static gr_event frame(void)
     return (gr_event){.type = GR_EVENT_FRAME, .time = 2, .value.frame = {.target_time = 2.016, .interval = 0.016}};
 }
 
-static gr_event commit_text(const char *text)
+/* An edit inserting text at the start of any state, leaving the caret after it. */
+static gr_event insert_text(const char *text)
 {
-    gr_event e = {.type = GR_EVENT_TEXT_COMMIT, .time = 3};
-    e.value.text.text = text;
-    e.value.text.length = strlen(text);
+    size_t n = strlen(text);
+    gr_event e = {.type = GR_EVENT_TEXT_EDIT, .time = 3};
+    e.value.edit = (gr_text_edit_event){{0, 0}, {text, n}, {n, n}, {0, 0}};
     return e;
 }
 
@@ -176,12 +176,9 @@ static void host_commands(void)
     OK(gr_scene_host_request_focus(host));
     CHECK(p.focus_requests == 1);
 
-    gr_text_input input = {{{4, 5}, {1, 18}}};
-    OK(gr_scene_host_set_text_input(host, &input));
-    CHECK(p.text_input && p.caret.origin.x == 4 && p.caret.size.height == 18);
-    gr_text_input bad[] = {{{{NAN, 0}, {1, 1}}}, {{{0, 0}, {-1, 1}}}, {{{0, 0}, {1, INFINITY}}}};
-    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
-        CHECK(gr_scene_host_set_text_input(host, &bad[i]) == GR_ERROR_ARGUMENT);
+    gr_text_input input = {.kind = GR_TEXT_INPUT_TEXT, .text = {"hi", 2}, .selection = {2, 2}};
+    OK(gr_scene_host_set_text_input(host, &input)); /* Passed through as is. */
+    CHECK(p.text_input == &input && p.text_input_sets == 1);
     OK(gr_scene_host_set_text_input(host, NULL));
     CHECK(!p.text_input && p.text_input_sets == 2);
 
@@ -278,7 +275,7 @@ static void dispatch_nested(recorder *r, const gr_event *event)
     if (event->type != GR_EVENT_KEY_DOWN)
         return;
     char text[] = "ab";
-    gr_event nested = commit_text(text);
+    gr_event nested = insert_text(text);
     CHECK(!gr_scene_host_dispatch_event(r->host, &nested));
     memcpy(text, "xy", 2); /* The queued copy must not alias caller storage. */
     gr_event out = {.type = GR_EVENT_KEY_UP, .time = 4};
@@ -289,9 +286,9 @@ static void dispatch_nested(recorder *r, const gr_event *event)
 static void dispatch_from_queue(recorder *r, const gr_event *event)
 {
     dispatch_nested(r, event);
-    if (event->type == GR_EVENT_TEXT_COMMIT && event->value.text.text[0] == 'a')
+    if (event->type == GR_EVENT_TEXT_EDIT && event->value.edit.text.data[0] == 'a')
     {
-        gr_event more = commit_text("c");
+        gr_event more = insert_text("c");
         CHECK(!gr_scene_host_dispatch_event(r->host, &more));
     }
 }
@@ -306,14 +303,14 @@ static void reentrant_dispatch(void)
     OK(gr_scene_host_set_event_handler(host, &h));
     gr_event e = press();
     CHECK(gr_scene_host_dispatch_event(host, &e));
-    CHECK(r.count == 3 && r.types[1] == GR_EVENT_TEXT_COMMIT && r.types[2] == GR_EVENT_KEY_UP);
+    CHECK(r.count == 3 && r.types[1] == GR_EVENT_TEXT_EDIT && r.types[2] == GR_EVENT_KEY_UP);
     CHECK(strcmp(r.texts[1], "ab") == 0);
 
     /* Events queued while draining the queue are delivered too, in order. */
     r.count = 0;
     r.react = dispatch_from_queue;
     CHECK(gr_scene_host_dispatch_event(host, &e));
-    CHECK(r.count == 4 && r.types[3] == GR_EVENT_TEXT_COMMIT && strcmp(r.texts[3], "c") == 0);
+    CHECK(r.count == 4 && r.types[3] == GR_EVENT_TEXT_EDIT && strcmp(r.texts[3], "c") == 0);
     gr_scene_host_unref(host);
     gr_scene_unref(scene);
 }
@@ -393,19 +390,20 @@ static void event_validation(void)
     scroll.value.scroll = (gr_scroll_event){{1, 1}, {0, -3}, GR_SCROLL_UNIT_LINE, GR_SCROLL_PHASE_NONE, false};
     gr_event key = {.type = GR_EVENT_KEY_DOWN, .time = 1};
     key.value.key = (gr_key_event){GR_KEY_CODE_C, GR_KEY_CHARACTER, 'c', false, false, 8};
-    gr_event preedit = {.type = GR_EVENT_TEXT_PREEDIT, .time = 1};
-    preedit.value.text = (gr_text_event){"ni", 2, 2, 2};
-    gr_event empty = {.type = GR_EVENT_TEXT_PREEDIT, .time = 1};
+    gr_event compose = {.type = GR_EVENT_TEXT_EDIT, .time = 1};
+    compose.value.edit = (gr_text_edit_event){{0, 0}, {"ni", 2}, {2, 2}, {0, 2}};
+    gr_event command = {.type = GR_EVENT_TEXT_COMMAND, .time = 1};
+    command.value.command = (gr_text_command_event){GR_TEXT_COMMAND_MOVE_LEFT, true};
     gr_event viewport = {.type = GR_EVENT_VIEWPORT, .time = 1, .value.viewport = {{800, 600}, 2}};
-    const gr_event valid[] = {down, scroll, key, preedit, empty, viewport};
+    const gr_event valid[] = {down, scroll, key, compose, command, viewport};
     for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
         CHECK(gr_scene_host_dispatch_event(host, &valid[i]));
     CHECK(r.count == 6);
 
 #ifndef NDEBUG /* Release builds trust backends to send valid events. */
-    gr_event bad[18];
+    gr_event bad[17];
     size_t n = 0;
-    bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_PREEDIT + 1);
+    bad[n] = press(), bad[n++].type = (gr_event_type)(GR_EVENT_TEXT_COMMAND + 1);
     bad[n] = press(), bad[n++].time = NAN;
     bad[n] = press(), bad[n++].modifiers = 32;
     bad[n] = down, bad[n++].value.pointer.button = GR_BUTTON_NONE;
@@ -418,9 +416,8 @@ static void event_validation(void)
     bad[n] = scroll, bad[n++].value.scroll.delta.x = NAN;
     bad[n] = key, bad[n++].value.key.character = 0xD800;
     bad[n] = key, bad[n++].value.key.code = (gr_key_code)1000;
-    bad[n] = preedit, bad[n++].value.text.selection_end = 3;
-    bad[n] = preedit, bad[n++].value.text.text = NULL;
-    bad[n] = commit_text("a"), bad[n++].value.text.selection_end = 1;
+    bad[n] = compose, bad[n++].value.edit.text.data = NULL;
+    bad[n] = command, bad[n++].value.command.command = (gr_text_command)99;
     bad[n] = viewport, bad[n++].value.viewport.scale = 0;
     bad[n] = frame(), bad[n++].value.frame.interval = -1;
     CHECK(n == sizeof(bad) / sizeof(bad[0]));

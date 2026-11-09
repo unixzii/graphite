@@ -2,6 +2,7 @@
 #ifndef GRAPHITE_EVENT_H
 #define GRAPHITE_EVENT_H
 
+#include "text.h"
 #include "types.h"
 
 #ifdef __cplusplus
@@ -29,8 +30,8 @@ typedef enum
     GR_EVENT_SCROLL,         /**< Wheel or touchpad scrolling. */
     GR_EVENT_KEY_DOWN,       /**< A key was pressed or auto-repeated. */
     GR_EVENT_KEY_UP,         /**< A key was released. */
-    GR_EVENT_TEXT_COMMIT,    /**< Text to insert, typed or committed by an input method. */
-    GR_EVENT_TEXT_PREEDIT    /**< Input method composition text; empty text ends the composition. */
+    GR_EVENT_TEXT_EDIT,      /**< The platform's text input edited the shared text input state; see host.h. */
+    GR_EVENT_TEXT_COMMAND    /**< An editing command from the platform's key bindings, such as delete backward. */
 } gr_event_type;
 
 typedef uint32_t gr_modifiers;
@@ -311,12 +312,54 @@ typedef struct
     uint32_t native_code; /**< macOS kVK_* code, X11/evdev keycode, or Windows scan code with the extended bit. */
 } gr_key_event;
 
+/** An edit of the shared text input state (see gr_scene_host_set_text_input): typed text, an input method's
+ * composition or its committed result. Offsets are UTF-8 bytes on code point boundaries. The edit applies to the state
+ * the platform holds, which is the last one shared with earlier edits applied: replace the range with the text, then
+ * take the selection and composition, which index the edited text, and share the new state. */
 typedef struct
 {
-    const char *text; /**< Valid UTF-8, borrowed for the callback, not NUL-terminated; NULL only when length is 0. */
-    size_t length;    /**< In bytes. */
-    size_t selection_start, selection_end; /**< PREEDIT: caret or selection in UTF-8 bytes; 0 for COMMIT. */
-} gr_text_event;
+    gr_text_range replace;     /**< Range of the text before the edit; empty to insert at its start. */
+    gr_string text;            /**< Valid UTF-8 replacing it, borrowed for the callback; may be empty. */
+    gr_text_range selection;   /**< Selection after the edit; empty for a caret. Inside the composition while composing,
+                                * where it marks the part the input method is working on. */
+    gr_text_range composition; /**< Text the input method is still composing, shown inline and usually underlined;
+                                * empty when no composition remains. */
+} gr_text_edit_event;
+
+/** Editing commands that platform key bindings produce while text input is on, so fields follow each platform's
+ * conventions (Option+Delete deletes a word on macOS). Keys that type text arrive as TEXT_EDIT instead. */
+typedef enum
+{
+    GR_TEXT_COMMAND_INSERT_NEWLINE,
+    GR_TEXT_COMMAND_INSERT_TAB,
+    GR_TEXT_COMMAND_INSERT_BACKTAB,
+    GR_TEXT_COMMAND_DELETE_BACKWARD,
+    GR_TEXT_COMMAND_DELETE_FORWARD,
+    GR_TEXT_COMMAND_DELETE_WORD_BACKWARD,
+    GR_TEXT_COMMAND_DELETE_WORD_FORWARD,
+    GR_TEXT_COMMAND_DELETE_TO_LINE_START,
+    GR_TEXT_COMMAND_DELETE_TO_LINE_END,
+    GR_TEXT_COMMAND_MOVE_LEFT,
+    GR_TEXT_COMMAND_MOVE_RIGHT,
+    GR_TEXT_COMMAND_MOVE_UP,
+    GR_TEXT_COMMAND_MOVE_DOWN,
+    GR_TEXT_COMMAND_MOVE_WORD_LEFT,
+    GR_TEXT_COMMAND_MOVE_WORD_RIGHT,
+    GR_TEXT_COMMAND_MOVE_LINE_START,
+    GR_TEXT_COMMAND_MOVE_LINE_END,
+    GR_TEXT_COMMAND_MOVE_DOCUMENT_START,
+    GR_TEXT_COMMAND_MOVE_DOCUMENT_END,
+    GR_TEXT_COMMAND_MOVE_PAGE_UP,
+    GR_TEXT_COMMAND_MOVE_PAGE_DOWN,
+    GR_TEXT_COMMAND_SELECT_ALL,
+    GR_TEXT_COMMAND_CANCEL /**< Escape: leave the field or dismiss what it shows. */
+} gr_text_command;
+
+typedef struct
+{
+    gr_text_command command;
+    bool extend; /**< MOVE_* commands extend the selection instead of moving the caret. */
+} gr_text_command_event;
 
 /** One event. value holds the member named after the type's group; FOCUS events have no payload. */
 typedef struct
@@ -332,8 +375,9 @@ typedef struct
         gr_viewport_event viewport;
         gr_pointer_event pointer; /**< All POINTER_* events. */
         gr_scroll_event scroll;
-        gr_key_event key;   /**< KEY_DOWN, KEY_UP. */
-        gr_text_event text; /**< TEXT_COMMIT, TEXT_PREEDIT. */
+        gr_key_event key;              /**< KEY_DOWN, KEY_UP. */
+        gr_text_edit_event edit;       /**< TEXT_EDIT. */
+        gr_text_command_event command; /**< TEXT_COMMAND. */
     } value;
 } gr_event;
 
@@ -365,9 +409,25 @@ typedef enum
     GR_CURSOR_NONE /**< Hidden while over the host. */
 } gr_cursor;
 
+typedef enum
+{
+    GR_TEXT_INPUT_TEXT,
+    GR_TEXT_INPUT_PASSWORD /**< Hides the text from input methods, limits them to direct typing and secures input. */
+} gr_text_input_kind;
+
+/** The editing state a focused text field shares with the platform's text input (keyboard layouts, input methods,
+ * accent menus, dictation). Offsets are UTF-8 bytes on code point boundaries of text. */
 typedef struct
 {
-    gr_rect caret; /**< Host space; places the input method's candidate window. */
+    gr_text_input_kind kind;
+    gr_string text;            /**< The field's text, including any composition; may be an excerpt around the
+                                * selection, which offsets then index. */
+    gr_text_range selection;   /**< Selection; empty for a caret. */
+    gr_text_range composition; /**< Composition shown inline; empty when there is none. */
+    gr_text_layout *layout;    /**< Optional layout of exactly text, as the field draws it; input methods place their
+                                * windows by its characters and map points to offsets. */
+    gr_point origin;           /**< Host-space point where the layout's origin is drawn. */
+    gr_rect caret;             /**< Host-space caret, used when layout is NULL. */
 } gr_text_input;
 
 #ifdef __cplusplus

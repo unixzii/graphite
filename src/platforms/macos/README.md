@@ -41,8 +41,19 @@ with `charactersByApplyingModifiers:`, and modifier keys arrive through
 `flagsChanged:` using device-specific flags so left and right sides are
 distinguished. A press makes the view first responder. Unconsumed events go to
 `super`, which passes them up the responder chain. Cursors are set from
-`cursorUpdate:` and immediately while hovering. Text input requests are accepted
-but not applied yet.
+`cursorUpdate:` and immediately while hovering.
+
+The view is an `NSTextInputClient`. While text input is on it keeps a copy of
+the shared state and answers its `NSTextInputContext` from it in UTF-16
+offsets, applying its own edits before dispatching them. Unconsumed key downs go
+to the context: typed text, compositions and accent menus become
+`GR_EVENT_TEXT_EDIT`, and key-binding selectors from `doCommandBySelector:`
+become `GR_EVENT_TEXT_COMMAND` (unmapped ones go to `super`). While a
+composition is in progress, keys go to the input method flagged as composing,
+and primary-button presses go to the context first, as in `NSTextView`.
+Character rectangles and hit testing come from the shared layout. Password
+fields limit input sources to Roman ones and hold secure event input while
+focused.
 
 Offscreen rendering uses CARenderer with a shared BGRA8 Metal texture, an
 sRGB color space and a command-queue fence. Readback is flipped

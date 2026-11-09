@@ -1,7 +1,7 @@
 add_library(graphite_macos backend.m draw.m convert.m host.m keys.m offscreen.m text.m)
 add_library(graphite::macos ALIAS graphite_macos)
 target_link_libraries(graphite_macos PUBLIC graphite
-    "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" "-framework CoreText" "-framework Metal")
+    "-framework AppKit" "-framework Carbon" "-framework QuartzCore" "-framework CoreGraphics" "-framework CoreText" "-framework Metal")
 target_compile_options(graphite_macos PRIVATE -fobjc-arc -fblocks -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(graphite_macos PRIVATE ${PROJECT_SOURCE_DIR}/src/core)
 target_compile_definitions(graphite_macos PRIVATE GRAPHITE_MACOS_BUILDING)

@@ -58,7 +58,8 @@ NSUInteger gr_macos_modifier_mask(unsigned short code);
 /* Private classes: their own members are direct (no message dispatch); AppKit overrides and selector targets are not.
  */
 __attribute__((objc_direct_members))
-@interface GRSceneView : NSView
+/* Conforming to NSTextInputClient here keeps its methods dynamic under objc_direct_members. */
+@interface GRSceneView : NSView<NSTextInputClient>
 @property(nonatomic) gr_scene_link *sceneLink;
 @property(nonatomic, strong) CALayer *hostLayer;
 /** Borrowed; set after wrapping and cleared by detachHost when the host is destroyed. */
@@ -68,6 +69,7 @@ __attribute__((objc_direct_members))
 - (void)requestFrame;
 - (void)detachHost;
 - (void)setCursorKind:(gr_cursor)cursor;
+- (void)setTextInput:(const gr_text_input *)input;
 @end
 
 __attribute__((objc_direct_members))
