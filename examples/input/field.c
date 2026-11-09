@@ -340,7 +340,7 @@ static size_t word_end(const text_field *f, size_t i)
     return i;
 }
 
-/* Replaces range with text and puts the caret after it. */
+/* Replaces range with text and puts the caret after it, with no composition. */
 static void replace(text_field *f, gr_text_range range, gr_string text)
 {
     if (f->length - (range.end - range.start) + text.count > FIELD_CAPACITY)
@@ -350,6 +350,7 @@ static void replace(text_field *f, gr_text_range range, gr_string text)
         memcpy(f->text + range.start, text.data, text.count);
     f->length = f->length - (range.end - range.start) + text.count;
     f->anchor = f->focus = range.start + text.count;
+    f->composition = (gr_text_range){f->focus, f->focus};
 }
 
 /* Deletes the selection, or else the range from the caret to target. */
