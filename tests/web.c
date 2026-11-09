@@ -15,6 +15,7 @@ int web_test_host_count(void);
 void web_test_register_element(const char *name);
 int web_test_hosts_in(const char *name);
 bool web_test_pointer(const char *type, double x, double y, int button, int buttons, const char *kind, double pressure);
+bool web_test_touch(const char *type, double x, double y, int id);
 bool web_test_wheel(double x, double y, double dx, double dy, int mode);
 bool web_test_key(const char *type, const char *code, const char *key, bool shift, bool meta, bool composing,
                   bool repeat);
@@ -194,12 +195,38 @@ static void events_reach_the_handler(void)
     CHECK(p->button == GR_BUTTON_SECONDARY && p->buttons == 1u << GR_BUTTON_SECONDARY && p->click_count == 1);
     web_test_pointer("pointerup", 31, 41, 2, 0, "mouse", 0);
 
-    /* Pens report their own id and pressure; touch is not reported yet. */
+    /* Pens report their own id and pressure. */
     web_test_pointer("pointerdown", 5, 5, 0, 1, "pen", 0.25);
     CHECK(p->kind == GR_POINTER_PEN && p->id == 7 && p->pressure == 0.25f);
     web_test_pointer("pointerup", 5, 5, 0, 0, "pen", 0);
+
+    /* Touch contacts are pointers of their own that press the primary button from down to up and never hover. */
+    const uint32_t primary = 1u << GR_BUTTON_PRIMARY;
+    CHECK(web_test_touch("pointerdown", 60, 60, 3));
+    CHECK(r.last.type == GR_EVENT_POINTER_DOWN && p->kind == GR_POINTER_TOUCH && p->id == 3);
+    CHECK(p->button == GR_BUTTON_PRIMARY && p->buttons == primary && p->click_count == 1 && p->pressure == 0.5f);
+    CHECK(web_test_touch("pointerdown", 200, 150, 4));
+    CHECK(p->id == 4 && p->click_count == 1);
+    CHECK(web_test_touch("pointermove", 70, 65, 3));
+    CHECK(r.last.type == GR_EVENT_POINTER_MOVE && p->id == 3 && p->button == GR_BUTTON_NONE && p->buttons == primary);
     before = r.count;
-    CHECK(!web_test_pointer("pointerdown", 5, 5, 0, 1, "touch", 0.5));
+    CHECK(!web_test_touch("pointermove", 1, 1, 9)); /* Not down on the host. */
+    CHECK(r.count == before);
+    CHECK(web_test_touch("pointerup", 200, 150, 4));
+    CHECK(r.last.type == GR_EVENT_POINTER_UP && p->id == 4 && p->button == GR_BUTTON_PRIMARY && p->buttons == 0);
+    CHECK(p->pressure == 0);
+    web_test_touch("pointerup", 70, 65, 3);
+    CHECK(r.count == before + 2 && r.last.type == GR_EVENT_POINTER_UP && p->id == 3);
+    /* A tap near the last one counts as a double tap, with a looser distance than clicks. */
+    web_test_touch("pointerdown", 220, 170, 5);
+    CHECK(p->id == 5 && p->click_count == 2);
+    web_test_touch("pointerup", 220, 170, 5);
+    CHECK(p->click_count == 2);
+    web_test_touch("pointerdown", 10, 10, 6);
+    CHECK(web_test_touch("pointercancel", 10, 10, 6));
+    CHECK(r.last.type == GR_EVENT_POINTER_CANCEL && p->id == 6 && p->button == GR_BUTTON_NONE && p->buttons == 0);
+    before = r.count;
+    CHECK(!web_test_touch("pointerup", 10, 10, 6));
     CHECK(r.count == before);
     web_test_pointer("pointerleave", -5, -5, -1, 0, "mouse", 0);
     CHECK(r.last.type == GR_EVENT_POINTER_LEAVE);

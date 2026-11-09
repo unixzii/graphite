@@ -10,10 +10,9 @@ measurements behind it.
 geometry, opacity, visibility, background, corner radii, borders,
 `masks_to_bounds`, masks, shadows, blur, and shape, gradient, image and drawn
 contents all render, and `gr_web_text_system_new` lays out and draws text. Hosts are
-interactive: frames, timers, viewport (size and `devicePixelRatio`), focus, mouse and
-pen pointers, wheel and keys, cursors, and text input (typing, input methods,
-paste, editing keys). Touch is not implemented yet. Every example runs in the
-browser.
+interactive: frames, timers, viewport (size and `devicePixelRatio`), focus, mouse,
+pen and touch pointers, wheel and keys, cursors, and text input (typing, input
+methods, paste, editing keys). Every example runs in the browser.
 
 ## Implementation
 

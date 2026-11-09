@@ -287,8 +287,9 @@ typedef struct
     size_t next_ripple;
     text_cell *status, *key, *detail, *chip_text[CHIPS];
     text_field *field;
-    double scroll;
-    uint32_t buttons;
+    double scroll, drag_y; /* drag_y: the list point under the touch that drags it, while list_dragging. */
+    uint32_t buttons, list_contact;
+    bool list_dragging;
     gr_cursor cursor;
     gr_modifiers modifiers;
     bool chips_shown;
@@ -453,6 +454,30 @@ static int tile_at(gr_point p)
     return -1;
 }
 
+static void scroll_to(input_scene *d, double offset);
+
+/* Touch reports contacts rather than scrolling, so a touch dragging the list scrolls it, keeping the point under it. */
+static bool list_touch(input_scene *d, const gr_event *e)
+{
+    const gr_pointer_event *p = &e->value.pointer;
+    if (p->kind != GR_POINTER_TOUCH)
+        return false;
+    if (e->type == GR_EVENT_POINTER_DOWN && !d->list_dragging && inside(LIST, p->position))
+    {
+        d->list_dragging = true;
+        d->list_contact = p->id;
+        d->drag_y = p->position.y + d->scroll;
+    }
+    else if (!d->list_dragging || p->id != d->list_contact)
+        return false;
+    else if (e->type == GR_EVENT_POINTER_MOVE)
+        scroll_to(d, d->drag_y - p->position.y);
+    else if (e->type == GR_EVENT_POINTER_UP || e->type == GR_EVENT_POINTER_CANCEL)
+        d->list_dragging = false;
+    set_cell(d->status, "touch %u drags the list  y %.0f  scroll %.0f", p->id, p->position.y, d->scroll);
+    return true;
+}
+
 static bool pointer(input_scene *d, const gr_event *e)
 {
     const gr_pointer_event *p = &e->value.pointer;
@@ -461,7 +486,11 @@ static bool pointer(input_scene *d, const gr_event *e)
         set_cursor(d, GR_CURSOR_TEXT);
         return true;
     }
-    bool gone = e->type == GR_EVENT_POINTER_LEAVE || e->type == GR_EVENT_POINTER_CANCEL;
+    if (list_touch(d, e))
+        return true;
+    /* Touch contacts never hover, so they leave the pad when they lift. */
+    bool gone = e->type == GR_EVENT_POINTER_LEAVE || e->type == GR_EVENT_POINTER_CANCEL ||
+                (e->type == GR_EVENT_POINTER_UP && p->kind == GR_POINTER_TOUCH);
     d->buttons = gone ? 0 : p->buttons;
     gr_point local = {p->position.x - PAD.origin.x, p->position.y - PAD.origin.y};
     bool in_pad = !gone && (inside(PAD, p->position) || d->buttons);
@@ -507,19 +536,23 @@ static bool pointer(input_scene *d, const gr_event *e)
     return true;
 }
 
-static bool scroll(input_scene *d, const gr_event *e)
+static void scroll_to(input_scene *d, double offset)
 {
-    const gr_scroll_event *s = &e->value.scroll;
-    if (!inside(LIST, s->position))
-        return false;
     double range = ROWS * ROW_HEIGHT - LIST.size.height;
-    double step = s->unit == GR_SCROLL_UNIT_LINE ? ROW_HEIGHT : 1;
-    d->scroll = fmin(fmax(d->scroll + s->delta.y * step, 0), range);
+    d->scroll = fmin(fmax(offset, 0), range);
     EX_OK(gr_layer_set_position(d->list_content, EX_POINT(LIST.size.width / 2, ROWS * ROW_HEIGHT / 2 - d->scroll)));
     double thumb = LIST.size.height * LIST.size.height / (ROWS * ROW_HEIGHT);
     EX_OK(gr_layer_set_position(
         d->scrollbar,
         EX_POINT(LIST.size.width - 6, 4 + thumb / 2 + d->scroll / range * (LIST.size.height - thumb - 8))));
+}
+
+static bool scroll(input_scene *d, const gr_event *e)
+{
+    const gr_scroll_event *s = &e->value.scroll;
+    if (!inside(LIST, s->position))
+        return false;
+    scroll_to(d, d->scroll + s->delta.y * (s->unit == GR_SCROLL_UNIT_LINE ? ROW_HEIGHT : 1));
     static const char *const phases[] = {"", " begin", " update", " end"};
     set_cell(d->status, "scroll %+.2f, %+.2f %s%s%s", s->delta.x, s->delta.y,
              s->unit == GR_SCROLL_UNIT_LINE ? "lines" : "points", phases[s->phase], s->momentum ? " momentum" : "");

@@ -85,9 +85,10 @@ typedef struct
     uint32_t id; /**< 0 for the mouse; stable from down to up for touch and pen contacts. */
     gr_pointer_kind kind;
     gr_point position;
-    gr_button button;     /**< The changed button for DOWN/UP (never NONE there); NONE otherwise. */
-    uint32_t buttons;     /**< Bit (1u << button) for each button still pressed after this event. */
-    uint32_t click_count; /**< DOWN/UP: consecutive clicks by the platform double-click setting; 0 otherwise. */
+    gr_button button; /**< The changed button for DOWN/UP (never NONE there); NONE otherwise. A touch contact presses
+                       * PRIMARY from down to up. */
+    uint32_t buttons; /**< Bit (1u << button) for each button of this pointer still pressed after this event. */
+    uint32_t click_count; /**< DOWN/UP: consecutive clicks or taps by the platform setting; 0 otherwise. */
     float pressure;       /**< [0,1]; 0.5 while pressed for devices without pressure, 0 while hovering. */
 } gr_pointer_event;
 

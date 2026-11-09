@@ -5,8 +5,8 @@
 renders layer properties, shadows, blur, shape, gradient and image contents,
 drawn contents, masks and text, passes every conformance case in Chromium except
 the thread-safety case, delivers frame, viewport, focus, pointer, scroll and
-key events, and takes text input. Every example runs in the browser. Touch is
-not implemented yet. This page records the design
+key events (touch included), and takes text input. Every example runs in the
+browser. This page records the design
 and what a browser spike measured. The spike ran Chromium (headless shell
 158), WebKit and Firefox through Playwright on macOS in November 2026. It
 compared each approach with a reference rendering in the same browser.
@@ -271,8 +271,14 @@ The [event design](../events.md) applies.
 - Pointer events from mice and pens map directly: pressure, buttons (also
   chorded presses, which arrive as moves), pointer capture during drags,
   crossings deferred until the last button is up, and click counts (500 ms,
-  5 points). A press focuses the host (`tabindex="0"`). Touch is not reported
-  yet.
+  5 points). A press focuses the host (`tabindex="0"`).
+- Touch contacts are pointers of their own, identified by `pointerId`: each
+  presses the primary button from down to up, is captured, never hovers (no
+  crossings), and counts taps within 500 ms and 40 points. Pressure is the
+  browser's, or 0.5. The host's `touch-action: none` keeps the browser from
+  panning or zooming, so scrolling by touch is the application's (the input
+  example drags its list). A long touch's context menu is prevented while a
+  consumed contact is down.
 - `wheel` pixel deltas are points and line or page deltas lines; there are no
   phases. Browsers do not tell wheels and touchpads apart.
 - Keys: `KeyboardEvent.code` uses the W3C names that `gr_key_code` uses, and
@@ -397,7 +403,7 @@ suite, because the runner uses CDP.
 ## Known gaps
 
 - **No offscreen rendering.**
-- No touch yet.
+- Touch gestures (pinch, rotate, flings) are left to applications.
 - The text system works on the main thread only, glyph identities are
   approximations (one glyph per grapheme cluster), and grapheme directions
   come from a simplified bidi resolution.
@@ -412,9 +418,9 @@ suite, because the runner uses CDP.
    skeleton with a browser test, and CI running both.
 2. **Rendering** (done): host attachment, rAF commits, the
    command stream, layers, drawn contents, and Playwright-driven conformance.
-3. **Events and examples** (done apart from touch): input, frame, viewport
+3. **Events and examples** (done): input (touch included), frame, viewport
    and focus events, text input through a hidden field, and a Web shell under `examples/shared/platform`
    with the examples driven by animation frames rather than a blocking loop.
 4. **Text** (done): the DOM text system (layout, metrics, truncation, carets,
    hit testing, range rectangles and approximated glyphs) and its replay.
-5. **Gaps**: touch, and performance work.
+5. **Gaps**: performance work.

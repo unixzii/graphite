@@ -39,6 +39,20 @@ addToLibrary({
     return e.defaultPrevented;
   },
 
+  // A touch contact: down and moves press it, up and cancel lift it.
+  web_test_touch__deps: ['$webTestHost', '$UTF8ToString'],
+  web_test_touch: (type, x, y, id) => {
+    const host = webTestHost(), r = host.getBoundingClientRect(), name = UTF8ToString(type);
+    const pressed = name === 'pointerdown' || name === 'pointermove';
+    const e = new PointerEvent(name, {
+      clientX: r.left + x, clientY: r.top + y, button: name === 'pointermove' ? -1 : 0, buttons: pressed ? 1 : 0,
+      pointerType: 'touch', pointerId: id, isPrimary: false, pressure: pressed ? 0.5 : 0, bubbles: true,
+      cancelable: true, composed: true,
+    });
+    host.dispatchEvent(e);
+    return e.defaultPrevented;
+  },
+
   web_test_wheel__deps: ['$webTestHost'],
   web_test_wheel: (x, y, dx, dy, mode) => {
     const host = webTestHost(), r = host.getBoundingClientRect();

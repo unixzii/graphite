@@ -701,13 +701,20 @@ addToLibrary({
         const r = element.getBoundingClientRect();
         return e.clientX >= r.left && e.clientY >= r.top && e.clientX < r.right && e.clientY < r.bottom;
       };
-      // Counts consecutive presses of one button within 500 ms and 5 points, as a double-click setting would.
-      const count = (button, e) => {
+      // Counts consecutive presses of one button within 500 ms and slop points, as a double-click setting would.
+      const count = (s, button, e, slop) => {
         const [x, y] = point(e), time = e.timeStamp;
-        const again = state.clicks && button === state.button && time - state.time <= 500 &&
-          Math.abs(x - state.x) <= 5 && Math.abs(y - state.y) <= 5;
-        Object.assign(state, { clicks: again ? state.clicks + 1 : 1, button, time, x, y });
-        return state.clicks;
+        const again = s.clicks && button === s.button && time - s.time <= 500 &&
+          Math.abs(x - s.x) <= slop && Math.abs(y - s.y) <= slop;
+        Object.assign(s, { clicks: again ? s.clicks + 1 : 1, button, time, x, y });
+        return s.clicks;
+      };
+      // Capture keeps moves and the release coming during drags, as native hosts' implicit grabs do. It throws for
+      // pointers the browser no longer tracks.
+      const capture = (e) => {
+        try {
+          element.setPointerCapture(e.pointerId);
+        } catch {}
       };
       // A press, a release, or a chorded button change reported with a move.
       const press = (e) => {
@@ -716,19 +723,37 @@ addToLibrary({
         const down = !(before & (1 << button)) && !!(state.buttons & (1 << button));
         if (down) {
           (host.text?.field ?? element).focus({ preventScroll: true });
-          // Capture keeps moves and the release coming during drags, as native hosts' implicit grabs do. It throws
-          // for pointers the browser no longer tracks.
-          if (e.type === 'pointerdown') {
-            try {
-              element.setPointerCapture(e.pointerId);
-            } catch {}
-          }
+          if (e.type === 'pointerdown') capture(e);
         }
-        const handled = send(down ? 4 : 5, e, button, down ? count(button, e) : state.clicks);
+        const handled = send(down ? 4 : 5, e, button, down ? count(state, button, e, 5) : state.clicks);
         if (down && button === 2) state.menu = handled;
         // Crossings are not reported during drags; catch up once the last button is released.
         if (!state.buttons) hover(contains(e), e);
         return handled;
+      };
+      // Touch: each contact is its own pointer, pressing the primary button from down to up, and never hovers.
+      // contacts maps the contacts down on the host to whether their press was consumed. Taps count within 40 points.
+      const contacts = new Map(), taps = { clicks: 0, button: 0, time: 0, x: 0, y: 0 };
+      const touch = (type, e, clicks = 0) => {
+        const [x, y] = point(e), down = type === 4 || type === 6;
+        const pressure = down ? Math.min(Math.max(e.pressure || 0.5, 0), 1) : 0;
+        return call(() => _gr_web_on_pointer(host.events, type, e.timeStamp / 1000, GRWeb.modifiers(e),
+          e.pointerId >>> 0, 2, x, y, type === 6 || type === 9 ? 0 : 1, down ? 2 : 0, clicks, pressure));
+      };
+      const touched = (e) => {
+        if (e.type === 'pointerdown') {
+          if (contacts.has(e.pointerId)) return false;
+          (host.text?.field ?? element).focus({ preventScroll: true });
+          capture(e);
+          contacts.set(e.pointerId, false);
+          const handled = touch(4, e, count(taps, 1, e, 40));
+          if (contacts.has(e.pointerId)) contacts.set(e.pointerId, handled);
+          return handled;
+        }
+        if (!contacts.has(e.pointerId)) return false;
+        if (e.type === 'pointermove') return touch(6, e);
+        contacts.delete(e.pointerId);
+        return e.type === 'pointerup' ? touch(5, e, taps.clicks) : touch(9, e);
       };
       const on = (type, handler, options) => {
         element.addEventListener(type, handler, options);
@@ -736,6 +761,11 @@ addToLibrary({
       };
       host.listeners = [];
       host.unobserve = () => resize.disconnect();
+      for (const type of ['pointerdown', 'pointerup', 'pointermove', 'pointercancel']) {
+        on(type, (e) => {
+          if (e.pointerType === 'touch' && touched(e)) e.preventDefault();
+        });
+      }
       on('pointerdown', (e) => {
         if (kindOf(e) >= 0 && BUTTON[e.button] && press(e)) e.preventDefault();
       });
@@ -766,8 +796,9 @@ addToLibrary({
       on('mousedown', (e) => {
         if (host.text?.field) e.preventDefault();
       });
+      // A long touch opens the menu while the contact is still down.
       on('contextmenu', (e) => {
-        if (state.menu) e.preventDefault();
+        if (state.menu || [...contacts.values()].includes(true)) e.preventDefault();
       });
       on('wheel', (e) => {
         // Pixel deltas are CSS pixels, which are logical points; line and page deltas both become lines.

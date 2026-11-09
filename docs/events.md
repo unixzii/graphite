@@ -82,7 +82,7 @@ velocities from input times alone.
 | `TIMER` | deadline | The deadline the application set passed |
 | `VIEWPORT` | size, scale | Host size or backing scale changed; the scale is already applied to the Scene, and the root's size is the application's choice |
 | `FOCUS_IN`, `FOCUS_OUT` | none | Keyboard focus |
-| `POINTER_DOWN`, `UP`, `MOVE` | pointer | Mouse and pen, in the style of W3C Pointer Events |
+| `POINTER_DOWN`, `UP`, `MOVE` | pointer | Mouse, pen and touch, in the style of W3C Pointer Events |
 | `POINTER_ENTER`, `LEAVE` | pointer | Hovering into or out of the host |
 | `POINTER_CANCEL` | pointer | The platform took the pointer away; treat it as an up without activation |
 | `SCROLL` | scroll | Wheels and touchpads |
@@ -151,17 +151,24 @@ display rate.
 
 ## Pointer
 
-- `id` is 0 for the mouse and stable from down to up for pen contacts; `kind`
-  says mouse or pen. Touchscreens are not reported.
+- `id` is 0 for the mouse and stable from down to up for pen and touch
+  contacts; `kind` says mouse, pen or touch. Touchscreens are reported on the
+  Web.
 - `button` is the button that changed (DOWN and UP only), `buttons` the set
-  still pressed after the event, and `click_count` follows the platform's
-  double-click time and distance.
+  still pressed on that pointer after the event, and `click_count` follows the
+  platform's double-click time and distance.
+- Each touch contact is a pointer of its own: it presses the primary button
+  from DOWN to UP, and several can be down at once, told apart by `id`. A
+  contact never hovers, so touch reports no `ENTER` or `LEAVE`, and a
+  contact's moves come only while it is down. `click_count` counts taps.
+  Touch reports contacts, not scrolling: an application that scrolls by touch
+  follows the contact itself.
 - `pressure` is in [0, 1]: the pen's own pressure, else 0.5 while pressed and 0
   while hovering, as on the Web.
 - A press captures the pointer: moves and the release reach the host until
   every button is up, even outside it. Crossings are not reported during a
   drag; the one that happened is reported after the last release. A lost
-  capture reports `POINTER_CANCEL`.
+  capture reports `POINTER_CANCEL`. Each touch contact is captured on its own.
 - A press gives the host keyboard focus.
 
 ## Scroll
@@ -296,7 +303,8 @@ caret on the host's timer.
 
 ## Not covered
 
-- Touchscreens, and gestures such as pinch and rotate.
+- Touchscreens on GTK and Windows (Windows reports touch as the mouse), and
+  gestures such as pinch and rotate.
 - The history of coalesced pointer moves.
 - Hit testing helpers and coordinate conversion between layers.
 - Frames for hosts without a native surface: a layer or visual host has no
