@@ -101,6 +101,27 @@ conformance suite's text cases) lays text out with Pango and draws it with
 - Line heights are taller than CoreText's (about 17 pt vs 15.5 pt at 12.5 pt
   sans), so layouts that budget height by line count should measure first.
 
+## Events
+
+The [event design](../events.md) applies; the [backend guide](../../src/platforms/gtk/README.md)
+describes how the widget maps GDK events.
+
+- **Frame and input times come from different clocks.** Frames use the frame
+  clock (`gdk_frame_clock_get_frame_time`, with the interval and presentation
+  time from `gdk_frame_clock_get_refresh_info`). Input events carry the
+  compositor's milliseconds, usually but not necessarily on
+  `CLOCK_MONOTONIC`.
+- **GDK's discrete scroll direction can disagree with the device
+  horizontally.** The deltas GDK attaches to discrete wheel events follow the
+  device, so the widget uses them and falls back to the direction only when
+  both are zero.
+- **GTK 4 cannot construct `GdkEvent`s.** Unit tests send nothing through the
+  event controllers: `tests/gtk.c` swaps in a stand-in `GtkIMContext`
+  (`gr_gtk_widget_set_im_context`) and emits its signals. Real input on the
+  validation VM comes from a `uinput` keyboard (python-evdev, as root) typing
+  into the focused window; `ibus engine libpinyin` selects Pinyin over ssh.
+  That is how compositions under GNOME on Wayland were checked.
+
 ## Known gaps
 
 - Text: mixed-direction paragraphs in unwrapped text without an ellipsis share

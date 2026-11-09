@@ -108,6 +108,24 @@ factory and draws it with `ID2D1DeviceContext::DrawTextLayout`:
 - Windows' emoji font has no flag glyphs; regional indicator pairs render as
   letters (for example "CN").
 
+## Events
+
+The [event design](../events.md) applies; the [backend guide](../../src/platforms/windows/README.md)
+describes how the host window maps messages.
+
+- **`EnableMouseInPointer` is process-wide**, so the host leaves it alone.
+  Mice arrive as `WM_MOUSE*`, and pens as mouse messages the system promotes,
+  recognized by their `GetMessageExtraInfo` signature. Touch is not reported.
+- **Input times are coarse.** Mouse and key messages carry `GetMessageTime`
+  milliseconds, while frames use QPC. The refresh interval is the compositor's
+  `framePeriod` from `DCompositionGetStatistics` (13.3 ms on the VM).
+- **Tests hold modifiers through the thread's key state.** `SetKeyboardState`
+  sets what `GetKeyState` reports on the calling thread, so `tests/windows.cpp`
+  sends key messages with Control held and no system-wide input.
+- **Key messages sent to a window bypass input methods.** Input methods see
+  keyboard input as the thread reads it from the system, so keys sent or
+  posted to the window never reach them. Microsoft Pinyin was checked by hand.
+
 ## Known gaps
 
 - **Device loss is not handled.** After a Direct3D device loss, drawing

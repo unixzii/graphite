@@ -4,6 +4,7 @@
 |---|---|
 | [Architecture](architecture.md) | Ownership, dirty tracking, commit batches and coordinates |
 | [Layer semantics](layer-model.md) | Geometry, masks, drawing and resources |
+| [Events](events.md) | Interactive hosts, input and frame events, text input |
 | [API conventions](../include/graphite/types.h) | Ownership, errors, threading and values |
 | [Core lifetime](core-lifetime.md) | Cleanup boundaries, retirement and Scene teardown |
 | [CMake packages](cmake.md) | Build switches, install/export and consumers |
@@ -11,7 +12,7 @@
 | [Core coverage](core-test-audit.md) | Covered contracts and remaining test opportunities |
 | [Writing a backend](backends/writing-a-backend.md) | Backend vtable and hosting requirements |
 | [macOS](backends/macos.md), [GTK](backends/gtk.md), [Windows](backends/windows.md) | Native implementations |
-| [Web](backends/web.md) | Design and spike measurements for a DOM backend (not implemented) |
+| [Web](backends/web.md) | DOM backend design and browser measurements |
 | [Platform notes](platform-notes.md) | Rendering capabilities and constraints |
 | [Roadmap](roadmap.md) | Implemented features and planned work |
 

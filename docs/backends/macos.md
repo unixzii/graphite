@@ -72,6 +72,28 @@ conformance suite's text cases) lays text out with CoreText:
 - Layout is built on first use under an `os_unfair_lock` and is immutable
   afterwards, so queries are safe from any thread.
 
+## Events
+
+The [event design](../events.md) applies; the [backend guide](../../src/platforms/macos/README.md)
+describes how the view maps AppKit events.
+
+- **Frames and input share one clock.** Display link timestamps and
+  `NSEvent.timestamp` are both `CACurrentMediaTime`, so frame and input times
+  compare directly.
+- **Menu key equivalents take Command shortcuts first.** A shortcut that a
+  menu item handles never reaches the view; the others arrive as `keyDown:`.
+- **`objc_direct_members` must not swallow `NSTextInputClient`.** AppKit calls
+  the protocol's methods dynamically. Declaring the conformance in the view's
+  `@interface` keeps them dynamic while the rest of the class stays direct.
+- **Pinyin keeps its candidate window after `discardMarkedText`.** Ending a
+  composition from the application alone left it on screen. While composing,
+  primary-button presses go to the input context first, as in `NSTextView`, so
+  the input method commits or cancels and closes it.
+- **Synthetic key events do not engage input methods.** Keystrokes posted to
+  the process with `CGEventPostToPid` type plain text even with Pinyin
+  selected. `tests/macos.m` calls the `NSTextInputClient` methods directly;
+  compositions and candidate windows are checked by hand.
+
 ## Known gaps
 
 - Text: no font loading from bytes, locale, font features or line height

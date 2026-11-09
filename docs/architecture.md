@@ -43,7 +43,7 @@ Hosts with a native input surface are interactive: they deliver input and frame 
 frames; hit testing, routing, gestures and focus chains stay with the application. Core owns the handler and the
 delivery rules (event validation in debug builds, frame request coalescing, queueing events dispatched from inside a handler, deferred
 handler destruction); platforms report native events through `gr_scene_host_dispatch_event` and implement the
-optional event callbacks of `gr_scene_host_vtable`.
+optional event callbacks of `gr_scene_host_vtable`. [Events](events.md) describes the event model and text input.
 
 ## Pipeline
 

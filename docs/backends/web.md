@@ -4,9 +4,9 @@
 `src/platforms/web` (see its [README](../../src/platforms/web/README.md))
 renders layer properties, shadows, blur, shape, gradient and image contents,
 drawn contents, masks and text, passes every conformance case in Chromium except
-the thread-safety case, and delivers frame, viewport, focus, pointer, scroll and
-key events. Every example runs in the browser. IME and touch are not
-implemented yet. This page records the design
+the thread-safety case, delivers frame, viewport, focus, pointer, scroll and
+key events, and takes text input. Every example runs in the browser. Touch is
+not implemented yet. This page records the design
 and what a browser spike measured. The spike ran Chromium (headless shell
 158), WebKit and Firefox through Playwright on macOS in November 2026. It
 compared each approach with a reference rendering in the same browser.
@@ -249,6 +249,8 @@ DOM, so it only works on the main thread, and the conformance harness declares
 independent layout engine (for example HarfBuzz with bundled fonts).
 
 ## Hosting and events
+
+The [event design](../events.md) applies.
 
 - `gr_web_attach_to_element(scene, target)` creates the host element inside
   an application-provided container and returns an interactive
