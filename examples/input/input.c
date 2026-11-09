@@ -1,4 +1,5 @@
 #include "example.h"
+#include "field.h"
 
 #include <stdarg.h>
 
@@ -6,7 +7,8 @@
 
 #define PAD EX_RECT(24, 24, 540, 404)
 #define LIST EX_RECT(588, 24, 288, 404)
-#define STRIP EX_RECT(24, 452, 852, 84)
+#define FIELD EX_RECT(24, 452, 852, 52)
+#define STRIP EX_RECT(24, 520, 852, 84)
 #define ROWS 30
 #define ROW_HEIGHT 40.0
 #define TILES 6
@@ -285,6 +287,7 @@ typedef struct
     double ripple_start[RIPPLES];
     size_t next_ripple;
     text_cell *status, *key, *detail, *chip_text[CHIPS];
+    text_field *field;
     double scroll;
     uint32_t buttons;
     gr_cursor cursor;
@@ -360,6 +363,9 @@ static void *build(example *ex)
     double thumb = LIST.size.height * LIST.size.height / (ROWS * ROW_HEIGHT);
     d->scrollbar = pill(ex, list, EX_RECT(LIST.size.width - 8, 4, 4, thumb), alpha(hex(EX_INK), 0.25f), 2);
 
+    d->field = text_field_new(ex, root, FIELD, FIELD.origin,
+                              "Click here and type; try an input method, or hold a letter for accents");
+
     /* Key strip. */
     gr_layer *strip = pill(ex, root, STRIP, EX_WHITE, 12);
     border(strip, 1, hex(LINE));
@@ -379,6 +385,7 @@ static void update(void *state, double t)
 {
     input_scene *d = state;
     d->now = t;
+    text_field_update(d->field, t);
     for (size_t i = 0; i < RIPPLES; ++i)
     {
         if (d->ripple_start[i] < 0)
@@ -441,6 +448,11 @@ static int tile_at(gr_point p)
 static bool pointer(input_scene *d, const gr_event *e)
 {
     const gr_pointer_event *p = &e->value.pointer;
+    if (text_field_pointer(d->field, e))
+    {
+        set_cursor(d, GR_CURSOR_TEXT);
+        return true;
+    }
     bool gone = e->type == GR_EVENT_POINTER_LEAVE || e->type == GR_EVENT_POINTER_CANCEL;
     d->buttons = gone ? 0 : p->buttons;
     gr_point local = {p->position.x - PAD.origin.x, p->position.y - PAD.origin.y};
@@ -466,6 +478,8 @@ static bool pointer(input_scene *d, const gr_event *e)
     /* Cursor tiles: hovering shows the cursor; pressing the grab tile grabs. */
     int tile = inside(PAD, p->position) && !gone ? tile_at(local) : -1;
     gr_cursor cursor = tile < 0 ? GR_CURSOR_DEFAULT : tiles[tile].cursor;
+    if (!gone && text_field_contains(d->field, p->position))
+        cursor = GR_CURSOR_TEXT;
     if (cursor == GR_CURSOR_GRAB && d->buttons)
         cursor = GR_CURSOR_GRABBING;
     set_cursor(d, cursor);
@@ -545,6 +559,9 @@ static bool key(input_scene *d, const gr_event *e)
     set_cell(d->key, "%s", k->key == GR_KEY_CHARACTER || k->key >= GR_KEY_F1 ? text : key_names[k->key]);
     set_cell(d->detail, "%s  %s%s  native 0x%x", code_names[k->code], e->type == GR_EVENT_KEY_DOWN ? "down" : "up",
              k->repeat ? " repeat" : "", k->native_code);
+    /* A focused field takes its shortcuts and leaves the rest to text input. */
+    if (text_field_focused(d->field))
+        return text_field_event(d->field, e);
     /* Leave shortcuts with Alt or Super to the platform, such as Alt+F4 and Command+Q. */
     return !(e->modifiers & (GR_MODIFIER_ALT | GR_MODIFIER_SUPER));
 }
@@ -567,6 +584,45 @@ static bool input(void *state, const gr_event *e)
         case GR_EVENT_KEY_DOWN:
         case GR_EVENT_KEY_UP:
             return key(d, e);
+        case GR_EVENT_TEXT_EDIT:
+        {
+            const gr_text_edit_event *t = &e->value.edit;
+            set_cell(d->status, "edit %zu-%zu \"%.*s\"  selection %zu-%zu  composition %zu-%zu", t->replace.start,
+                     t->replace.end, (int)t->text.count, t->text.data ? t->text.data : "", t->selection.start,
+                     t->selection.end, t->composition.start, t->composition.end);
+            return text_field_event(d->field, e);
+        }
+        case GR_EVENT_TEXT_COMMAND:
+        {
+            static const char *const names[] = {
+                "insert newline",
+                "insert tab",
+                "insert backtab",
+                "delete backward",
+                "delete forward",
+                "delete word backward",
+                "delete word forward",
+                "delete to line start",
+                "delete to line end",
+                "move left",
+                "move right",
+                "move up",
+                "move down",
+                "move word left",
+                "move word right",
+                "move line start",
+                "move line end",
+                "move document start",
+                "move document end",
+                "move page up",
+                "move page down",
+                "select all",
+                "cancel",
+            };
+            set_cell(d->status, "command %s%s", names[e->value.command.command],
+                     e->value.command.extend ? " (extend)" : "");
+            return text_field_event(d->field, e);
+        }
         default:
             return false;
     }
@@ -574,6 +630,6 @@ static bool input(void *state, const gr_event *e)
 
 int main(int argc, char **argv)
 {
-    static const example_desc desc = {"input", {900, 560}, build, update, free, NULL, input, NULL};
+    static const example_desc desc = {"input", {900, 624}, build, update, free, NULL, input, NULL};
     return example_main(argc, argv, &desc);
 }

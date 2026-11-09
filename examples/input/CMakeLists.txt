@@ -1,1 +1,1 @@
-graphite_add_example(input input.c)
+graphite_add_example(input input.c field.c)
