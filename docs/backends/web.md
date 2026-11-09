@@ -33,7 +33,10 @@ needs the DOM (see [Text](#text)).
   both schedule it; it delivers a requested `GR_EVENT_FRAME` and then runs
   `gr_scene_commit`, so changes made in a frame commit in the same animation
   frame. This is the platform commit point, before the browser's style and
-  layout.
+  layout. A callback whose timestamp is not later than the last tick's waits
+  for the next animation frame: Chromium can run a callback requested during
+  another in the same display frame (seen after an editable element had
+  focus), and each frame event stands for its own display frame.
 - `apply` encodes the batch as a stream of doubles in linear memory (opcodes
   and operands are documented in `internal.h`) and makes one call into
   JavaScript. JavaScript then applies it in the commit-contract order: realize,
@@ -173,7 +176,8 @@ UTF-16 indices inside and UTF-8 offsets at the boundary.
    `white-space: pre`, `width: max-content` and its paragraph's direction
    (explicit, or its first strong character with a table of right-to-left
    blocks, as on macOS). Trailing whitespace and the separator are left out,
-   so they never shift aligned lines. A zero-size inline-block marker gives the
+   so they never shift aligned lines; carets still measure the whitespace (see
+   below). A zero-size inline-block marker gives the
    baseline, and the stacked blocks give the line boxes. The block's font,
    which sets the line's minimum height, is the style where the line starts,
    as native text systems size lines by their fonts.
@@ -183,15 +187,19 @@ Queries use cluster boxes, measured per line when first needed:
 - Caret stops are grapheme boundaries. A downstream caret is the leading edge
   of the grapheme at the index (in its own direction), an upstream caret the
   trailing edge of the one before it; at a soft line break, upstream picks the
-  earlier line. Trailing whitespace hangs at the line's end with no width, and
-  elided text shares the ellipsis's leading edge.
+  earlier line. Cluster boxes are measured on the line laid out with its
+  trailing whitespace (not its separator), so carets after trailing spaces move
+  on past the content as on native text systems; in right-to-left lines the
+  boxes shift back by the whitespace's width, which widens the block on the
+  left. Elided text shares the ellipsis's leading edge.
 - Grapheme directions come from their characters: strong right-to-left and
   left-to-right letters, with neutrals taking the direction of the strong
   characters around them when both agree, else the paragraph's.
 - Hit testing picks the line by y, then the cluster under x and its nearer
-  edge; outside the line, the visually first or last cluster. Past the end of a
-  soft-wrapped line it returns the line's end upstream; at a hard break, the
-  index before the separator.
+  edge; outside the line, the visually first or last cluster. Trailing
+  whitespace counts as part of the line. Past the end of a soft-wrapped line it
+  returns the line's end upstream; at a hard break, the index before the
+  separator.
 - Range rectangles are the selected cluster boxes of each line, merged where
   they touch, in visual order: one per line and visual piece.
 - Glyphs are approximations, because the DOM exposes no glyph indices or faces.

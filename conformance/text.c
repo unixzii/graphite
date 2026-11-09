@@ -222,6 +222,25 @@ void text_aligns_by_paragraph_direction(ctx *c)
     gr_text_layout_unref(layout);
 }
 
+/* Trailing whitespace is not drawn, but carets after it move on, and a point past it hits the end. */
+void text_trailing_whitespace_advances_carets(ctx *c)
+{
+    SYSTEM_OR_SKIP(c);
+    (void)system;
+    gr_text_layout *layout = layout_of(c, STR("ab  "), gr_text_layout_options_default());
+    double baseline = line(layout, 0).baseline;
+    double after_b = caret(layout, 2, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x;
+    double after_one = caret(layout, 3, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x;
+    double after_two = caret(layout, 4, GR_TEXT_AFFINITY_DOWNSTREAM).origin.x;
+    CHECK(after_one > after_b + 1 && after_two > after_one + 1);
+    CHECK(gr_text_layout_hit_test(layout, (gr_point){after_one + 0.5, baseline}).index == 3);
+    CHECK(gr_text_layout_hit_test(layout, (gr_point){500, baseline}).index == 4);
+    gr_rect rect;
+    CHECK(gr_text_layout_get_range_rects(layout, (gr_text_range){2, 4}, &rect, 1) == 1);
+    CHECK(rect.size.width > 2);
+    gr_text_layout_unref(layout);
+}
+
 void text_carets_follow_grapheme_clusters(ctx *c)
 {
     SYSTEM_OR_SKIP(c);

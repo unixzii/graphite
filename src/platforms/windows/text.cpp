@@ -561,21 +561,13 @@ gr_text_position dw_hit_test(void *data, gr_point point)
     if (!l->layout)
         return {0, GR_TEXT_AFFINITY_DOWNSTREAM};
     auto const &line = line_at_y(l.l, point.y);
-    double left = line.bounds.origin.x, right = left + line.bounds.size.width;
-    bool rtl = l->layout && l->layout->GetReadingDirection() == DWRITE_READING_DIRECTION_RIGHT_TO_LEFT;
-    UINT32 position;
-    if (point.x < left || point.x >= right)
-        position = (point.x >= right) == !rtl ? line.caret : line.start;
-    else
-    {
-        BOOL trailing = FALSE, inside = FALSE;
-        DWRITE_HIT_TEST_METRICS h{};
-        double y = line.bounds.origin.y + line.bounds.size.height / 2;
-        check_hresult(
-            l->layout->HitTestPoint(static_cast<float>(point.x), static_cast<float>(y), &trailing, &inside, &h));
-        position = h.textPosition + (trailing ? h.length : 0);
-    }
-    position = std::clamp(position, line.start, line.caret);
+    /* DirectWrite also resolves points past the visible text, over trailing whitespace and beyond; the line's
+     * range bounds the result, which keeps elided text and separators out. */
+    BOOL trailing = FALSE, inside = FALSE;
+    DWRITE_HIT_TEST_METRICS h{};
+    double y = line.bounds.origin.y + line.bounds.size.height / 2;
+    check_hresult(l->layout->HitTestPoint(static_cast<float>(point.x), static_cast<float>(y), &trailing, &inside, &h));
+    UINT32 position = std::clamp(h.textPosition + (trailing ? h.length : 0), line.start, line.caret);
     size_t index = to8(l.l, position);
     bool upstream = line.soft && index == line.range.end;
     return {index, upstream ? GR_TEXT_AFFINITY_UPSTREAM : GR_TEXT_AFFINITY_DOWNSTREAM};

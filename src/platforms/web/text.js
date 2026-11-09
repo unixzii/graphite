@@ -374,13 +374,24 @@ addToLibrary({
       return L;
     },
 
-    /* Per-line cluster boxes in layout coordinates: {s, e, left, right, rtl}, plus the ellipsis box. */
+    /* Where a line's text ends before its separator: its content plus trailing whitespace, which is not drawn or
+     * aligned but has advances, so carets after it move on as in native text systems. Ellipsized lines end at
+     * their content. */
+    hangingEnd(line) {
+      return line.ellipsis ? line.contentEnd : Math.min(line.end, line.paragraph.contentEnd);
+    },
+
+    /* Per-line cluster boxes in layout coordinates: {s, e, left, right, rtl}, plus the ellipsis box. Trailing
+     * whitespace is measured with the line and extends past its content in reading order. */
     clusters(L, line) {
       if (line.clusters) return line.clusters;
-      const { element } = GRText.lineElement(L, line, null);
+      const end = GRText.hangingEnd(line);
+      const { element } = GRText.lineElement(L, end > line.contentEnd ? { ...line, contentEnd: end } : line, null);
       const host = GRText.measure();
       host.append(element);
       const box = element.getBoundingClientRect();
+      // Right-to-left, the whitespace widens the element on the left; keep the content where it is drawn.
+      const shift = line.rtl ? box.width - line.width : 0;
       const nodes = [];
       let at = line.start;
       for (const span of element.childNodes) {
@@ -394,20 +405,15 @@ addToLibrary({
         range.setEnd(node, to);
         const rects = range.getClientRects();
         const r = [...rects].find((x) => x.width > 0) ?? rects[0];
-        return r ? [r.left - box.left + line.x, r.right - box.left + line.x] : [line.x, line.x];
+        return r ? [r.left - box.left - shift + line.x, r.right - box.left - shift + line.x] : [line.x, line.x];
       };
-      const end = line.rtl ? line.x : line.x + line.width;
       const out = [];
       const kinds = [];
       for (const g of L.graphemes) {
         if (g.s < line.start || g.e > line.end || g.separator) continue;
         if (line.ellipsis && g.s >= line.ellipsis.elidedStart) continue;
-        let left, right;
-        if (g.s >= line.contentEnd) left = right = end; // Trailing whitespace hangs at the line's end.
-        else {
-          const n = nodes.findLast((x) => x.start <= g.s);
-          [left, right] = rectOf(n.node, g.s - n.start, Math.min(g.e - n.start, n.node.length));
-        }
+        const n = nodes.findLast((x) => x.start <= g.s);
+        const [left, right] = rectOf(n.node, g.s - n.start, Math.min(g.e - n.start, n.node.length));
         out.push({ s: g.s, e: g.e, left, right, text: g.text });
         kinds.push(GRText.RTL(g.text) ? 'r' : GRText.LETTER(g.text) ? 'l' : 'n');
       }
@@ -463,13 +469,14 @@ addToLibrary({
       const lines = L.lines;
       let line = lines[lines.length - 1];
       for (const l of lines) if (y < l.top + l.height) { line = l; break; }
-      const clusters = GRText.clusters(L, line).filter((c) => c.s < line.contentEnd);
+      const hanging = GRText.hangingEnd(line);
+      const clusters = GRText.clusters(L, line).filter((c) => c.s < hanging);
       const last = line === lines[lines.length - 1];
       // The end of a soft-wrapped line is upstream of the next line's start; hard breaks stop before the separator.
-      const endOf = () => (line.separator || last ? [line.contentEnd, 0] : [line.end, 1]);
+      const endOf = () => (line.separator || last ? [hanging, 0] : [line.end, 1]);
       const resolve = (c, after) => {
         const index = after ? c.e : c.s;
-        return index >= line.contentEnd ? endOf() : [index, 0];
+        return index >= hanging ? endOf() : [index, 0];
       };
       const items = [...clusters];
       if (line.ellipsisBox) items.push(line.ellipsisBox);
