@@ -427,9 +427,15 @@ addToLibrary({
     /* The animation-frame tick: one per host, delivering a requested frame and then the commit (gr_web_tick). */
     requestTick(host) {
       if (host.frame) return;
-      host.frame = requestAnimationFrame((ms) => {
-        host.frame = 0;
+      const tick = (ms) => {
         const time = ms / 1000;
+        // Chromium can run a callback requested during one in the same display frame (seen after an editable element
+        // had focus); it waits for the next, so each tick is its own frame.
+        if (time <= host.last) {
+          host.frame = requestAnimationFrame(tick);
+          return;
+        }
+        host.frame = 0;
         // Estimate the refresh interval from consecutive frames; 1/60 s until there are two.
         const delta = time - host.last;
         if (host.last && delta > 0.003 && delta < 0.1) host.interval += (delta - host.interval) * 0.25;
@@ -438,7 +444,8 @@ addToLibrary({
         // here too, before the frame.
         if (host.events && host.scale !== devicePixelRatio) host.viewport?.();
         GRWeb.call(() => _gr_web_tick(host.backend, host.events, time, host.interval));
-      });
+      };
+      host.frame = requestAnimationFrame(tick);
     },
 
     /* W3C UI Events code values in gr_key_code order, and aliases some browsers still report. */
