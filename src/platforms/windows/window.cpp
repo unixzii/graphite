@@ -1,7 +1,10 @@
 #include "internal.hpp"
 
 #include <dcomp.h>
+#include <imm.h>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <windowsx.h>
 
 namespace gr_win
@@ -22,9 +25,16 @@ struct WindowData
     DWORD click_time = 0;
     POINT click_point{};
     HCURSOR cursor = LoadCursor(nullptr, IDC_ARROW);
+    /* Text input: the shared state with this window's edits applied; text_input.text borrows text and its layout
+     * holds a reference. */
+    bool text_on = false, resetting = false;
+    gr_text_input text_input{};
+    std::string text;
+    wchar_t high_surrogate = 0;
 
     ~WindowData()
     {
+        gr_text_layout_unref(text_input.layout);
         gr_scene_link_unref(scene);
     }
 };
@@ -175,7 +185,355 @@ static bool press(HWND hwnd, WindowData &d, UINT message, WPARAM wp, LPARAM lp, 
     return handled;
 }
 
-static bool key(WindowData &d, UINT message, WPARAM wp, LPARAM lp)
+/* Text input. The window keeps a copy of the shared state (see host.h) and turns typed characters, IMM32
+ * compositions and editing keys into TEXT_EDIT and TEXT_COMMAND events. The window has no input context while text
+ * input is off or for passwords, so input methods only engage for text. */
+
+static bool composing(WindowData const &d)
+{
+    return d.text_on && d.text_input.composition.start < d.text_input.composition.end;
+}
+
+/* Replaces the stored state with a copy of input, or clears it with nullptr. */
+static void store_text_input(WindowData &d, gr_text_input const *input)
+{
+    gr_text_layout *layout = input ? gr_text_layout_ref(input->layout) : nullptr;
+    gr_text_layout_unref(d.text_input.layout);
+    d.text.assign(input && input->text.count ? input->text.data : "", input ? input->text.count : 0);
+    d.text_on = input != nullptr;
+    d.text_input = input ? *input : gr_text_input{};
+    d.text_input.text = {d.text.data(), d.text.size()};
+    d.text_input.layout = layout;
+    d.high_surrogate = 0;
+}
+
+static std::string to_utf8(wchar_t const *text, size_t count)
+{
+    std::string out;
+    if (!count)
+        return out;
+    int n = WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(count), nullptr, 0, nullptr, nullptr);
+    out.resize(static_cast<size_t>(std::max(n, 0)));
+    WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(count), out.data(), n, nullptr, nullptr);
+    return out;
+}
+
+/* Byte offset reached by advancing units UTF-16 code units from the byte offset at in UTF-8 text. */
+static size_t advance_utf16(std::string_view text, size_t at, size_t units)
+{
+    while (units && at < text.size())
+    {
+        auto lead = static_cast<unsigned char>(text[at]);
+        size_t bytes = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+        units -= std::min<size_t>(units, bytes == 4 ? 2 : 1);
+        at = std::min(at + bytes, text.size());
+    }
+    return at;
+}
+
+/* Applies one of this window's edits to the stored state, then delivers it. */
+static void text_edit(WindowData &d, gr_text_range replace, std::string_view text, gr_text_range selection,
+                      gr_text_range composition)
+{
+    std::string inserted(text); /* d.text changes below. */
+    d.text.replace(replace.start, replace.end - replace.start, inserted);
+    d.text_input.text = {d.text.data(), d.text.size()};
+    d.text_input.selection = selection;
+    d.text_input.composition = composition;
+    gr_event e{};
+    e.type = GR_EVENT_TEXT_EDIT;
+    e.time = message_seconds();
+    e.value.edit = {replace, {inserted.data(), inserted.size()}, selection, composition};
+    dispatch(&d, e);
+}
+
+/* What typing replaces: the composition, or else the selection. */
+static gr_text_range typing_target(WindowData const &d)
+{
+    return composing(d) ? d.text_input.composition : d.text_input.selection;
+}
+
+static void insert_text(WindowData &d, std::string_view text)
+{
+    gr_text_range target = typing_target(d);
+    size_t end = target.start + text.size();
+    text_edit(d, target, text, {end, end}, {end, end});
+}
+
+/* Typed characters, which arrive as UTF-16 code units; control characters come through as editing keys instead. */
+static bool text_char(WindowData &d, WPARAM wp)
+{
+    if (!d.text_on)
+        return false;
+    auto c = static_cast<wchar_t>(wp);
+    if (IS_HIGH_SURROGATE(c))
+    {
+        d.high_surrogate = c;
+        return true;
+    }
+    wchar_t units[2] = {c, 0};
+    size_t count = 1;
+    if (IS_LOW_SURROGATE(c))
+    {
+        if (!d.high_surrogate)
+            return true;
+        units[0] = d.high_surrogate;
+        units[1] = c;
+        count = 2;
+    }
+    d.high_surrogate = 0;
+    if (count == 1 && (c < 0x20 || c == 0x7F))
+        return true;
+    insert_text(d, to_utf8(units, count));
+    return true;
+}
+
+/* Host-space rectangle of the character at offset, or its caret at the end, from the shared layout; without one,
+ * the shared caret. */
+static gr_rect character_rect(WindowData const &d, size_t offset)
+{
+    gr_text_input const &in = d.text_input;
+    if (!in.layout)
+        return in.caret;
+    size_t next = advance_utf16(d.text, offset, 1);
+    gr_rect r{};
+    if (next <= offset || !gr_text_layout_get_range_rects(in.layout, {offset, next}, &r, 1))
+        gr_text_layout_get_caret_rect(in.layout, {offset, GR_TEXT_AFFINITY_DOWNSTREAM}, &r);
+    r.origin.x += in.origin.x;
+    r.origin.y += in.origin.y;
+    return r;
+}
+
+/* A host-space rectangle in client pixels. */
+static RECT client_rect(HWND hwnd, gr_rect r)
+{
+    double scale = window_scale(hwnd);
+    return {static_cast<LONG>(std::floor(r.origin.x * scale)), static_cast<LONG>(std::floor(r.origin.y * scale)),
+            static_cast<LONG>(std::ceil((r.origin.x + std::max(r.size.width, 1.0)) * scale)),
+            static_cast<LONG>(std::ceil((r.origin.y + r.size.height) * scale))};
+}
+
+/* Input methods place their windows by the caret, at the start of the composition while there is one. */
+static void place_input_method(HWND hwnd, WindowData const &d)
+{
+    HIMC imc = ImmGetContext(hwnd);
+    if (!imc)
+        return;
+    RECT caret = client_rect(
+        hwnd, character_rect(d, composing(d) ? d.text_input.composition.start : d.text_input.selection.end));
+    COMPOSITIONFORM composition{CFS_POINT, {caret.left, caret.top}, {}};
+    ImmSetCompositionWindow(imc, &composition);
+    CANDIDATEFORM candidate{0, CFS_EXCLUDE, {caret.left, caret.bottom}, caret};
+    ImmSetCandidateWindow(imc, &candidate);
+    ImmReleaseContext(hwnd, imc);
+}
+
+/* Drops the input method's composition without hearing about it. */
+static void cancel_composition(HWND hwnd, WindowData &d)
+{
+    HIMC imc = ImmGetContext(hwnd);
+    if (!imc)
+        return;
+    d.resetting = true;
+    ImmNotifyIME(imc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+    d.resetting = false;
+    ImmReleaseContext(hwnd, imc);
+}
+
+static std::wstring composition_string(HIMC imc, DWORD kind)
+{
+    LONG bytes = ImmGetCompositionStringW(imc, kind, nullptr, 0);
+    if (bytes <= 0)
+        return {};
+    std::wstring out(static_cast<size_t>(bytes) / sizeof(wchar_t), L'\0');
+    ImmGetCompositionStringW(imc, kind, out.data(), static_cast<DWORD>(bytes));
+    return out;
+}
+
+/* WM_IME_COMPOSITION: a committed result, the composition so far, or neither when the composition is cancelled. */
+static void ime_composition(HWND hwnd, WindowData &d, LPARAM lp)
+{
+    if (!d.text_on || d.resetting)
+        return;
+    HIMC imc = ImmGetContext(hwnd);
+    if (!imc)
+        return;
+    if (lp & GCS_RESULTSTR)
+    {
+        std::wstring result = composition_string(imc, GCS_RESULTSTR);
+        insert_text(d, to_utf8(result.data(), result.size()));
+    }
+    if ((lp & GCS_COMPSTR) && d.text_on)
+    {
+        std::wstring units = composition_string(imc, GCS_COMPSTR);
+        if (!units.empty() || composing(d))
+        {
+            std::string text = to_utf8(units.data(), units.size());
+            size_t at = typing_target(d).start;
+            size_t cursor =
+                lp & GCS_CURSORPOS
+                    ? static_cast<size_t>(std::max(ImmGetCompositionStringW(imc, GCS_CURSORPOS, nullptr, 0), 0L))
+                    : units.size();
+            gr_text_range selection = {at + advance_utf16(text, 0, cursor), at + advance_utf16(text, 0, cursor)};
+            /* While converting (as in Japanese), the clause being converted is selected. */
+            std::string attributes(
+                static_cast<size_t>(std::max(ImmGetCompositionStringW(imc, GCS_COMPATTR, nullptr, 0), 0L)), '\0');
+            if (!attributes.empty())
+                ImmGetCompositionStringW(imc, GCS_COMPATTR, attributes.data(), static_cast<DWORD>(attributes.size()));
+            size_t first = attributes.find(static_cast<char>(ATTR_TARGET_CONVERTED));
+            if (first != std::string::npos)
+            {
+                size_t last = attributes.find_last_of(static_cast<char>(ATTR_TARGET_CONVERTED));
+                selection = {at + advance_utf16(text, 0, first), at + advance_utf16(text, 0, last + 1)};
+            }
+            text_edit(d, typing_target(d), text, selection, {at, at + text.size()});
+        }
+    }
+    else if (!(lp & (GCS_RESULTSTR | GCS_COMPSTR)) && composing(d))
+    {
+        gr_text_range c = d.text_input.composition;
+        text_edit(d, c, {}, {c.start, c.start}, {c.start, c.start});
+    }
+    ImmReleaseContext(hwnd, imc);
+    if (d.text_on)
+        place_input_method(hwnd, d);
+}
+
+/* WM_IME_ENDCOMPOSITION without a result: the input method cancelled its composition. */
+static void ime_end(WindowData &d)
+{
+    if (!composing(d) || d.resetting)
+        return;
+    gr_text_range c = d.text_input.composition;
+    text_edit(d, c, {}, {c.start, c.start}, {c.start, c.start});
+}
+
+/* IMR_QUERYCHARPOSITION: the screen position of a composition character, in UTF-16 units from its start. */
+static LRESULT query_char_position(HWND hwnd, WindowData const &d, IMECHARPOSITION *query)
+{
+    if (!d.text_on || !query || query->dwSize < sizeof(IMECHARPOSITION))
+        return 0;
+    size_t start = composing(d) ? d.text_input.composition.start : d.text_input.selection.end;
+    RECT r = client_rect(hwnd, character_rect(d, advance_utf16(d.text, start, query->dwCharPos)));
+    POINT top{r.left, r.top};
+    ClientToScreen(hwnd, &top);
+    query->pt = top;
+    query->cLineHeight = static_cast<UINT>(r.bottom - r.top);
+    RECT document{};
+    GetClientRect(hwnd, &document);
+    MapWindowPoints(hwnd, nullptr, reinterpret_cast<POINT *>(&document), 2);
+    query->rcDocument = document;
+    return TRUE;
+}
+
+/* Editing key bindings, following the Windows edit control. */
+static bool key_command(unsigned vk, gr_text_command_event &out)
+{
+    auto down = [](int key) { return (GetKeyState(key) & 0x8000) != 0; };
+    bool shift = down(VK_SHIFT), control = down(VK_CONTROL);
+    if (down(VK_MENU) || down(VK_LWIN) || down(VK_RWIN))
+        return false;
+    gr_text_command command;
+    bool extend = false;
+    switch (vk)
+    {
+        case VK_BACK:
+            command = control ? GR_TEXT_COMMAND_DELETE_WORD_BACKWARD : GR_TEXT_COMMAND_DELETE_BACKWARD;
+            break;
+        case VK_DELETE:
+            if (shift && !control)
+                return false; /* Cut. */
+            command = control ? GR_TEXT_COMMAND_DELETE_WORD_FORWARD : GR_TEXT_COMMAND_DELETE_FORWARD;
+            break;
+        case VK_LEFT:
+            command = control ? GR_TEXT_COMMAND_MOVE_WORD_LEFT : GR_TEXT_COMMAND_MOVE_LEFT;
+            extend = shift;
+            break;
+        case VK_RIGHT:
+            command = control ? GR_TEXT_COMMAND_MOVE_WORD_RIGHT : GR_TEXT_COMMAND_MOVE_RIGHT;
+            extend = shift;
+            break;
+        case VK_UP:
+            command = GR_TEXT_COMMAND_MOVE_UP;
+            extend = shift;
+            break;
+        case VK_DOWN:
+            command = GR_TEXT_COMMAND_MOVE_DOWN;
+            extend = shift;
+            break;
+        case VK_HOME:
+            command = control ? GR_TEXT_COMMAND_MOVE_DOCUMENT_START : GR_TEXT_COMMAND_MOVE_LINE_START;
+            extend = shift;
+            break;
+        case VK_END:
+            command = control ? GR_TEXT_COMMAND_MOVE_DOCUMENT_END : GR_TEXT_COMMAND_MOVE_LINE_END;
+            extend = shift;
+            break;
+        case VK_PRIOR:
+            command = GR_TEXT_COMMAND_MOVE_PAGE_UP;
+            extend = shift;
+            break;
+        case VK_NEXT:
+            command = GR_TEXT_COMMAND_MOVE_PAGE_DOWN;
+            extend = shift;
+            break;
+        case VK_RETURN:
+            if (control)
+                return false;
+            command = GR_TEXT_COMMAND_INSERT_NEWLINE;
+            break;
+        case VK_TAB:
+            if (control)
+                return false;
+            command = shift ? GR_TEXT_COMMAND_INSERT_BACKTAB : GR_TEXT_COMMAND_INSERT_TAB;
+            break;
+        case VK_ESCAPE:
+            if (shift || control)
+                return false;
+            command = GR_TEXT_COMMAND_CANCEL;
+            break;
+        case 'A':
+            if (!control || shift)
+                return false;
+            command = GR_TEXT_COMMAND_SELECT_ALL;
+            break;
+        default:
+            return false;
+    }
+    out = {command, extend};
+    return true;
+}
+
+/* Removes the characters TranslateMessage queued for a key the host consumed. */
+static void drop_characters(HWND hwnd)
+{
+    MSG m{};
+    while (PeekMessageW(&m, hwnd, WM_CHAR, WM_DEADCHAR, PM_REMOVE) ||
+           PeekMessageW(&m, hwnd, WM_SYSCHAR, WM_SYSDEADCHAR, PM_REMOVE))
+    {
+    }
+}
+
+void set_window_text_input(HWND hwnd, gr_text_input const *input)
+{
+    auto data = window_data(hwnd);
+    if (!data)
+        return;
+    WindowData &d = *data;
+    bool restart = input && (!d.text_on || input->kind != d.text_input.kind);
+    bool recompose = input && d.text_on &&
+                     (input->composition.start != d.text_input.composition.start ||
+                      input->composition.end != d.text_input.composition.end);
+    if ((composing(d) && !input) || recompose)
+        cancel_composition(hwnd, d);
+    store_text_input(d, input);
+    if (!input || restart)
+        ImmAssociateContextEx(hwnd, nullptr, input && input->kind != GR_TEXT_INPUT_PASSWORD ? IACE_DEFAULT : 0);
+    if (input)
+        place_input_method(hwnd, d);
+}
+
+static bool key(HWND hwnd, WindowData &d, UINT message, WPARAM wp, LPARAM lp)
 {
     bool down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
     auto vk = static_cast<unsigned>(wp);
@@ -202,8 +560,28 @@ static bool key(WindowData &d, UINT message, WPARAM wp, LPARAM lp)
     e.value.key.key = named;
     e.value.key.character = character;
     e.value.key.repeat = down && (lp & (1 << 30)) != 0;
+    /* VK_PROCESSKEY marks keys an input method took before the window saw them. */
+    bool held = composing(d) || vk == VK_PROCESSKEY;
+    e.value.key.composing = held;
     e.value.key.native_code = scan;
-    return dispatch(&d, e);
+    if (dispatch(&d, e) && !held)
+    {
+        drop_characters(hwnd);
+        return true;
+    }
+    /* Keys the handler leaves type text (through WM_CHAR) or edit it. */
+    gr_text_command_event command{};
+    if (!down || held || !d.text_on || !key_command(vk, command))
+        return false;
+    gr_event c{};
+    c.type = GR_EVENT_TEXT_COMMAND;
+    c.time = e.time;
+    c.modifiers = e.modifiers;
+    c.value.command = command;
+    if (!dispatch(&d, c))
+        return false;
+    drop_characters(hwnd);
+    return true;
 }
 
 /* Handles an input message of an interactive host; returns false to leave it to DefWindowProc. */
@@ -278,7 +656,35 @@ static bool input(HWND hwnd, WindowData &d, UINT message, WPARAM wp, LPARAM lp, 
         case WM_SYSKEYDOWN:
         case WM_KEYUP:
         case WM_SYSKEYUP:
-            return key(d, message, wp, lp);
+            return key(hwnd, d, message, wp, lp);
+        case WM_CHAR:
+            return text_char(d, wp);
+        case WM_IME_SETCONTEXT:
+            /* The host draws compositions inline; the input method keeps its candidate window. */
+            result = DefWindowProcW(hwnd, message, wp, d.text_on ? lp & ~ISC_SHOWUICOMPOSITIONWINDOW : lp);
+            return true;
+        case WM_IME_STARTCOMPOSITION:
+            if (!d.text_on)
+                return false;
+            place_input_method(hwnd, d);
+            return true;
+        case WM_IME_COMPOSITION:
+            if (!d.text_on)
+                return false;
+            ime_composition(hwnd, d, lp);
+            return true;
+        case WM_IME_ENDCOMPOSITION:
+            if (!d.text_on)
+                return false;
+            ime_end(d);
+            return true;
+        case WM_IME_CHAR:
+            return d.text_on; /* Results arrive with WM_IME_COMPOSITION. */
+        case WM_IME_REQUEST:
+            if (wp != IMR_QUERYCHARPOSITION)
+                return false;
+            result = query_char_position(hwnd, d, reinterpret_cast<IMECHARPOSITION *>(lp));
+            return true;
         case WM_SETCURSOR:
             if (LOWORD(lp) != HTCLIENT)
                 return false;
@@ -293,7 +699,10 @@ static bool input(HWND hwnd, WindowData &d, UINT message, WPARAM wp, LPARAM lp, 
 static bool is_input(UINT message)
 {
     return (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) || message == WM_MOUSELEAVE ||
-           message == WM_CAPTURECHANGED || message == WM_SETCURSOR || (message >= WM_KEYFIRST && message <= WM_KEYLAST);
+           message == WM_CAPTURECHANGED || message == WM_SETCURSOR ||
+           (message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+           (message >= WM_IME_STARTCOMPOSITION && message <= WM_IME_COMPOSITION) || message == WM_IME_SETCONTEXT ||
+           message == WM_IME_CHAR || message == WM_IME_REQUEST;
 }
 
 void set_window_cursor(HWND hwnd, gr_cursor cursor)
@@ -314,8 +723,13 @@ void set_window_cursor(HWND hwnd, gr_cursor cursor)
 
 void set_window_host(HWND hwnd, gr_scene_host *host)
 {
-    if (auto data = window_data(hwnd))
-        data->host = host;
+    auto data = window_data(hwnd);
+    if (!data)
+        return;
+    set_window_text_input(hwnd, nullptr);
+    data->host = host;
+    /* Input methods engage once a text field turns text input on. */
+    ImmAssociateContextEx(hwnd, nullptr, 0);
 }
 
 void report_viewport(HWND hwnd)

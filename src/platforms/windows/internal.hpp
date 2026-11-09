@@ -103,6 +103,8 @@ HWND create_window(gr_scene *scene, bool track_dpi, DWORD ex, DWORD style, int x
 void set_window_host(HWND hwnd, gr_scene_host *host);
 /* Sets the cursor shown over a host window. */
 void set_window_cursor(HWND hwnd, gr_cursor cursor);
+/* Shares the application's text input state with a host window's input method (nullptr turns it off). */
+void set_window_text_input(HWND hwnd, gr_text_input const *input);
 /* Physical key of a scan code, with 0xE000 set for E0-prefixed keys. */
 gr_key_code key_code(unsigned scan);
 /* Named key of a virtual key, or GR_KEY_UNKNOWN for keys that type text. */

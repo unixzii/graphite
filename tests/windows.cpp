@@ -7,6 +7,9 @@
 
 #include <windows.h>
 #include <chrono>
+#include <cmath>
+#include <imm.h>
+#include <string>
 #include <thread>
 #include <vector>
 #include <winrt/Windows.Foundation.h>
@@ -399,6 +402,174 @@ static void window_input()
     pump();
 }
 
+/* A minimal text field model: applies edits, records commands, consumes the Q key and shares its state. */
+struct Field
+{
+    gr_scene_host *host = nullptr;
+    std::string text;
+    gr_text_range selection{}, composition{};
+    gr_text_input_kind kind = GR_TEXT_INPUT_TEXT;
+    std::vector<gr_text_command_event> commands;
+
+    void share()
+    {
+        gr_text_input input{};
+        input.kind = kind;
+        input.text = {text.data(), text.size()};
+        input.selection = selection;
+        input.composition = composition;
+        input.caret = {{10, 20}, {1, 16}};
+        OK(gr_scene_host_set_text_input(host, &input));
+    }
+
+    bool is(char const *value, size_t caret) const
+    {
+        return text == value && selection.start == caret && selection.end == caret;
+    }
+};
+
+static bool on_field_event(void *userdata, gr_event const *event)
+{
+    auto &f = *static_cast<Field *>(userdata);
+    switch (event->type)
+    {
+        case GR_EVENT_TEXT_EDIT:
+        {
+            auto const &e = event->value.edit;
+            CHECK(e.replace.end <= f.text.size());
+            f.text.replace(e.replace.start, e.replace.end - e.replace.start, e.text.data ? e.text.data : "",
+                           e.text.count);
+            f.selection = e.selection;
+            f.composition = e.composition;
+            f.share();
+            return true;
+        }
+        case GR_EVENT_TEXT_COMMAND:
+            f.commands.push_back(event->value.command);
+            return true;
+        case GR_EVENT_KEY_DOWN:
+            return event->value.key.character == 'q';
+        default:
+            return false;
+    }
+}
+
+static bool has_input_context(HWND hwnd)
+{
+    HIMC imc = ImmGetContext(hwnd);
+    if (imc)
+        ImmReleaseContext(hwnd, imc);
+    return imc != nullptr;
+}
+
+static void set_control(bool down)
+{
+    BYTE keys[256]{};
+    CHECK(GetKeyboardState(keys));
+    keys[VK_CONTROL] = down ? 0x80 : 0;
+    CHECK(SetKeyboardState(keys));
+}
+
+static void window_text_input()
+{
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"GraphiteCTextInputTest";
+    RegisterClassW(&wc);
+    HWND parent = CreateWindowExW(0, wc.lpszClassName, L"graphite text input test", WS_POPUP | WS_VISIBLE, 40, 40, 300,
+                                  200, nullptr, nullptr, wc.hInstance, nullptr);
+    CHECK(parent);
+    auto scene = gr_scene_new({120, 80});
+    auto host = gr_windows_attach_to_hwnd(scene, parent);
+    HWND child = static_cast<HWND>(gr_windows_host_get_hwnd(host));
+    double scale = GetDpiForWindow(child) / 96.0;
+    Field f;
+    f.host = host;
+    gr_event_handler handler{&f, on_field_event, nullptr};
+    OK(gr_scene_host_set_event_handler(host, &handler));
+    SetFocus(child);
+    pump();
+
+    /* Input methods and typing engage only while a field shares its state. */
+    CHECK(!has_input_context(child));
+    SendMessageW(child, WM_CHAR, 'z', 0);
+    CHECK(f.text.empty());
+    f.share();
+    HIMC imc = ImmGetContext(child);
+    CHECK(imc);
+    CANDIDATEFORM candidate{};
+    CHECK(ImmGetCandidateWindow(imc, 0, &candidate) && candidate.dwStyle == CFS_EXCLUDE);
+    CHECK(candidate.rcArea.left == static_cast<LONG>(std::floor(10 * scale)) &&
+          candidate.rcArea.top == static_cast<LONG>(std::floor(20 * scale)) &&
+          candidate.rcArea.bottom == static_cast<LONG>(std::ceil(36 * scale)));
+    ImmReleaseContext(child, imc);
+
+    /* Characters type text, surrogate pairs included; control characters do not. */
+    SendMessageW(child, WM_CHAR, 'a', 0);
+    SendMessageW(child, WM_CHAR, 'b', 0);
+    SendMessageW(child, WM_CHAR, 0xD83D, 0);
+    SendMessageW(child, WM_CHAR, 0xDE00, 0);
+    SendMessageW(child, WM_CHAR, 0x08, 0);
+    CHECK(f.is("ab\xF0\x9F\x98\x80", 6));
+
+    /* A key the handler consumes drops the characters it queued; others type them. */
+    PostMessageW(child, WM_CHAR, 'q', 0);
+    SendMessageW(child, WM_KEYDOWN, 'Q', key_lparam(0x10, false, false, false));
+    pump();
+    CHECK(f.is("ab\xF0\x9F\x98\x80", 6));
+    PostMessageW(child, WM_CHAR, 'x', 0);
+    SendMessageW(child, WM_KEYDOWN, 'X', key_lparam(0x2D, false, false, false));
+    pump();
+    CHECK(f.is("ab\xF0\x9F\x98\x80x", 7));
+
+    /* Editing keys become commands, following the edit control's bindings. */
+    SendMessageW(child, WM_KEYDOWN, VK_BACK, key_lparam(0x0E, false, false, false));
+    set_control(true);
+    SendMessageW(child, WM_KEYDOWN, VK_LEFT, key_lparam(0x4B, true, false, false));
+    SendMessageW(child, WM_KEYDOWN, 'A', key_lparam(0x1E, false, false, false));
+    set_control(false);
+    SendMessageW(child, WM_KEYDOWN, VK_ESCAPE, key_lparam(0x01, false, false, false));
+    CHECK(f.commands.size() == 4);
+    CHECK(f.commands[0].command == GR_TEXT_COMMAND_DELETE_BACKWARD &&
+          f.commands[1].command == GR_TEXT_COMMAND_MOVE_WORD_LEFT &&
+          f.commands[2].command == GR_TEXT_COMMAND_SELECT_ALL && f.commands[3].command == GR_TEXT_COMMAND_CANCEL);
+
+    /* Input methods find characters on screen; without a layout every character is at the shared caret. */
+    IMECHARPOSITION position{sizeof(position)};
+    CHECK(SendMessageW(child, WM_IME_REQUEST, IMR_QUERYCHARPOSITION, reinterpret_cast<LPARAM>(&position)) == TRUE);
+    POINT caret{static_cast<LONG>(std::floor(10 * scale)), static_cast<LONG>(std::floor(20 * scale))};
+    ClientToScreen(child, &caret);
+    CHECK(position.pt.x == caret.x && position.pt.y == caret.y && position.cLineHeight > 0);
+
+    /* The input method's own composition window stays hidden; a cancel without a composition changes nothing. */
+    CHECK(SendMessageW(child, WM_IME_STARTCOMPOSITION, 0, 0) == 0);
+    SendMessageW(child, WM_IME_COMPOSITION, 0, 0);
+    SendMessageW(child, WM_IME_ENDCOMPOSITION, 0, 0);
+    CHECK(f.is("ab\xF0\x9F\x98\x80x", 7));
+
+    /* Passwords take typing but no input method. */
+    f.kind = GR_TEXT_INPUT_PASSWORD;
+    f.share();
+    CHECK(!has_input_context(child));
+    SendMessageW(child, WM_CHAR, 'p', 0);
+    CHECK(f.is("ab\xF0\x9F\x98\x80xp", 8));
+    f.kind = GR_TEXT_INPUT_TEXT;
+    f.share();
+    CHECK(has_input_context(child));
+
+    OK(gr_scene_host_set_text_input(host, nullptr));
+    CHECK(!has_input_context(child));
+    SendMessageW(child, WM_CHAR, 'z', 0);
+    CHECK(f.text.size() == 8);
+
+    gr_scene_host_unref(host);
+    gr_scene_unref(scene);
+    DestroyWindow(parent);
+    pump();
+}
+
 static void invalid_arguments()
 {
     gr_windows_pixels p{};
@@ -420,8 +591,9 @@ static void invalid_arguments()
 
 int main(int argc, char **argv)
 {
-    const gr_test_case cases[] = {GR_TEST_CASE(window_hosting), GR_TEST_CASE(offscreen_alpha_and_lifetime),
-                                  GR_TEST_CASE(visual_hosting), GR_TEST_CASE(invalid_arguments),
-                                  GR_TEST_CASE(window_events),  GR_TEST_CASE(window_input)};
+    const gr_test_case cases[] = {GR_TEST_CASE(window_hosting),   GR_TEST_CASE(offscreen_alpha_and_lifetime),
+                                  GR_TEST_CASE(visual_hosting),   GR_TEST_CASE(invalid_arguments),
+                                  GR_TEST_CASE(window_events),    GR_TEST_CASE(window_input),
+                                  GR_TEST_CASE(window_text_input)};
     return gr_test_run("windows", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
 }

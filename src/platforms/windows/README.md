@@ -62,8 +62,23 @@ and diagnostic text consistent across platforms. C++ compilation uses `/W4 /WX`.
   `MapVirtualKey` gives the unmodified text. Click counts follow the system
   double-click time and rectangle. Presses take focus. Cursors are set from
   `WM_SETCURSOR`. Each input message holds a host reference, so a handler that
-  releases the host cannot destroy the window mid-message. Text input requests
-  are accepted but not applied yet.
+  releases the host cannot destroy the window mid-message.
+- Text input uses IMM32 (TSF input methods reach it through the system's
+  compatibility layer). Host windows have no input context until a field turns
+  text input on, and none for passwords. The window keeps a copy of the shared
+  state: `WM_CHAR` types text (surrogate pairs joined, control characters left
+  to the editing keys), `WM_IME_COMPOSITION` results and composition strings
+  become `GR_EVENT_TEXT_EDIT` events applied to the copy first (the cursor
+  position as the caret, a clause being converted as the selection), and a
+  cancel removes the composition. `WM_IME_SETCONTEXT` hides the input method's
+  composition window, since the host draws compositions inline; the candidate
+  window is placed by the caret from the shared layout, and
+  `IMR_QUERYCHARPOSITION` answers from it too. Key downs the handler leaves map
+  the edit control's editing bindings to `GR_EVENT_TEXT_COMMAND`; a key the host
+  consumes drops the characters `TranslateMessage` queued for it. Keys an input
+  method takes arrive as `VK_PROCESSKEY`, reported as composing. When the
+  application ends a composition, the window cancels the input method's with
+  `ImmNotifyIME` and ignores what that sends.
 - A per-thread context shares compositor/devices and remains alive for process
   teardown. dcomp.dll is pinned to avoid releases jumping into an unloaded DLL,
   to protect shutdown releases. This is an intentional

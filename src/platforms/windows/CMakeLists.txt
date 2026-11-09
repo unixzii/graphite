@@ -4,7 +4,7 @@ add_library(graphite::windows ALIAS graphite_windows)
 target_compile_features(graphite_windows PRIVATE cxx_std_20)
 target_compile_definitions(graphite_windows PRIVATE GRAPHITE_WINDOWS_BUILDING NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(graphite_windows PUBLIC graphite windowsapp d2d1 d3d11 dxgi dcomp dwrite icu CoreMessaging user32
-    gdi32 dwmapi)
+    gdi32 dwmapi imm32)
 if(MSVC)
     target_compile_options(graphite_windows PRIVATE /W4 /WX /permissive- /EHsc)
 endif()

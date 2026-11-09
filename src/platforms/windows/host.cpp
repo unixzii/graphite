@@ -67,9 +67,9 @@ static void set_cursor(void *data, gr_cursor cursor)
     set_window_cursor(static_cast<gr_windows_host *>(data)->hwnd, cursor);
 }
 
-/* Text input is accepted but not applied yet. */
-static void set_text_input(void *, gr_text_input const *)
+static void set_text_input(void *data, gr_text_input const *input)
 {
+    set_window_text_input(static_cast<gr_windows_host *>(data)->hwnd, input);
 }
 
 static void request_focus(void *data)
