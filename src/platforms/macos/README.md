@@ -15,7 +15,10 @@ counts.
 Drawn content uses a CALayerDelegate. Core Animation requests display, the
 delegate invokes the drawer provider with its display version and the native
 bounds/scale, and the DisplayList is replayed into the supplied CGContext then
-released. No per-layer DisplayList is retained. Frame commits are scheduled on
+released. No per-layer DisplayList is retained. Display runs when the outermost
+transaction commits, which can be one AppKit opened around the commit, so the
+delegate refuses every action and new contents replace the old without a
+crossfade. Frame commits are scheduled on
 the owning run loop before Core Animation's own commit observer.
 
 Scene teardown explicitly cancels the pending observer, clears delegates and

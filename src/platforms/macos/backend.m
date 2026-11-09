@@ -27,6 +27,15 @@ __attribute__((objc_direct_members))
     gr_drawer_provider_unref(_provider);
 }
 
+/* Display runs when the outermost transaction commits. When AppKit has one open around the commit (while handling
+ * input, say), that is after the commit's own transaction with actions disabled, so new contents would crossfade. */
+- (id<CAAction>)actionForLayer:(CALayer *)layer forKey:(NSString *)event
+{
+    (void)layer;
+    (void)event;
+    return (id<CAAction>)NSNull.null;
+}
+
 - (void)drawLayer:(CALayer *)layer inContext:(CGContextRef)context
 {
     gr_draw_info info = {gr_from_cg_rect(layer.bounds), layer.contentsScale};

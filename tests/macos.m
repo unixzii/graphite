@@ -135,6 +135,62 @@ static void view_hosting(void)
     }
 }
 
+static void draw_square(void *userdata, gr_canvas *canvas, const gr_draw_info *info)
+{
+    (void)info;
+    const int *shade = userdata;
+    gr_paint *paint = gr_paint_new(&(gr_paint_desc){.kind = GR_PAINT_SOLID, .value.solid = {*shade / 4.0f, 0, 0, 1}});
+    OK(gr_canvas_fill_rect(canvas, (gr_rect){{0, 0}, {20, 20}}, paint));
+    gr_paint_unref(paint);
+}
+
+/* Redrawn content replaces its contents at once, without Core Animation's implicit crossfade, also when the commit
+ * is nested in a transaction AppKit opened (while handling input, say), so that drawing waits for the outer one. */
+static void redrawn_content(void)
+{
+    @autoreleasepool
+    {
+        [NSApplication sharedApplication];
+        NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(100, 100, 200, 100)
+                                                       styleMask:NSWindowStyleMaskTitled
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        window.releasedWhenClosed = NO;
+        gr_scene *scene = gr_scene_new((gr_size){200, 100});
+        gr_layer *content = gr_layer_new(scene, GR_LAYER_CONTENT);
+        int shade = 1;
+        OK(gr_layer_set_frame(content, (gr_rect){{0, 0}, {20, 20}}));
+        OK(gr_content_layer_set_drawer(content, &(gr_drawer){&shade, draw_square, NULL}));
+        OK(gr_layer_add_child(gr_scene_get_root(scene), content));
+        gr_scene_host *h = gr_macos_attach_to_view(scene, (__bridge void *)window.contentView);
+        [window orderFrontRegardless];
+        OK(gr_scene_commit(scene));
+        spin();
+        CALayer *body = ((__bridge CALayer *)gr_macos_host_get_layer(h)).sublayers[0].sublayers[0];
+        CHECK(body.contents);
+        for (shade = 2; shade <= 4; ++shade)
+        {
+            id before = body.contents;
+            OK(gr_content_layer_set_needs_display(content));
+            if (shade == 3)
+                [CATransaction begin];
+            else if (shade == 4)
+                window.contentView.layer.opacity = 1; /* Opens an implicit transaction. */
+            OK(gr_scene_commit(scene));
+            if (shade == 3)
+                [CATransaction commit];
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+            CHECK(body.contents != before);
+            CHECK(![body animationForKey:@"contents"]);
+        }
+        gr_layer_unref(content);
+        gr_scene_host_unref(h);
+        gr_scene_unref(scene);
+        spin();
+        [window close];
+    }
+}
+
 static void graphite_offscreen(void)
 {
     @autoreleasepool
@@ -696,10 +752,11 @@ int main(int argc, char **argv)
 {
     @autoreleasepool
     {
-        const gr_test_case cases[] = {
-            GR_TEST_CASE(invalid_arguments), GR_TEST_CASE(rows_are_top_down),  GR_TEST_CASE(scaled_rendering),
-            GR_TEST_CASE(view_hosting),      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
-            GR_TEST_CASE(view_events),       GR_TEST_CASE(view_input),         GR_TEST_CASE(view_text_input)};
+        const gr_test_case cases[] = {GR_TEST_CASE(invalid_arguments),  GR_TEST_CASE(rows_are_top_down),
+                                      GR_TEST_CASE(scaled_rendering),   GR_TEST_CASE(view_hosting),
+                                      GR_TEST_CASE(graphite_offscreen), GR_TEST_CASE(expired_scene),
+                                      GR_TEST_CASE(view_events),        GR_TEST_CASE(view_input),
+                                      GR_TEST_CASE(view_text_input),    GR_TEST_CASE(redrawn_content)};
         return gr_test_run("macos", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
     }
 }
