@@ -57,6 +57,10 @@ void gr_gtk_widget_request(GtkWidget *widget);
 void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host);
 void gr_gtk_widget_request_frame(GtkWidget *widget);
 void gr_gtk_widget_set_cursor(GtkWidget *widget, gr_cursor cursor);
+/* Shares the application's text input state with the widget's input method (NULL turns it off). */
+void gr_gtk_widget_set_text_input(GtkWidget *widget, const gr_text_input *input);
+/* Replaces the widget's input method context (a GtkIMMulticontext), for tests. */
+void gr_gtk_widget_set_im_context(GtkWidget *widget, GtkIMContext *im);
 /* Physical key of an X11/Wayland keycode (evdev code + 8). */
 gr_key_code gr_gtk_key_code(guint keycode);
 /* Named key of a keyval, or GR_KEY_UNKNOWN for keys that type text. */

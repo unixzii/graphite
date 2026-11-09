@@ -36,7 +36,21 @@ No additional container dependency is introduced: GTK already supplies GLib.
   state is adjusted to after the event (GDK reports it before). `keys.c` maps
   evdev codes (keycode − 8) and keyvals. Presses grab focus; unconsumed events
   propagate. Cursors use CSS cursor names. Touchscreen events are not
-  reported yet, and text input requests are accepted but not applied yet.
+  reported yet.
+
+  Text input goes through a `GtkIMMulticontext`. While it is on, the widget
+  keeps a copy of the shared state, focuses the context while it has focus, and
+  sets its cursor location from the shared layout (the composition's start
+  while composing). Key events the handler leaves go to
+  `gtk_im_context_filter_keypress`, then to a table of GtkText's editing
+  bindings that produce `GR_EVENT_TEXT_COMMAND`. `commit` and `preedit-changed`
+  become `GR_EVENT_TEXT_EDIT` events applied to the copy first;
+  `retrieve-surrounding` and `delete-surrounding` see the text without the
+  composition, which the input method holds itself (and nothing for passwords).
+  When the application ends or replaces a composition, the context is reset and
+  whatever the reset emits is ignored. Under GNOME on Wayland (text-input-v3),
+  the compositor routes keys to the input method before the application, so
+  compositions start without a `GR_EVENT_KEY_DOWN`.
 - `text.c`: the Pango text system (`gr_gtk_text_system_new`); `draw.c` replays
   its layouts with `gtk_snapshot_append_layout`. See the
   [backend notes](../../../docs/backends/gtk.md#text).

@@ -1,3 +1,4 @@
+#include "internal.h"
 #include "test.h"
 
 #include <graphite/backend.h>
@@ -291,6 +292,211 @@ static void widget_events(void)
     iterate();
 }
 
+/* An input method context driven by the test: a set preedit string, and records of what the widget asks of it. */
+typedef struct
+{
+    GtkIMContext parent_instance;
+    char *preedit;
+    int cursor, resets, focus_ins, focus_outs;
+    GdkRectangle area;
+} TestIM;
+
+typedef struct
+{
+    GtkIMContextClass parent_class;
+} TestIMClass;
+G_DEFINE_TYPE(TestIM, test_im, GTK_TYPE_IM_CONTEXT)
+
+static void test_im_preedit(GtkIMContext *context, char **text, PangoAttrList **attrs, int *cursor)
+{
+    TestIM *im = (TestIM *)context;
+    if (text)
+        *text = g_strdup(im->preedit ? im->preedit : "");
+    if (attrs)
+        *attrs = pango_attr_list_new();
+    if (cursor)
+        *cursor = im->cursor;
+}
+
+/* Some input methods commit their composition when reset. */
+static void test_im_reset(GtkIMContext *context)
+{
+    ++((TestIM *)context)->resets;
+    g_signal_emit_by_name(context, "commit", "x");
+}
+
+static void test_im_focus_in(GtkIMContext *context)
+{
+    ++((TestIM *)context)->focus_ins;
+}
+
+static void test_im_focus_out(GtkIMContext *context)
+{
+    ++((TestIM *)context)->focus_outs;
+}
+
+static void test_im_cursor_location(GtkIMContext *context, GdkRectangle *area)
+{
+    ((TestIM *)context)->area = *area;
+}
+
+static void test_im_finalize(GObject *object)
+{
+    g_free(((TestIM *)object)->preedit);
+    G_OBJECT_CLASS(test_im_parent_class)->finalize(object);
+}
+
+static void test_im_class_init(TestIMClass *klass)
+{
+    GtkIMContextClass *im = GTK_IM_CONTEXT_CLASS(klass);
+    im->get_preedit_string = test_im_preedit;
+    im->reset = test_im_reset;
+    im->focus_in = test_im_focus_in;
+    im->focus_out = test_im_focus_out;
+    im->set_cursor_location = test_im_cursor_location;
+    G_OBJECT_CLASS(klass)->finalize = test_im_finalize;
+}
+
+static void test_im_init(TestIM *im)
+{
+    (void)im;
+}
+
+static void set_preedit(TestIM *im, const char *text, int cursor)
+{
+    g_free(im->preedit);
+    im->preedit = g_strdup(text);
+    im->cursor = cursor;
+    g_signal_emit_by_name(im, "preedit-changed");
+}
+
+/* A minimal text field model: applies edits, records commands and shares its state. */
+typedef struct
+{
+    gr_scene_host *host;
+    char text[64];
+    size_t length;
+    gr_text_range selection, composition;
+    gr_text_input_kind kind;
+    unsigned edits;
+} field;
+
+static void share(field *f)
+{
+    gr_text_input input = {.kind = f->kind,
+                           .text = {f->text, f->length},
+                           .selection = f->selection,
+                           .composition = f->composition,
+                           .caret = {{10, 20}, {1, 16}}};
+    OK(gr_scene_host_set_text_input(f->host, &input));
+}
+
+static bool on_field_event(void *userdata, const gr_event *event)
+{
+    field *f = userdata;
+    if (event->type != GR_EVENT_TEXT_EDIT)
+        return false;
+    const gr_text_edit_event *e = &event->value.edit;
+    size_t removed = e->replace.end - e->replace.start;
+    CHECK(e->replace.end <= f->length && f->length - removed + e->text.count < sizeof(f->text));
+    memmove(f->text + e->replace.start + e->text.count, f->text + e->replace.end, f->length - e->replace.end);
+    memcpy(f->text + e->replace.start, e->text.data, e->text.count);
+    f->length = f->length - removed + e->text.count;
+    f->selection = e->selection;
+    f->composition = e->composition;
+    ++f->edits;
+    share(f);
+    return true;
+}
+
+static bool field_is(const field *f, const char *text, size_t caret)
+{
+    return f->length == strlen(text) && memcmp(f->text, text, f->length) == 0 && f->selection.start == caret &&
+           f->selection.end == caret;
+}
+
+static void widget_text_input(void)
+{
+    gr_scene *scene = gr_scene_new((gr_size){120, 80});
+    gr_scene_host *host = gr_gtk_attach(scene);
+    GtkWidget *widget = gr_gtk_host_get_widget(host), *window = gtk_window_new();
+    g_object_ref_sink(window);
+    gtk_window_set_child(GTK_WINDOW(window), widget);
+    gtk_window_present(GTK_WINDOW(window));
+    wait_clean(scene, widget);
+    OK(gr_scene_host_request_focus(host));
+    iterate();
+    int focused = gtk_window_is_active(GTK_WINDOW(window)) ? 1 : 0;
+    TestIM *im = g_object_new(test_im_get_type(), NULL);
+    gr_gtk_widget_set_im_context(widget, GTK_IM_CONTEXT(im));
+    field f = {.host = host};
+    gr_event_handler handler = {&f, on_field_event, NULL};
+    OK(gr_scene_host_set_event_handler(host, &handler));
+
+    /* Text input is off until a field shares its state. */
+    g_signal_emit_by_name(im, "commit", "zz");
+    CHECK(f.edits == 0 && im->focus_ins == 0);
+    share(&f);
+    CHECK(im->focus_ins == focused);
+    CHECK(im->area.x == 10 && im->area.y == 20 && im->area.width == 1 && im->area.height == 16);
+
+    /* Committed text replaces the selection; a composition replaces itself. */
+    g_signal_emit_by_name(im, "commit", "ab");
+    CHECK(field_is(&f, "ab", 2));
+    set_preedit(im, "ni", 2);
+    CHECK(field_is(&f, "abni", 4) && f.composition.start == 2 && f.composition.end == 4);
+    set_preedit(im, "\xE4\xBD\xA0\xE5\xA5\xBD", 1); /* 你好 with the cursor after 你. */
+    CHECK(field_is(&f, "ab\xE4\xBD\xA0\xE5\xA5\xBD", 5) && f.composition.start == 2 && f.composition.end == 8);
+
+    /* Input methods read the text around the caret without the composition. */
+    char *surrounding = NULL;
+    int cursor = -1, anchor = -1;
+    CHECK(gtk_im_context_get_surrounding_with_selection(GTK_IM_CONTEXT(im), &surrounding, &cursor, &anchor));
+    CHECK(strcmp(surrounding, "ab") == 0 && cursor == 2 && anchor == 2);
+    g_free(surrounding);
+
+    /* Ending the preedit removes it, and the commit that follows inserts the result. */
+    set_preedit(im, "", 0);
+    CHECK(field_is(&f, "ab", 2) && f.composition.start == f.composition.end);
+    g_signal_emit_by_name(im, "commit", "\xE4\xBD\xA0\xE5\xA5\xBD");
+    CHECK(field_is(&f, "ab\xE4\xBD\xA0\xE5\xA5\xBD", 8) && im->resets == 0);
+
+    /* Deleting around the caret counts characters. */
+    gboolean deleted = FALSE;
+    g_signal_emit_by_name(im, "delete-surrounding", -1, 1, &deleted);
+    CHECK(deleted && field_is(&f, "ab\xE4\xBD\xA0", 5));
+
+    /* The field ending a composition itself resets the input method, ignoring what the reset commits. */
+    set_preedit(im, "w", 1);
+    CHECK(field_is(&f, "ab\xE4\xBD\xA0w", 6));
+    unsigned edits = f.edits;
+    f.composition = (gr_text_range){0, 0};
+    share(&f);
+    CHECK(im->resets == 1 && f.edits == edits && field_is(&f, "ab\xE4\xBD\xA0w", 6));
+
+    /* Password fields hide their text and say so. */
+    f.kind = GR_TEXT_INPUT_PASSWORD;
+    share(&f);
+    GtkInputPurpose purpose;
+    g_object_get(im, "input-purpose", &purpose, NULL);
+    CHECK(purpose == GTK_INPUT_PURPOSE_PASSWORD);
+    CHECK(gtk_im_context_get_surrounding_with_selection(GTK_IM_CONTEXT(im), &surrounding, &cursor, &anchor));
+    CHECK(strcmp(surrounding, "") == 0);
+    g_free(surrounding);
+
+    OK(gr_scene_host_set_text_input(host, NULL));
+    CHECK(im->focus_outs == focused);
+    g_signal_emit_by_name(im, "commit", "zz");
+    CHECK(f.length == 6);
+
+    gr_scene_host_unref(host);
+    gtk_window_destroy(GTK_WINDOW(window));
+    g_object_unref(window);
+    g_object_unref(im);
+    gr_scene_unref(scene);
+    iterate();
+}
+
 typedef struct
 {
     unsigned draws, destroyed;
@@ -407,8 +613,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "GTK needs a graphical session\n");
         return 1;
     }
-    const gr_test_case cases[] = {GR_TEST_CASE(widget_hosting), GR_TEST_CASE(frame_clock_commits),
-                                  GR_TEST_CASE(widget_events), GR_TEST_CASE(offscreen_cache_and_lifetime),
-                                  GR_TEST_CASE(empty_scene)};
+    const gr_test_case cases[] = {
+        GR_TEST_CASE(widget_hosting),    GR_TEST_CASE(frame_clock_commits),          GR_TEST_CASE(widget_events),
+        GR_TEST_CASE(widget_text_input), GR_TEST_CASE(offscreen_cache_and_lifetime), GR_TEST_CASE(empty_scene)};
     return gr_test_run("gtk", cases, sizeof(cases) / sizeof(cases[0]), argc, argv);
 }

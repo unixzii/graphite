@@ -18,6 +18,11 @@ typedef struct
     gr_point click_position;
     guint64 keys_down[4]; /* Bitset of pressed keycodes, to recognize auto-repeat. */
     gr_point pointer;     /* Last known pointer position; Wayland scroll events carry none. */
+    /* Text input: the shared state with this widget's edits applied; text is owned, layout referenced. */
+    GtkIMContext *im;
+    bool text_on, im_focused, resetting;
+    gr_text_input text_input;
+    char *text;
 } GrGraphiteWidget;
 
 typedef struct
@@ -43,9 +48,14 @@ static double seconds(gint64 microseconds)
     return (double)microseconds / G_TIME_SPAN_SECOND;
 }
 
+static void clear_text_input(GrGraphiteWidget *w);
+
 void gr_gtk_widget_set_host(GtkWidget *widget, gr_scene_host *host)
 {
-    ((GrGraphiteWidget *)widget)->host = host;
+    GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
+    w->host = host;
+    if (!host)
+        clear_text_input(w);
 }
 
 /* Frames run in the update phase, before the layout phase where the backend commits. */
@@ -85,11 +95,19 @@ static void report_viewport(GrGraphiteWidget *w)
 }
 
 /* The widget has keyboard focus while it is the focus widget of the active window. */
+static bool has_focus(GrGraphiteWidget *w)
+{
+    return gtk_widget_has_focus(GTK_WIDGET(w)) && (!w->window || gtk_window_is_active(w->window));
+}
+
+static void update_im_focus(GrGraphiteWidget *w);
+
 static void update_focus(GrGraphiteWidget *w)
 {
-    bool focused = gtk_widget_has_focus(GTK_WIDGET(w)) && (!w->window || gtk_window_is_active(w->window));
+    bool focused = has_focus(w);
     if (!focused)
         memset(w->keys_down, 0, sizeof(w->keys_down)); /* Releases may go elsewhere. */
+    update_im_focus(w);
     dispatch(w, (gr_event){.type = focused ? GR_EVENT_FOCUS_IN : GR_EVENT_FOCUS_OUT,
                            .time = seconds(g_get_monotonic_time())});
 }
@@ -325,6 +343,358 @@ static gr_modifiers modifiers_after(GrGraphiteWidget *w, gr_modifiers before, gr
     return held ? before | own : before & ~own;
 }
 
+/* Text input. The widget keeps a copy of the shared state (see host.h), answers its GtkIMContext from it and turns
+ * input method signals and key bindings into TEXT_EDIT and TEXT_COMMAND events. */
+
+/* Editing key bindings, following GtkText. */
+static bool key_command(guint keyval, GdkModifierType state, gr_text_command_event *out)
+{
+    state &= GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK | GDK_HYPER_MASK;
+    bool shift = state & GDK_SHIFT_MASK, control = state & GDK_CONTROL_MASK;
+    if (state & ~(GDK_SHIFT_MASK | GDK_CONTROL_MASK))
+        return false;
+    gr_text_command command;
+    bool extend = false;
+    switch (keyval)
+    {
+        case GDK_KEY_BackSpace:
+            command = !control ? GR_TEXT_COMMAND_DELETE_BACKWARD
+                      : shift  ? GR_TEXT_COMMAND_DELETE_TO_LINE_START
+                               : GR_TEXT_COMMAND_DELETE_WORD_BACKWARD;
+            break;
+        case GDK_KEY_Delete:
+        case GDK_KEY_KP_Delete:
+            if (shift && !control)
+                return false; /* Cut. */
+            command = !control ? GR_TEXT_COMMAND_DELETE_FORWARD
+                      : shift  ? GR_TEXT_COMMAND_DELETE_TO_LINE_END
+                               : GR_TEXT_COMMAND_DELETE_WORD_FORWARD;
+            break;
+        case GDK_KEY_Left:
+        case GDK_KEY_KP_Left:
+            command = control ? GR_TEXT_COMMAND_MOVE_WORD_LEFT : GR_TEXT_COMMAND_MOVE_LEFT;
+            extend = shift;
+            break;
+        case GDK_KEY_Right:
+        case GDK_KEY_KP_Right:
+            command = control ? GR_TEXT_COMMAND_MOVE_WORD_RIGHT : GR_TEXT_COMMAND_MOVE_RIGHT;
+            extend = shift;
+            break;
+        case GDK_KEY_Up:
+        case GDK_KEY_KP_Up:
+            command = GR_TEXT_COMMAND_MOVE_UP;
+            extend = shift;
+            break;
+        case GDK_KEY_Down:
+        case GDK_KEY_KP_Down:
+            command = GR_TEXT_COMMAND_MOVE_DOWN;
+            extend = shift;
+            break;
+        case GDK_KEY_Home:
+        case GDK_KEY_KP_Home:
+            command = control ? GR_TEXT_COMMAND_MOVE_DOCUMENT_START : GR_TEXT_COMMAND_MOVE_LINE_START;
+            extend = shift;
+            break;
+        case GDK_KEY_End:
+        case GDK_KEY_KP_End:
+            command = control ? GR_TEXT_COMMAND_MOVE_DOCUMENT_END : GR_TEXT_COMMAND_MOVE_LINE_END;
+            extend = shift;
+            break;
+        case GDK_KEY_Page_Up:
+        case GDK_KEY_KP_Page_Up:
+            command = GR_TEXT_COMMAND_MOVE_PAGE_UP;
+            extend = shift;
+            break;
+        case GDK_KEY_Page_Down:
+        case GDK_KEY_KP_Page_Down:
+            command = GR_TEXT_COMMAND_MOVE_PAGE_DOWN;
+            extend = shift;
+            break;
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+        case GDK_KEY_ISO_Enter:
+            if (control)
+                return false;
+            command = GR_TEXT_COMMAND_INSERT_NEWLINE;
+            break;
+        case GDK_KEY_Tab:
+        case GDK_KEY_KP_Tab:
+        case GDK_KEY_ISO_Left_Tab:
+            if (control)
+                return false;
+            command =
+                shift || keyval == GDK_KEY_ISO_Left_Tab ? GR_TEXT_COMMAND_INSERT_BACKTAB : GR_TEXT_COMMAND_INSERT_TAB;
+            break;
+        case GDK_KEY_Escape:
+            if (state)
+                return false;
+            command = GR_TEXT_COMMAND_CANCEL;
+            break;
+        case GDK_KEY_a:
+        case GDK_KEY_A:
+            if (!control || shift)
+                return false;
+            command = GR_TEXT_COMMAND_SELECT_ALL;
+            break;
+        default:
+            return false;
+    }
+    *out = (gr_text_command_event){command, extend};
+    return true;
+}
+
+static bool composing(const GrGraphiteWidget *w)
+{
+    return w->text_on && w->text_input.composition.start < w->text_input.composition.end;
+}
+
+/* Replaces the stored state with a copy of input, or clears it with NULL. */
+static void store_text_input(GrGraphiteWidget *w, const gr_text_input *input)
+{
+    char *text = input ? g_strndup(input->text.data ? input->text.data : "", input->text.count) : NULL;
+    gr_text_layout *layout = input ? gr_text_layout_ref(input->layout) : NULL;
+    g_free(w->text);
+    gr_text_layout_unref(w->text_input.layout);
+    w->text = text;
+    w->text_on = input != NULL;
+    w->text_input = input ? *input : (gr_text_input){0};
+    w->text_input.text = (gr_string){text, input ? input->text.count : 0};
+    w->text_input.layout = layout;
+}
+
+/* Where a position lands after range is replaced by count bytes. */
+static size_t moved(size_t at, gr_text_range range, size_t count)
+{
+    return at <= range.start ? at : at >= range.end ? at - (range.end - range.start) + count : range.start + count;
+}
+
+/* Applies one of this widget's edits to the stored state, then delivers it. */
+static void text_edit(GrGraphiteWidget *w, gr_text_range replace, const char *text, size_t count,
+                      gr_text_range selection, gr_text_range composition)
+{
+    gr_string old = w->text_input.text;
+    size_t length = old.count - (replace.end - replace.start) + count;
+    char *joined = g_malloc(length + 1);
+    memcpy(joined, old.data, replace.start);
+    if (count)
+        memcpy(joined + replace.start, text, count);
+    memcpy(joined + replace.start + count, old.data + replace.end, old.count - replace.end);
+    joined[length] = 0;
+    g_free(w->text);
+    w->text = joined;
+    w->text_input.text = (gr_string){joined, length};
+    w->text_input.selection = selection;
+    w->text_input.composition = composition;
+    gr_event e = {.type = GR_EVENT_TEXT_EDIT, .time = seconds(g_get_monotonic_time())};
+    e.value.edit = (gr_text_edit_event){replace, {text, count}, selection, composition};
+    dispatch(w, e);
+}
+
+/* What typing replaces: the composition, or else the selection. */
+static gr_text_range typing_target(const GrGraphiteWidget *w)
+{
+    return composing(w) ? w->text_input.composition : w->text_input.selection;
+}
+
+static void im_commit(GtkIMContext *im, const char *text, gpointer userdata)
+{
+    (void)im;
+    GrGraphiteWidget *w = userdata;
+    if (!w->text_on || w->resetting)
+        return;
+    gr_text_range target = typing_target(w);
+    size_t count = strlen(text), end = target.start + count;
+    text_edit(w, target, text, count, (gr_text_range){end, end}, (gr_text_range){end, end});
+}
+
+static void im_preedit_changed(GtkIMContext *im, gpointer userdata)
+{
+    GrGraphiteWidget *w = userdata;
+    if (!w->text_on || w->resetting)
+        return;
+    char *text = NULL;
+    int cursor = 0;
+    gtk_im_context_get_preedit_string(im, &text, NULL, &cursor);
+    size_t count = strlen(text);
+    if (count || composing(w))
+    {
+        gr_text_range target = typing_target(w);
+        size_t at = target.start;
+        size_t caret = at + (size_t)(g_utf8_offset_to_pointer(text, cursor) - text);
+        text_edit(w, target, text, count, (gr_text_range){caret, caret}, (gr_text_range){at, at + count});
+    }
+    g_free(text);
+}
+
+/* Input methods see the text around the caret without the composition, which they hold themselves. */
+static gboolean im_retrieve_surrounding(GtkIMContext *im, gpointer userdata)
+{
+    GrGraphiteWidget *w = userdata;
+    if (!w->text_on)
+        return FALSE;
+    if (w->text_input.kind == GR_TEXT_INPUT_PASSWORD)
+    {
+        gtk_im_context_set_surrounding_with_selection(im, "", 0, 0, 0);
+        return TRUE;
+    }
+    gr_string text = w->text_input.text;
+    gr_text_range composition = w->text_input.composition, selection = w->text_input.selection;
+    size_t cut = composition.end - composition.start;
+    char *surrounding = g_malloc(text.count - cut + 1);
+    memcpy(surrounding, text.data, composition.start);
+    memcpy(surrounding + composition.start, text.data + composition.end, text.count - composition.end);
+    surrounding[text.count - cut] = 0;
+    size_t anchor = cut ? composition.start : selection.start, caret = cut ? composition.start : selection.end;
+    gtk_im_context_set_surrounding_with_selection(im, surrounding, (int)(text.count - cut), (int)caret, (int)anchor);
+    g_free(surrounding);
+    return TRUE;
+}
+
+/* Deletes n_chars characters starting offset characters from the caret, in the text without the composition. */
+static gboolean im_delete_surrounding(GtkIMContext *im, int offset, int n_chars, gpointer userdata)
+{
+    (void)im;
+    GrGraphiteWidget *w = userdata;
+    if (!w->text_on || n_chars < 0)
+        return FALSE;
+    gr_string text = w->text_input.text;
+    gr_text_range composition = w->text_input.composition;
+    size_t caret = composing(w) ? composition.start : w->text_input.selection.end;
+    /* Walk characters in the full text, stepping over the composition. */
+    const char *p = text.data + caret, *start = text.data, *end = text.data + text.count;
+    for (; offset < 0 && p > start; ++offset)
+    {
+        p = g_utf8_prev_char(p);
+        if ((size_t)(p - start) >= composition.start && (size_t)(p - start) < composition.end)
+            p = start + composition.start;
+    }
+    for (; offset > 0 && p < end; --offset)
+    {
+        if ((size_t)(p - start) == composition.start && composition.start < composition.end)
+            p = start + composition.end;
+        p = g_utf8_next_char(p);
+    }
+    gr_text_range range = {(size_t)(p - start), (size_t)(p - start)};
+    for (; n_chars > 0 && p < end; --n_chars)
+        p = g_utf8_next_char(p);
+    range.end = (size_t)(p - start);
+    if (range.start < composition.end && range.end > composition.start)
+        return FALSE; /* Never reaches into the composition. */
+    gr_text_range selection = {moved(w->text_input.selection.start, range, 0),
+                               moved(w->text_input.selection.end, range, 0)};
+    gr_text_range kept = {moved(composition.start, range, 0), moved(composition.end, range, 0)};
+    text_edit(w, range, "", 0, selection, kept);
+    return TRUE;
+}
+
+/* Host-space rectangle of the caret at offset, from the shared layout; without one, the shared caret. */
+static gr_rect caret_rect(const GrGraphiteWidget *w, size_t offset)
+{
+    const gr_text_input *in = &w->text_input;
+    if (!in->layout)
+        return in->caret;
+    gr_rect r;
+    gr_text_layout_get_caret_rect(in->layout, (gr_text_position){offset, GR_TEXT_AFFINITY_DOWNSTREAM}, &r);
+    r.origin.x += in->origin.x;
+    r.origin.y += in->origin.y;
+    return r;
+}
+
+/* Input methods place their windows by the caret, at the start of the composition while there is one. */
+static void update_cursor_location(GrGraphiteWidget *w)
+{
+    gr_rect r = caret_rect(w, composing(w) ? w->text_input.composition.start : w->text_input.selection.end);
+    double x = floor(r.origin.x), y = floor(r.origin.y);
+    GdkRectangle area = {(int)x, (int)y, (int)ceil(r.origin.x + r.size.width - x),
+                         (int)ceil(r.origin.y + r.size.height - y)};
+    gtk_im_context_set_cursor_location(w->im, &area);
+}
+
+static void update_im_focus(GrGraphiteWidget *w)
+{
+    bool focused = w->text_on && w->host && has_focus(w);
+    if (focused == w->im_focused)
+        return;
+    w->im_focused = focused;
+    if (focused)
+        gtk_im_context_focus_in(w->im);
+    else
+        gtk_im_context_focus_out(w->im);
+}
+
+/* Drops the input method's composition without hearing about it. */
+static void reset_im(GrGraphiteWidget *w)
+{
+    w->resetting = true;
+    gtk_im_context_reset(w->im);
+    w->resetting = false;
+}
+
+void gr_gtk_widget_set_text_input(GtkWidget *widget, const gr_text_input *input)
+{
+    GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
+    bool restart = input && (!w->text_on || input->kind != w->text_input.kind);
+    bool recompose = input && w->text_on &&
+                     (input->composition.start != w->text_input.composition.start ||
+                      input->composition.end != w->text_input.composition.end);
+    bool had_composition = composing(w);
+    store_text_input(w, input);
+    if (!input)
+    {
+        if (had_composition)
+            reset_im(w);
+        update_im_focus(w);
+        return;
+    }
+    if (restart)
+    {
+        bool password = input->kind == GR_TEXT_INPUT_PASSWORD;
+        g_object_set(w->im, "input-purpose", password ? GTK_INPUT_PURPOSE_PASSWORD : GTK_INPUT_PURPOSE_FREE_FORM,
+                     "input-hints", password ? GTK_INPUT_HINT_PRIVATE | GTK_INPUT_HINT_NO_SPELLCHECK : 0, NULL);
+    }
+    else if (recompose)
+        reset_im(w);
+    update_im_focus(w);
+    update_cursor_location(w);
+}
+
+static void clear_text_input(GrGraphiteWidget *w)
+{
+    if (composing(w))
+        reset_im(w);
+    store_text_input(w, NULL);
+    update_im_focus(w);
+}
+
+static void use_im_context(GrGraphiteWidget *w, GtkIMContext *im)
+{
+    if (w->im)
+    {
+        if (w->im_focused)
+            gtk_im_context_focus_out(w->im);
+        g_signal_handlers_disconnect_by_data(w->im, w);
+        gtk_im_context_set_client_widget(w->im, NULL);
+        g_clear_object(&w->im);
+    }
+    w->im_focused = false;
+    if (!im)
+        return;
+    w->im = g_object_ref(im);
+    g_signal_connect(im, "commit", G_CALLBACK(im_commit), w);
+    g_signal_connect(im, "preedit-changed", G_CALLBACK(im_preedit_changed), w);
+    g_signal_connect(im, "retrieve-surrounding", G_CALLBACK(im_retrieve_surrounding), w);
+    g_signal_connect(im, "delete-surrounding", G_CALLBACK(im_delete_surrounding), w);
+    if (gtk_widget_get_realized(GTK_WIDGET(w)))
+        gtk_im_context_set_client_widget(im, GTK_WIDGET(w));
+}
+
+void gr_gtk_widget_set_im_context(GtkWidget *widget, GtkIMContext *im)
+{
+    GrGraphiteWidget *w = (GrGraphiteWidget *)widget;
+    use_im_context(w, im);
+    update_im_focus(w);
+}
+
 static gboolean key(GrGraphiteWidget *w, GdkEvent *event, bool down)
 {
     guint keyval = gdk_key_event_get_keyval(event), keycode = gdk_key_event_get_keycode(event);
@@ -354,14 +724,28 @@ static gboolean key(GrGraphiteWidget *w, GdkEvent *event, bool down)
     gr_event e = {.type = down ? GR_EVENT_KEY_DOWN : GR_EVENT_KEY_UP,
                   .time = event_seconds(event),
                   .modifiers = modifiers_after(w, modifiers(gdk_event_get_modifier_state(event)), code)};
+    bool held = composing(w); /* The input method owns keys while composing. */
     e.value.key = (gr_key_event){
         .code = code,
         .key = named,
         .character = character,
         .repeat = repeat,
+        .composing = held,
         .native_code = keycode,
     };
-    return dispatch(w, e) ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
+    if (dispatch(w, e) && !held)
+        return GDK_EVENT_STOP;
+    /* Keys the handler leaves go to text input: the input method first, then the key bindings. */
+    if (!w->text_on)
+        return GDK_EVENT_PROPAGATE;
+    if (gtk_im_context_filter_keypress(w->im, event))
+        return GDK_EVENT_STOP;
+    gr_text_command_event command;
+    if (!down || held || !w->text_on || !key_command(keyval, gdk_event_get_modifier_state(event), &command))
+        return GDK_EVENT_PROPAGATE;
+    gr_event c = {.type = GR_EVENT_TEXT_COMMAND, .time = event_seconds(event), .modifiers = e.modifiers};
+    c.value.command = command;
+    return dispatch(w, c) ? GDK_EVENT_STOP : GDK_EVENT_PROPAGATE;
 }
 
 static void cancel_pointer(GrGraphiteWidget *w, guint32 time)
@@ -525,6 +909,7 @@ static void realize(GtkWidget *widget)
         w->surface = g_object_ref(surface);
         w->scale_handler = g_signal_connect(surface, "notify::scale", G_CALLBACK(scale_changed), w);
     }
+    gtk_im_context_set_client_widget(w->im, widget);
     sync_scale(w);
     if (w->shared && w->shared->pending)
         gr_gtk_widget_request(widget);
@@ -540,6 +925,8 @@ static void unrealize(GtkWidget *widget)
     w->inside = w->scrolling = false;
     memset(w->keys_down, 0, sizeof(w->keys_down));
     dispatch(w, (gr_event){.type = GR_EVENT_FOCUS_OUT, .time = seconds(g_get_monotonic_time())});
+    update_im_focus(w);
+    gtk_im_context_set_client_widget(w->im, NULL);
     GTK_WIDGET_CLASS(gr_graphite_widget_parent_class)->unrealize(widget);
 }
 
@@ -582,6 +969,8 @@ static void dispose(GObject *object)
 {
     GrGraphiteWidget *w = (GrGraphiteWidget *)object;
     disconnect_signals(w);
+    use_im_context(w, NULL);
+    store_text_input(w, NULL);
     if (w->shared)
     {
         g_weak_ref_set(&w->shared->widget, NULL);
@@ -617,6 +1006,9 @@ static void gr_graphite_widget_init(GrGraphiteWidget *widget)
     g_signal_connect(crossing, "enter", G_CALLBACK(pointer_enter), widget);
     g_signal_connect(crossing, "leave", G_CALLBACK(pointer_leave), widget);
     gtk_widget_add_controller(GTK_WIDGET(widget), crossing);
+    GtkIMContext *im = gtk_im_multicontext_new();
+    use_im_context(widget, im);
+    g_object_unref(im);
 }
 
 GtkWidget *gr_gtk_widget_new(gr_gtk_shared *shared)

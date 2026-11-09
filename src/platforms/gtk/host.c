@@ -74,11 +74,9 @@ static void set_cursor(void *data, gr_cursor cursor)
     gr_gtk_widget_set_cursor(((gr_gtk_host *)data)->widget, cursor);
 }
 
-/* Text input is accepted but not applied yet. */
 static void set_text_input(void *data, const gr_text_input *input)
 {
-    (void)data;
-    (void)input;
+    gr_gtk_widget_set_text_input(((gr_gtk_host *)data)->widget, input);
 }
 
 static void request_focus(void *data)

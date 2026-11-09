@@ -10,6 +10,7 @@ set_target_properties(graphite_gtk PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED 
 if(BUILD_TESTING)
     add_executable(graphite_gtk_tests ${PROJECT_SOURCE_DIR}/tests/gtk.c)
     target_link_libraries(graphite_gtk_tests PRIVATE graphite_gtk graphite_test_harness)
+    target_include_directories(graphite_gtk_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(graphite_gtk_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
     add_test(NAME graphite.gtk COMMAND graphite_gtk_tests)
     set_tests_properties(graphite.gtk PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
